@@ -6,6 +6,7 @@
 
 - [Architecture](dev/architecture/index.md)
   - [Video pipeline](dev/architecture/video.md)
+  - [Input path](dev/architecture/input.md)
 - [Crates](dev/crates/index.md)
   - [tlp-desk-proto](dev/crates/proto.md)
   - [tlp-desk-crypto](dev/crates/crypto.md)
