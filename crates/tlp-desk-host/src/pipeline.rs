@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use tlp_desk_capture::{BgraFrame, CaptureError, MonitorInfo, ScreenCapturer};
+use tlp_desk_capture::{BgraFrame, CaptureError, CaptureOptions, MonitorInfo, ScreenCapturer};
 use tlp_desk_codec::{CodecError, EncoderConfig, VideoEncoder};
 use tlp_desk_input::MonitorRect;
 use tlp_desk_net::{Session, VideoSendStatus};
@@ -41,6 +41,8 @@ pub(crate) struct PipelineCtx {
     /// Monitor index actually being captured.
     pub active: watch::Sender<u32>,
     pub fps: u32,
+    /// Capture size cap.
+    pub max_size: (u32, u32),
     pub session: Arc<Session>,
     /// Set by the control loop on `Message::RequestKeyframe`.
     pub keyframe: Arc<AtomicBool>,
@@ -155,6 +157,10 @@ fn rect_of(m: &MonitorInfo) -> MonitorRect {
     MonitorRect::new(m.x, m.y, m.width, m.height)
 }
 
+fn capture_options(ctx: &PipelineCtx) -> CaptureOptions {
+    CaptureOptions::max_size(ctx.max_size.0, ctx.max_size.1)
+}
+
 fn stopped(ctx: &PipelineCtx) -> bool {
     ctx.stop.load(Ordering::Acquire)
 }
@@ -175,7 +181,7 @@ fn open(
         if stopped(ctx) || mailbox.is_closed() {
             return Ok(None);
         }
-        match (ctx.capturer_factory)(index) {
+        match (ctx.capturer_factory)(index, capture_options(ctx)) {
             Ok(c) => {
                 let m = c.monitor();
                 tracing::info!(
@@ -225,7 +231,7 @@ fn capture_loop(
             let want = *select.borrow_and_update();
             if want != index {
                 // Switch live: one attempt; on failure keep streaming the current monitor.
-                match (ctx.capturer_factory)(want) {
+                match (ctx.capturer_factory)(want, capture_options(ctx)) {
                     Ok(c) => {
                         tracing::info!(
                             from = index,

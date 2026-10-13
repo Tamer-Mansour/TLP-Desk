@@ -76,7 +76,7 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
         known_hosts: KnownHostsStore::File(dir.join("known_hosts")),
         host: HostConfig {
             advertise: false,
-            capturer_factory: Arc::new(|_| {
+            capturer_factory: Arc::new(|_, _| {
                 Ok(Box::new(FakeCapturer {
                     mon: MonitorInfo {
                         index: 0,

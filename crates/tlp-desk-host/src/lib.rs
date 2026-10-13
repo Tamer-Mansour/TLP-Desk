@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use tlp_desk_capture::{CaptureError, MonitorInfo, ScreenCapturer};
+use tlp_desk_capture::{CaptureError, CaptureOptions, MonitorInfo, ScreenCapturer};
 use tlp_desk_codec::{CodecError, EncoderConfig, VideoEncoder};
 use tlp_desk_crypto::{
     DeviceId, Fingerprint, OneTimeCode, PasswordVerifier, RateLimitConfig, RateLimiter,
@@ -70,8 +70,10 @@ pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
+/// `CaptureOptions::max_size` carries the size cap of the current quality preset (and the
+/// adaptive resolution step); fakes may ignore it, the encoder follows the frames.
 pub type CapturerFactory =
-    Arc<dyn Fn(u32) -> Result<Box<dyn ScreenCapturer>, CaptureError> + Send + Sync>;
+    Arc<dyn Fn(u32, CaptureOptions) -> Result<Box<dyn ScreenCapturer>, CaptureError> + Send + Sync>;
 /// Creates the video encoder (default: [`tlp_desk_codec::new_encoder`]).
 pub type EncoderFactory =
     Arc<dyn Fn(EncoderConfig) -> Result<Box<dyn VideoEncoder>, CodecError> + Send + Sync>;
@@ -90,17 +92,23 @@ pub type PointerMarkerFactory =
 /// Lists the host's monitors (default: [`tlp_desk_capture::list_monitors`]).
 pub type MonitorLister = Arc<dyn Fn() -> Result<Vec<MonitorInfo>, CaptureError> + Send + Sync>;
 
-/// Largest video frame the default capturer delivers. Bigger monitors are downscaled on the GPU
-/// before readback (3840x2400 -> 1920x1200), which keeps capture + encode well above 60 fps.
+/// Default capture size cap ([`HostConfig::max_capture_size`]). Bigger monitors are downscaled
+/// on the GPU before readback (3840x2400 -> 1920x1200), which keeps capture + encode well above
+/// 60 fps.
 pub const MAX_CAPTURE_SIZE: (u32, u32) = (1920, 1200);
 
 /// The default [`CapturerFactory`]: Windows.Graphics.Capture (DXGI fallback) with frames capped
-/// at [`MAX_CAPTURE_SIZE`]. [`ScreenCapturer::monitor`] still reports the real monitor size.
-pub fn open_default_capturer(monitor: u32) -> Result<Box<dyn ScreenCapturer>, CaptureError> {
-    tlp_desk_capture::open_capturer_opts(
-        monitor,
-        tlp_desk_capture::CaptureOptions::max_size(MAX_CAPTURE_SIZE.0, MAX_CAPTURE_SIZE.1),
-    )
+/// at `options.max_size` ([`MAX_CAPTURE_SIZE`] when `None`). [`ScreenCapturer::monitor`] still
+/// reports the real monitor size.
+pub fn open_default_capturer(
+    monitor: u32,
+    options: CaptureOptions,
+) -> Result<Box<dyn ScreenCapturer>, CaptureError> {
+    let options = CaptureOptions {
+        max_size: Some(options.max_size.unwrap_or(MAX_CAPTURE_SIZE)),
+        ..options
+    };
+    tlp_desk_capture::open_capturer_opts(monitor, options)
 }
 
 /// How often the monitor list is re-read for hot-plug.
@@ -117,6 +125,9 @@ pub struct HostConfig {
     pub monitor: u32,
     /// Target frame rate (default 60).
     pub fps: u32,
+    /// Capture size cap before any `SetQuality` (the `Balanced` preset); frames of bigger
+    /// monitors are scaled down to fit. Default [`MAX_CAPTURE_SIZE`] (1920x1200).
+    pub max_capture_size: (u32, u32),
     /// Permissions for sessions authorized by code/password, and for [`Host::accept`] with
     /// `None`.
     pub default_permissions: Permissions,
@@ -160,6 +171,7 @@ impl Default for HostConfig {
         Self {
             monitor: 0,
             fps: 60,
+            max_capture_size: MAX_CAPTURE_SIZE,
             default_permissions: DEFAULT_PERMISSIONS,
             accept_timeout: Duration::from_secs(60),
             prompt_rate_limit: RateLimitConfig::default(),
@@ -188,6 +200,7 @@ impl std::fmt::Debug for HostConfig {
         f.debug_struct("HostConfig")
             .field("monitor", &self.monitor)
             .field("fps", &self.fps)
+            .field("max_capture_size", &self.max_capture_size)
             .field("default_permissions", &self.default_permissions)
             .field("accept_timeout", &self.accept_timeout)
             .field("allow_one_time_code", &self.allow_one_time_code)
@@ -794,6 +807,7 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         select: select_rx,
         active: active_tx,
         fps: inner.cfg.fps,
+        max_size: inner.cfg.max_capture_size,
         session: session.clone(),
         keyframe: keyframe.clone(),
         stop: stop.clone(),
