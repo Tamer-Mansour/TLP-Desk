@@ -7,6 +7,7 @@
 - [Overview](user-guide/en/index.md)
   - [Installing](user-guide/en/installing.md)
   - [First run and the firewall](user-guide/en/first-run.md)
+  - [Your device ID and one-time code](user-guide/en/device-id-and-code.md)
 
 # Security
 
