@@ -41,8 +41,8 @@ pub use discovery::{
     DiscoveryConfig, DiscoveryEvent, PacketKind, BROADCAST_MAGIC, MDNS_SERVICE_TYPE,
 };
 pub use endpoint::{
-    default_device_name, AuthKind, AuthMethod, AwaitingAcceptFn, Endpoint, EndpointConfig,
-    PendingSession,
+    default_device_name, sanitize_peer_name, AuthKind, AuthMethod, AwaitingAcceptFn, Endpoint,
+    EndpointConfig, PendingSession, MAX_PEER_NAME_CHARS,
 };
 pub use error::NetError;
 pub use feature::{
