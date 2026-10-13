@@ -22,6 +22,7 @@
   - [tlp-desk-app](dev/crates/app.md)
   - [tlp-desk-cli](dev/crates/cli.md)
 - [Building on Windows](dev/building.md)
+- [Testing](dev/testing.md)
 
 # Reference
 
