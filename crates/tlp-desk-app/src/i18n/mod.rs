@@ -229,6 +229,32 @@ strings! {
     // --- perf ---
 
     // --- power ---
+    // recording (TLP-recording)
+    RecStart => "Record this session to a video file on this computer", "تسجيل هذه الجلسة في ملف فيديو على هذا الجهاز";
+    RecStop => "Stop recording", "إيقاف التسجيل";
+    RecActive => "Recording {time}", "جارٍ التسجيل {time}";
+    RecStarting => "Starting the recording…", "جارٍ بدء التسجيل…";
+    RecErrDiskFull => "Recording stopped: the disk is almost full.", "توقف التسجيل: القرص ممتلئ تقريباً.";
+    RecErrNoFolder => "Recording is not possible: no folder for videos was found.", "التسجيل غير ممكن: لم يُعثر على مجلد للفيديو.";
+    RecErrFailed => "Recording failed: {detail}", "فشل التسجيل: {detail}";
+    Recordings => "Recordings", "التسجيلات";
+    RecordingsHint => "Recordings stay on this computer. The other side is not notified.", "تبقى التسجيلات على هذا الجهاز، ولا يُبلَّغ الطرف الآخر بها.";
+    RecordingsEmpty => "No recordings yet. Use the record button during a session.", "لا توجد تسجيلات بعد. استخدم زر التسجيل أثناء الجلسة.";
+    RecOpenFolder => "Open folder", "فتح المجلد";
+    RecRefresh => "Refresh", "تحديث";
+    RecPlay => "Play", "تشغيل";
+    RecPause => "Pause", "إيقاف مؤقت";
+    RecDelete => "Delete", "حذف";
+    RecDeleteTitle => "Delete this recording?", "حذف هذا التسجيل؟";
+    RecDeleteBody => "{name} will be deleted permanently.", "سيُحذف {name} نهائياً.";
+    RecIncomplete => "Interrupted", "منقطع";
+    RecRepair => "Repair", "إصلاح";
+    RecRepairHint => "The recording was interrupted. Repairing finishes the file so every player can open it.", "انقطع التسجيل. الإصلاح يُكمل الملف ليفتحه أي مشغّل.";
+    RecErrOpen => "Cannot open this recording: {detail}", "تعذّر فتح هذا التسجيل: {detail}";
+    RecErrAction => "The operation failed: {detail}", "فشلت العملية: {detail}";
+    PlayTitle => "Playback: {name}", "تشغيل: {name}";
+    PlaySpeed => "Speed", "السرعة";
+    PlayClose => "Close", "إغلاق";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.
