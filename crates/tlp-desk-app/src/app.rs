@@ -102,6 +102,8 @@ pub struct App {
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    /// Permanent password card and password sign-in (TLP-unattended).
+    pub unattended: crate::ui::unattended::UnattendedUi,
 }
 
 impl App {
@@ -118,7 +120,10 @@ impl App {
         theme::install(&cc.egui_ctx);
         theme::apply_lang(&cc.egui_ctx, settings.lang);
         let local = backend.local_info();
+        let unattended =
+            crate::ui::unattended::UnattendedUi::new(backend.unattended_password_state());
         let mut app = Self {
+            unattended,
             name_edit: local.device_name.clone(),
             backend,
             events,
@@ -183,6 +188,10 @@ impl App {
     /// Connect using the one-time code field (empty = ask the host user to accept). The code
     /// is cleared once used: it rotates on the host after each use.
     pub fn connect(&mut self, target: ConnectTarget) {
+        if self.unattended.use_password {
+            self.connect_password(target);
+            return;
+        }
         let code = match normalize_code(&self.code) {
             Ok(c) => c,
             Err(()) => {
@@ -212,9 +221,35 @@ impl App {
         true
     }
 
+    /// Connect with the permanent password typed in the connect box (TLP-unattended). The
+    /// password stays in the field until the attempt ends, so a confirmed key change can retry.
+    fn connect_password(&mut self, target: ConnectTarget) {
+        if self.unattended.password.is_empty() {
+            self.error = Some(self.tx.t(S::ErrPasswordEmpty).to_owned());
+            return;
+        }
+        if self.pending.is_some() || self.session.is_some() {
+            return;
+        }
+        let label = target.to_string();
+        let attempt = self
+            .backend
+            .connect_with_password(target.clone(), self.unattended.password.clone());
+        self.pending = Some(Pending {
+            attempt,
+            target: label,
+            awaiting_accept: false,
+            dial: target,
+            code: None,
+        });
+    }
+
     fn error_text(&self, error: &ConnectError) -> String {
         let tx = self.tx;
         match error {
+            ConnectError::Rejected(RejectReason::RateLimited) => {
+                crate::ui::unattended::locked_out_text(tx)
+            }
             ConnectError::NotFound => tx.t(S::ErrNotFound).into(),
             ConnectError::Rejected(r) => tx
                 .t(match r {
@@ -268,7 +303,10 @@ impl App {
                                 presented,
                             });
                         }
-                        other => self.error = Some(self.error_text(&other)),
+                        other => {
+                            self.unattended.password.clear();
+                            self.error = Some(self.error_text(&other));
+                        }
                     }
                 }
                 BackendEvent::SessionStarted {
@@ -280,6 +318,7 @@ impl App {
                 } => {
                     if self.pending.as_ref().is_some_and(|p| p.attempt == attempt) {
                         self.pending = None;
+                        self.unattended.password.clear();
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
                         if let Some(grab) =
                             SystemKeyGrab::start(Arc::downgrade(&self.backend), session, self.hwnd)
@@ -328,15 +367,23 @@ impl App {
                 BackendEvent::SessionEnded { session, reason } => {
                     self.host_sessions.retain(|(id, _)| *id != session);
                     if self.session.as_ref().is_some_and(|s| s.id == session) {
-                        self.session = None;
+                        let reconnect_failed = self
+                            .session
+                            .take()
+                            .and_then(|mut s| s.unattended.failed.take());
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(
                             self.tx.raw(S::AppTitle).into(),
                         ));
-                        self.notice = match reason {
-                            EndReason::Local => None,
-                            EndReason::Remote => Some(self.tx.t(S::SessionEnded).into()),
-                            EndReason::Error(e) => Some(self.tx.f(S::ErrOther, &[("detail", &e)])),
+                        self.notice = match (reconnect_failed, reason) {
+                            (Some(detail), _) => {
+                                Some(self.tx.f(S::ReconnectFailedText, &[("detail", &detail)]))
+                            }
+                            (None, EndReason::Local) => None,
+                            (None, EndReason::Remote) => Some(self.tx.t(S::SessionEnded).into()),
+                            (None, EndReason::Error(e)) => {
+                                Some(self.tx.f(S::ErrOther, &[("detail", &e)]))
+                            }
                         };
                     }
                 }
@@ -355,13 +402,36 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
-                // Shown by the unattended UI (next commit).
-                BackendEvent::PasswordState(_)
-                | BackendEvent::PasswordChanged(_)
-                | BackendEvent::RemoteRestarting { .. }
-                | BackendEvent::ReconnectAttempt { .. }
-                | BackendEvent::Reconnected { .. }
-                | BackendEvent::ReconnectFailed { .. } => {}
+                // --- unattended (TLP-unattended) ---
+                BackendEvent::PasswordState(state) => self.unattended.state = state,
+                BackendEvent::PasswordChanged(result) => {
+                    self.unattended.on_password_changed(self.tx, result);
+                }
+                BackendEvent::RemoteRestarting { session } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.on_restarting();
+                    }
+                }
+                BackendEvent::ReconnectAttempt { session, attempt } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.attempt = attempt;
+                    }
+                }
+                BackendEvent::Reconnected {
+                    session,
+                    permissions,
+                } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.on_reconnected();
+                        s.permissions = permissions;
+                    }
+                }
+                BackendEvent::ReconnectFailed { session, error } => {
+                    let text = self.error_text(&error);
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.failed = Some(text);
+                    }
+                }
             }
         }
     }
@@ -550,12 +620,19 @@ impl App {
                 Some(true) => {
                     self.key_warning = None;
                     if self.backend.forget_host_key(w.attempt) {
-                        self.connect_with(w.dial, w.code);
+                        if self.unattended.use_password && !self.unattended.password.is_empty() {
+                            self.connect_password(w.dial);
+                        } else {
+                            self.connect_with(w.dial, w.code);
+                        }
                     } else {
                         self.error = Some(self.tx.t(S::ErrIdentity).to_owned());
                     }
                 }
-                Some(false) => self.key_warning = None,
+                Some(false) => {
+                    self.key_warning = None;
+                    self.unattended.password.clear();
+                }
                 None => {}
             }
             return true;

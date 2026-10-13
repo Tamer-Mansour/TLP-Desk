@@ -50,6 +50,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// System menu, confirmations and restart progress (TLP-unattended).
+    pub unattended: super::unattended::SessionUnattended,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -89,6 +91,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            unattended: Default::default(),
         }
     }
 
@@ -186,14 +189,23 @@ impl ViewerSession {
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        // Restart / lock confirmations and the reconnect overlay block input (TLP-unattended).
+        let confirm_open = self
+            .unattended
+            .dialogs(&ctx, tx, backend, self.id, &self.peer);
+        let modal_open = modal_open || confirm_open || self.unattended.blocks_input();
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
             .show(ui, |ui| {
+                let area = ui.max_rect();
                 let Some(tex) = self.texture.clone() else {
                     ui.centered_and_justified(|ui| {
                         ui.label(RichText::new(tx.t(S::WaitingForVideo)).color(Color32::GRAY));
                     });
+                    if self.unattended.overlay(ui, tx, area) {
+                        backend.cancel_reconnect(self.id);
+                    }
                     return;
                 };
                 let tex_size = egui::vec2(self.frame_size[0] as f32, self.frame_size[1] as f32);
@@ -230,6 +242,9 @@ impl ViewerSession {
                     self.stats_overlay(ui, tx, ui.clip_rect());
                 }
                 self.handle_input(ui, backend, &resp, image_rect, visible, modal_open);
+                if self.unattended.overlay(ui, tx, area) {
+                    backend.cancel_reconnect(self.id);
+                }
             });
     }
 
@@ -301,6 +316,10 @@ impl ViewerSession {
                         self.release_all(backend);
                         backend.select_monitor(self.id, index);
                     }
+                    // System menu: restart, lock, Ctrl+Alt+Del (TLP-unattended).
+                    ui.separator();
+                    self.unattended
+                        .menu(ui, tx, self.permissions, backend, self.id);
                     if self.grab_on {
                         ui.separator();
                         // Accent icon = keys are captured. The caption is shown only when it fits

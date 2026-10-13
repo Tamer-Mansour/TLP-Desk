@@ -195,21 +195,11 @@ impl App {
                 });
                 widgets::edit_preview(ui, tx, &resp, &self.address);
                 ui.add_space(6.0);
-                theme::row(ui, tx.rtl(), |ui| {
-                    let resp = widgets::text_field(
-                        ui,
-                        tx,
-                        "one-time-code",
-                        &mut self.code,
-                        tx.t(S::CodeHint),
-                        200.0,
-                    );
-                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if enter && !self.address.trim().is_empty() {
-                        actions.push(Action::ConnectAddress);
-                    }
-                });
-                ui.label(theme::caption(ui, tx.t(S::CodeFieldHint)));
+                // One-time code or permanent password (TLP-unattended).
+                let enter = self.unattended.connect_fields(ui, tx, &mut self.code);
+                if enter && !self.address.trim().is_empty() {
+                    actions.push(Action::ConnectAddress);
+                }
             });
         });
         ui.add_space(12.0);
