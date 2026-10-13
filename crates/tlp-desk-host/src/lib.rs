@@ -63,7 +63,6 @@ use tokio::task::JoinHandle;
 
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
-
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
 pub type CapturerFactory =
     Arc<dyn Fn(u32) -> Result<Box<dyn ScreenCapturer>, CaptureError> + Send + Sync>;
@@ -82,6 +81,9 @@ pub type LocalActivityFactory =
 /// [`tlp_desk_input::start_pointer_marker`]).
 pub type PointerMarkerFactory =
     Arc<dyn Fn(&str) -> Result<Box<dyn PointerMarker>, InputError> + Send + Sync>;
+/// The streamed rectangle of a session, by `FeatureCtx::session_key` (see
+/// [`Host::streamed_monitor_fn`]).
+pub type StreamedMonitorFn = Arc<dyn Fn(u64) -> Option<MonitorRect> + Send + Sync>;
 /// Lists the host's monitors (default: [`tlp_desk_capture::list_monitors`]).
 pub type MonitorLister = Arc<dyn Fn() -> Result<Vec<MonitorInfo>, CaptureError> + Send + Sync>;
 
@@ -303,6 +305,8 @@ struct PendingEntry {
 
 struct SessionCtl {
     info: Mutex<ConnectedViewer>,
+    /// The streamed monitor's rectangle, published by the capture pipeline.
+    rect: watch::Receiver<Option<MonitorRect>>,
     perms: AtomicU16,
     stop: Notify,
     perms_changed: Notify,
@@ -490,6 +494,22 @@ impl Host {
         true
     }
 
+    /// The rectangle (physical virtual-desktop pixels) a session currently streams and maps
+    /// input to; `None` before capture started or for an unknown session.
+    pub fn streamed_monitor(&self, id: SessionId) -> Option<MonitorRect> {
+        streamed_rect(&self.inner, id)
+    }
+
+    /// [`Host::streamed_monitor`] as a callback keyed by `FeatureCtx::session_key`, for
+    /// features that draw on the host screen (e.g. the whiteboard). Holds the host weakly.
+    pub fn streamed_monitor_fn(&self) -> StreamedMonitorFn {
+        let inner = Arc::downgrade(&self.inner);
+        Arc::new(move |key| {
+            let inner = inner.upgrade()?;
+            streamed_rect(&inner, SessionId(key))
+        })
+    }
+
     /// Ends a session (the viewer receives `Bye`). [`HostEvent::SessionEnded`] follows.
     pub fn disconnect(&self, id: SessionId) -> bool {
         match lock(&self.inner.sessions).get(&id) {
@@ -530,6 +550,12 @@ impl Drop for Host {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+fn streamed_rect(inner: &Inner, id: SessionId) -> Option<MonitorRect> {
+    let ctl = lock(&inner.sessions).get(&id).cloned()?;
+    let rect = *ctl.rect.borrow();
+    rect
 }
 
 async fn accept_loop(inner: Arc<Inner>) {
@@ -727,8 +753,10 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         permissions: perms,
         since: SystemTime::now(),
     };
+    let (rect_tx, rect_rx) = watch::channel(None);
     let ctl = Arc::new(SessionCtl {
         info: Mutex::new(info.clone()),
+        rect: rect_rx.clone(),
         perms: AtomicU16::new(perms.0),
         stop: Notify::new(),
         perms_changed: Notify::new(),
@@ -750,7 +778,6 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         FeatureDispatch::start(&inner.cfg.features, session.clone(), id.0, perms, sink)
     };
 
-    let (rect_tx, rect_rx) = watch::channel(None);
     let (input_tx, input_rx) = std::sync::mpsc::channel::<InputEvent>();
     let (prio_tx, mut prio_rx) = mpsc::unbounded_channel::<bool>();
     let input_ctx = input::InputCtx {
