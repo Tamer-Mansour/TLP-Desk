@@ -1,7 +1,7 @@
 use tlp_desk_proto::*;
 
 fn samples() -> Vec<Message> {
-    vec![
+    let mut v = vec![
         Message::Hello(Hello {
             protocol_version: PROTOCOL_VERSION,
             device_id: 123_456_789,
@@ -96,7 +96,9 @@ fn samples() -> Vec<Message> {
             active: 0,
         },
         Message::SelectMonitor { index: 1 },
-    ]
+    ];
+    v.extend(v4_samples());
+    v
 }
 
 #[test]
@@ -197,4 +199,151 @@ fn v3_variants_are_appended() {
         encode_message(&Message::SelectMonitor { index: 2 }).unwrap(),
         vec![12, 2]
     );
+}
+
+/// Samples of every protocol-v4 message (Arabic text and paths on purpose).
+fn v4_samples() -> Vec<Message> {
+    let entry = FsEntry {
+        name: "تقرير الربع الأول.docx".into(),
+        is_dir: false,
+        size: 123_456,
+        modified_unix_ms: 1_760_000_000_000,
+        readonly: false,
+        hidden: true,
+    };
+    vec![
+        // --- remote file system ---
+        Message::FsRequest {
+            req_id: 1,
+            op: FsOp::ListDir {
+                path: r"C:\Users\مستخدم\سطح المكتب".into(),
+            },
+        },
+        Message::FsRequest {
+            req_id: 2,
+            op: FsOp::Stat {
+                path: r"D:\a.txt".into(),
+            },
+        },
+        Message::FsRequest {
+            req_id: 3,
+            op: FsOp::Roots,
+        },
+        Message::FsRequest {
+            req_id: 4,
+            op: FsOp::MakeDir {
+                path: r"C:\جديد".into(),
+            },
+        },
+        Message::FsRequest {
+            req_id: 5,
+            op: FsOp::Rename {
+                from: r"C:\a".into(),
+                to: r"C:\ب".into(),
+            },
+        },
+        Message::FsRequest {
+            req_id: u64::MAX,
+            op: FsOp::Delete {
+                path: r"C:\tmp".into(),
+                recursive: true,
+            },
+        },
+        Message::FsResponse {
+            req_id: 1,
+            result: Ok(FsReply::Entries(vec![entry.clone()])),
+        },
+        Message::FsResponse {
+            req_id: 2,
+            result: Ok(FsReply::Entry(FsEntry {
+                modified_unix_ms: -5,
+                ..entry
+            })),
+        },
+        Message::FsResponse {
+            req_id: 3,
+            result: Ok(FsReply::Roots(vec![
+                FsRoot {
+                    path: r"C:\".into(),
+                    label: "Windows".into(),
+                    kind: FsRootKind::Drive,
+                    total_bytes: Some(1 << 40),
+                    free_bytes: Some(1 << 30),
+                },
+                FsRoot {
+                    path: r"C:\Users\u\Desktop".into(),
+                    label: "سطح المكتب".into(),
+                    kind: FsRootKind::Desktop,
+                    total_bytes: None,
+                    free_bytes: None,
+                },
+            ])),
+        },
+        Message::FsResponse {
+            req_id: 4,
+            result: Ok(FsReply::Done),
+        },
+        Message::FsResponse {
+            req_id: 5,
+            result: Err(FsError::Other("الوصول مرفوض".into())),
+        },
+        Message::FsResponse {
+            req_id: 6,
+            result: Err(FsError::NotEmpty),
+        },
+    ]
+}
+
+/// Postcard variant index of a message (its first byte; every index is < 128).
+fn index(m: &Message) -> u8 {
+    encode_message(m).unwrap()[0]
+}
+
+#[test]
+fn v4_variants_are_appended_in_order() {
+    // v4 appends after `SelectMonitor` (index 12). These indices are wire format: never change.
+    let expected: &[(Message, u8)] = &[
+        (
+            Message::FsRequest {
+                req_id: 0,
+                op: FsOp::Roots,
+            },
+            13,
+        ),
+        (
+            Message::FsResponse {
+                req_id: 0,
+                result: Ok(FsReply::Done),
+            },
+            14,
+        ),
+    ];
+    for (m, i) in expected {
+        assert_eq!(index(m), *i, "{m:?}");
+    }
+}
+
+#[test]
+fn v4_permissions_gate_feature_messages() {
+    let fs = Message::FsRequest {
+        req_id: 1,
+        op: FsOp::Roots,
+    };
+    assert_eq!(fs.required_permissions(), Permissions::FILES);
+    assert_eq!(
+        Message::RequestKeyframe.required_permissions(),
+        Permissions::VIEW
+    );
+    assert_eq!(
+        Message::Bye(Bye {
+            reason: ByeReason::Error
+        })
+        .required_permissions(),
+        Permissions::NONE
+    );
+}
+
+#[test]
+fn protocol_version_is_4() {
+    assert_eq!(PROTOCOL_VERSION, 4);
 }

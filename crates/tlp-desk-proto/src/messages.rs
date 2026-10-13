@@ -34,6 +34,149 @@ pub enum Message {
     SelectMonitor {
         index: u32,
     },
+
+    // ---------------------------------------------------------------------------------------
+    // Protocol v4. Append-only: never reorder or insert above, postcard encodes the variant
+    // index. Direction and the permission the host requires are documented per message; see
+    // `Message::required_permissions` and docs/protocol.md.
+    // ---------------------------------------------------------------------------------------
+    // --- remote file system (FILES) ---
+    /// Either direction (normally viewer -> host): one file-system operation on the receiver's
+    /// disks. Answered by exactly one [`Message::FsResponse`] with the same `req_id`. (v4)
+    FsRequest {
+        req_id: u64,
+        op: FsOp,
+    },
+    /// Answer to [`Message::FsRequest`]. (v4)
+    FsResponse {
+        req_id: u64,
+        result: Result<FsReply, FsError>,
+    },
+    // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
+}
+
+impl Message {
+    /// Permissions a viewer must currently hold for the host to act on this message when it
+    /// arrives from the viewer. `Permissions::NONE` = always allowed (protocol housekeeping).
+    /// Input events are additionally gated per event by the host (`CONTROL` / `KEYBOARD`);
+    /// `CONTROL` here is only the coarse requirement. Messages that only flow host -> viewer
+    /// return `NONE`; the viewer does not gate them.
+    pub fn required_permissions(&self) -> Permissions {
+        use Message as M;
+        match self {
+            M::Hello(_)
+            | M::AuthRequest(_)
+            | M::AuthResult(_)
+            | M::Bye(_)
+            | M::Permissions(_)
+            | M::HostInputPriority { .. }
+            | M::MonitorList { .. }
+            | M::VideoFrame(_) => Permissions::NONE,
+            M::RequestKeyframe | M::SelectMonitor { .. } => Permissions::VIEW,
+            M::InputEvent(_) => Permissions::CONTROL,
+            M::ClipboardData(_) => Permissions::CLIPBOARD,
+            M::FileChunk(_) | M::FsRequest { .. } | M::FsResponse { .. } => Permissions::FILES,
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------------------
+// v4 payload types
+// ------------------------------------------------------------------------------------------
+
+/// A file-system operation. Paths are UTF-8 `String`s in the receiver's native form (e.g.
+/// `C:\Users\مستخدم\Desktop`); Windows converts them to UTF-16 losslessly, so Arabic names
+/// survive exactly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FsOp {
+    /// Entries of a directory (not recursive). Reply: [`FsReply::Entries`].
+    ListDir { path: String },
+    /// One entry. Reply: [`FsReply::Entry`].
+    Stat { path: String },
+    /// Drives and known folders (Desktop, Documents, Downloads, ...). Reply: [`FsReply::Roots`].
+    Roots,
+    /// Create a directory (and missing parents). Reply: [`FsReply::Done`].
+    MakeDir { path: String },
+    /// Rename or move within one volume. Reply: [`FsReply::Done`].
+    Rename { from: String, to: String },
+    /// Delete a file, or a directory (`recursive` required if not empty). Reply:
+    /// [`FsReply::Done`].
+    Delete { path: String, recursive: bool },
+}
+
+/// Successful answer to an [`FsOp`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FsReply {
+    Entries(Vec<FsEntry>),
+    Entry(FsEntry),
+    Roots(Vec<FsRoot>),
+    Done,
+}
+
+/// One directory entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FsEntry {
+    /// File name only (no directory), UTF-8.
+    pub name: String,
+    pub is_dir: bool,
+    /// Bytes (0 for directories).
+    pub size: u64,
+    /// Last modification, milliseconds since the Unix epoch (negative before 1970).
+    pub modified_unix_ms: i64,
+    pub readonly: bool,
+    pub hidden: bool,
+}
+
+/// What kind of place an [`FsRoot`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FsRootKind {
+    /// A drive / volume (`C:\`).
+    Drive,
+    Home,
+    Desktop,
+    Documents,
+    Downloads,
+    Pictures,
+    Music,
+    Videos,
+    Other,
+}
+
+/// A drive or well-known folder offered as a starting point for browsing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FsRoot {
+    /// Absolute path (`C:\`, `C:\Users\name\Desktop`).
+    pub path: String,
+    /// Display label (volume label or localized folder name), may be empty.
+    pub label: String,
+    pub kind: FsRootKind,
+    /// Volume size and free space when known.
+    pub total_bytes: Option<u64>,
+    pub free_bytes: Option<u64>,
+}
+
+/// Why a file-system operation or transfer failed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FsError {
+    NotFound,
+    /// The OS refused access, or the session lacks `FILES`.
+    PermissionDenied,
+    AlreadyExists,
+    /// Directory not empty (use `recursive`).
+    NotEmpty,
+    /// Path is malformed, escapes the transfer root, or names a device.
+    InvalidPath,
+    /// Disk full.
+    NoSpace,
+    /// File in use by another process.
+    Busy,
+    /// The user at the other side declined.
+    Declined,
+    Cancelled,
+    /// Data did not match its `blake3` hash.
+    HashMismatch,
+    /// Anything else, with the OS message (UTF-8, may be localized).
+    Other(String),
 }
 
 /// One host monitor, as listed in [`Message::MonitorList`]. Position and size are physical
