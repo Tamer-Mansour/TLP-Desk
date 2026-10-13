@@ -29,6 +29,11 @@ const STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 /// are dropped (see [`Session::send_video`]).
 pub const DEFAULT_MAX_VIDEO_IN_FLIGHT: usize = 3;
 
+/// Largest control frame accepted before the session is authorized (`Hello`, `AuthRequest`,
+/// `AuthResult` are all far smaller). An unauthenticated peer can therefore make us buffer at
+/// most this much per connection instead of `MAX_FRAME_LEN`.
+pub const HANDSHAKE_MAX_FRAME: usize = 16 * 1024;
+
 /// Frames the viewer buffers between the network and the decoder before dropping.
 const VIEWER_VIDEO_QUEUE: usize = 4;
 
@@ -63,12 +68,20 @@ pub(crate) struct FramedRecv {
 }
 
 impl FramedRecv {
+    /// A reader for an unauthenticated peer: frames above [`HANDSHAKE_MAX_FRAME`] are refused.
+    /// [`Session::new`] lifts the limit to `MAX_FRAME_LEN` once the session is authorized.
     pub(crate) fn new(recv: quinn::RecvStream) -> Self {
         Self {
             recv,
-            dec: FrameDecoder::new(),
+            dec: FrameDecoder::with_max_len(HANDSHAKE_MAX_FRAME),
             buf: vec![0u8; 64 * 1024],
         }
+    }
+
+    /// Accepts frames up to `MAX_FRAME_LEN` from now on.
+    fn authorized(mut self) -> Self {
+        self.dec.set_max_len(MAX_FRAME_LEN);
+        self
     }
 
     pub(crate) async fn next(&mut self) -> Result<Message, NetError> {
@@ -236,7 +249,7 @@ impl Session {
             peer,
             permissions,
             ctrl_tx: Mutex::new(ctrl_tx),
-            ctrl_rx: Mutex::new(ctrl_rx),
+            ctrl_rx: Mutex::new(ctrl_rx.authorized()),
             video_tx,
             video_rx,
             side_rx,

@@ -505,11 +505,17 @@ async fn host_handshake(
     let addr = SocketAddr::new(normalize(remote.ip()), remote.port());
     let (mut send, recv) = conn.accept_bi().await?;
     let mut rx = FramedRecv::new(recv);
-    let hello = match rx.next().await? {
-        Message::Hello(h) => h,
-        other => {
+    let hello = match rx.next().await {
+        Ok(Message::Hello(h)) => h,
+        Ok(other) => {
             conn.close(CLOSE_PROTOCOL.into(), b"expected Hello");
             return Err(unexpected(&other));
+        }
+        Err(e) => {
+            // Malformed or oversized frame (or the peer left): close explicitly instead of
+            // leaving it to the idle timeout.
+            conn.close(CLOSE_PROTOCOL.into(), b"bad Hello");
+            return Err(e);
         }
     };
     if hello.protocol_version != PROTOCOL_VERSION {
@@ -523,7 +529,14 @@ async fn host_handshake(
         return Ok(None);
     }
     write_msg(&mut send, &shared.hello(Role::Host)).await?;
-    let (kind, spake2_msg) = match rx.next().await? {
+    let request = match rx.next().await {
+        Ok(m) => m,
+        Err(e) => {
+            conn.close(CLOSE_PROTOCOL.into(), b"bad AuthRequest");
+            return Err(e);
+        }
+    };
+    let (kind, spake2_msg) = match request {
         Message::AuthRequest(AuthRequest::AcceptPrompt) => (AuthKind::AcceptPrompt, Vec::new()),
         Message::AuthRequest(AuthRequest::OneTimeCode { spake2_msg }) => {
             (AuthKind::OneTimeCode, spake2_msg)

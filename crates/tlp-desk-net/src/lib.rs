@@ -51,7 +51,7 @@ pub use feature::{
 pub use quinn::{RecvStream, SendStream};
 pub use session::{
     stream_priority, PeerInfo, Session, SideStream, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT,
-    STREAM_REFUSED,
+    HANDSHAKE_MAX_FRAME, STREAM_REFUSED,
 };
 pub use tlp_desk_proto::{StreamHeader, StreamKind};
 pub use tls::{Pin, ALPN};
