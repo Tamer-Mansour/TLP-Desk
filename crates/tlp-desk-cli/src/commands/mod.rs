@@ -63,3 +63,92 @@ pub async fn run(cli: &Cli) -> Result<()> {
         // FEATURE HOOK: one arm per new subcommand.
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("TLP-Desk-cli").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn clap_definition_is_consistent() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn id_and_list_parse() {
+        assert!(matches!(parse(&["id"]).unwrap().cmd, Cmd::Id(_)));
+        let Cmd::List(l) = parse(&["list"]).unwrap().cmd else {
+            panic!("not list")
+        };
+        assert_eq!(l.seconds, 5);
+        let Cmd::List(l) = parse(&["list", "--seconds", "2"]).unwrap().cmd else {
+            panic!("not list")
+        };
+        assert_eq!(l.seconds, 2);
+    }
+
+    #[test]
+    fn connect_parses_target_auth_and_options() {
+        let cli = parse(&[
+            "connect",
+            "123456789@192.168.1.5:47400",
+            "--code",
+            "123456",
+            "--seconds",
+            "3",
+            "--monitor",
+            "1",
+            "--forget-key",
+            "--data-dir",
+            "C:\\بيانات",
+        ])
+        .unwrap();
+        assert_eq!(cli.data_dir, Some(PathBuf::from("C:\\بيانات")));
+        let Cmd::Connect(c) = cli.cmd else {
+            panic!("not connect")
+        };
+        assert_eq!(c.dial.target, "123456789@192.168.1.5:47400");
+        assert_eq!(c.dial.auth.code.as_deref(), Some("123456"));
+        assert!(!c.dial.auth.password);
+        assert!(c.dial.forget_key);
+        assert_eq!(c.dial.port, 0);
+        assert_eq!((c.seconds, c.monitor), (3, Some(1)));
+    }
+
+    #[test]
+    fn password_is_never_taken_from_argv() {
+        // `--password` is a flag; a value after it is an unexpected extra argument.
+        assert!(parse(&["connect", "10.0.0.2", "--password", "secret"]).is_err());
+        assert!(parse(&["connect", "10.0.0.2", "--password=secret"]).is_err());
+        let Cmd::Connect(c) = parse(&["connect", "10.0.0.2", "--password"]).unwrap().cmd else {
+            panic!("not connect")
+        };
+        assert!(c.dial.auth.password);
+    }
+
+    #[test]
+    fn serve_flags_map_to_host_config() {
+        let Cmd::Serve(s) = parse(&["serve", "--code", "--view-only", "--name", "حاسوب المكتب"])
+            .unwrap()
+            .cmd
+        else {
+            panic!("not serve")
+        };
+        let cfg = s.host_config();
+        assert!(cfg.allow_one_time_code);
+        assert_eq!(cfg.default_permissions, tlp_desk_proto::Permissions::VIEW);
+        assert_eq!(cfg.device_name, "حاسوب المكتب");
+        assert_eq!(s.port, tlp_desk_net::DEFAULT_PORT);
+    }
+
+    #[test]
+    fn unknown_command_and_missing_target_are_errors() {
+        assert!(parse(&["frobnicate"]).is_err());
+        assert!(parse(&["connect"]).is_err());
+        assert!(parse(&[]).is_err());
+    }
+}
