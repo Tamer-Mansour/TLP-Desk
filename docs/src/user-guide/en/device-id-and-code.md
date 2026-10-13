@@ -11,7 +11,8 @@ A 9-digit number such as `482 913 057`.
   you update or reinstall TLP-Desk.
 - It is **calculated from this PC's secret identity key**. That is why it is safe to connect by ID:
   another device cannot simply pretend to have your ID — TLP-Desk checks the key behind it.
-- Click **Copy** next to it to put it on the clipboard. It is always copied with Western digits
+- Click the **Copy** icon next to it (two overlapping squares) to put it on the clipboard; the icon
+  briefly turns into a green check mark. It is always copied with Western digits
   (`0-9`), even if you display Arabic-Indic digits, so it pastes correctly everywhere.
 
 Your ID changes only if the identity key is deleted — for example when Windows is reinstalled, or
@@ -43,6 +44,6 @@ computer name. You can change it in [Settings](settings.md#device-name).
 ## Local address
 
 Your PC's IP address(es) on the local network, for example `192.168.1.23`, each with a **Copy**
-button. Someone can type this address to connect when automatic discovery does not work. Only
+icon. Someone can type this address to connect when automatic discovery does not work. Only
 local addresses are shown (`10.x.x.x`, `172.16–31.x.x`, `192.168.x.x`, link-local and private IPv6);
 TLP-Desk never uses internet addresses.

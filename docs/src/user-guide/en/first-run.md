@@ -23,19 +23,19 @@ TLP-Desk has to be **running** on a PC for others to reach it. Closing the windo
 │ This device                  │ Connect to a device                    │
 │                              │ [ ID, name or IP address        ]      │
 │ Device ID                    │ [ One-time code (optional)      ]      │
-│ 482 913 057          [Copy]  │ Leave it empty to ask the other side   │
+│ 482 913 057           [⧉]    │ Leave it empty to ask the other side   │
 │                              │ to accept.                [Connect >]  │
 │ One-time code                │                                        │
-│ 042 917     [Copy] [New code]│ Devices on this network                │
+│ 042 917      [⧉] [↻ New code]│ Devices on this network                │
 │ Share it only with someone   │ ● Office-PC                 [Connect]  │
 │ you trust.                   │   123 456 789 · 192.168.1.40 · Available│
 │                              │                                        │
 │ Name        DESKTOP-TLP01    │                                        │
-│ Local address 192.168.1.23 [Copy]                                     │
+│ Local address 192.168.1.23 [⧉]                                        │
 └──────────────────────────────┴────────────────────────────────────────┘
 ```
 
-In Arabic the whole layout is mirrored: "This device" is on the right.
+`[⧉]` is the **Copy** icon. In Arabic the whole layout is mirrored: "This device" is on the right.
 
 - **This device** (left): what other people need to reach *you* — your device ID, your one-time
   code, your PC's name and its local IP address(es). See
