@@ -30,7 +30,9 @@ pub use endpoint::{
     PendingSession,
 };
 pub use error::NetError;
-pub use session::{PeerInfo, Session, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT};
+pub use session::{
+    PeerInfo, Session, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT, STREAM_REFUSED,
+};
 pub use tls::{Pin, ALPN};
 pub use wol::{magic_packet, parse_mac, send_wake_on_lan, WOL_PORT};
 

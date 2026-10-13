@@ -1,0 +1,10 @@
+# Clippy configuration for the whole workspace. Lint *levels* live in the root Cargo.toml
+# ([workspace.lints.clippy]); this file only tunes how lints behave. See docs/CODE_STYLE.md.
+
+# Tests may unwrap/expect/panic/index freely: a failing test should fail loudly. Non-test code
+# returns errors instead (CODE_STYLE.md, "Errors and panics").
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = true

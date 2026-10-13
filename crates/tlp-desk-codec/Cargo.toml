@@ -7,6 +7,9 @@ license.workspace = true
 # openh264 0.9 needs Rust 1.85.
 rust-version = "1.85"
 
+[lints]
+workspace = true
+
 [dependencies]
 tlp-desk-capture.workspace = true
 thiserror.workspace = true

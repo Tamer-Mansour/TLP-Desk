@@ -464,6 +464,8 @@ fn v4_samples() -> Vec<Message> {
             uptime_s: 86_400,
             hostname: "مكتب-1".into(),
         }),
+        // --- auth (v4) ---
+        Message::AuthRequest(AuthRequest::ReconnectTicket { token: vec![1; 32] }),
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -534,6 +536,12 @@ fn v4_variants_are_appended_in_order() {
     for (m, i) in expected {
         assert_eq!(index(m), *i, "{m:?}");
     }
+    // AuthRequest::ReconnectTicket follows KeyConfirm (index 3).
+    let ticket = encode_message(&Message::AuthRequest(AuthRequest::ReconnectTicket {
+        token: vec![],
+    }))
+    .unwrap();
+    assert_eq!(ticket, vec![1, 4, 0]);
 }
 
 #[test]

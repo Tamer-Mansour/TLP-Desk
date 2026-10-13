@@ -1,0 +1,20 @@
+# Spell checker config (https://github.com/crate-ci/typos). Run: `typos`.
+# Add a word here only when it is a real identifier or protocol term, never to hide a typo.
+
+[files]
+extend-exclude = [
+    "Cargo.lock",
+    "target/",
+    "dist/",
+    # Arabic UI strings and translated docs: typos only knows English.
+    "**/i18n/ar*",
+    "docs/*-ar.md",
+]
+
+[default.extend-words]
+# Direct3D sampler fields (MipLODBias, MinLOD, MaxLOD): level of detail.
+LOD = "LOD"
+# schtasks / rc.exe flag ("/fo" = output format / output file).
+fo = "fo"
+# Loop index pair (ix, iy).
+iy = "iy"

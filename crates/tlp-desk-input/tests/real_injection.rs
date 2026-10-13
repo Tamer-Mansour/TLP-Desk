@@ -1,6 +1,8 @@
 //! Real `SendInput` test: moves the actual cursor. Run manually on an unlocked desktop:
 //! `cargo test -p tlp-desk-input --test real_injection -- --ignored --nocapture`
 #![cfg(windows)]
+// This test calls Win32 directly to read monitor and cursor state; every block has a SAFETY note.
+#![allow(unsafe_code)]
 
 use tlp_desk_input::{ensure_dpi_aware, InputEvent, InputInjector, MonitorRect, WindowsInjector};
 use windows::core::BOOL;
