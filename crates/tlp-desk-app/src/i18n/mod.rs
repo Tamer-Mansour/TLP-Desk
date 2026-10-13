@@ -223,6 +223,22 @@ strings! {
     // --- service ---
 
     // --- privacy ---
+    PrivacyMode => "Privacy mode", "وضع الخصوصية";
+    PrivacyTurnOff => "Turn off privacy mode", "إيقاف وضع الخصوصية";
+    PrivacyNotAllowed => "The other device has not allowed privacy mode.", "لم يسمح الجهاز الآخر بوضع الخصوصية.";
+    PrivacyConfirmTitle => "Turn on privacy mode?", "تشغيل وضع الخصوصية؟";
+    // Short sentences: RTL labels do not wrap (see theme::apply_lang).
+    PrivacyConfirmScreen => "The screen of {name} turns black and its keyboard and mouse stop working.", "ستصبح شاشة {name} سوداء وتتوقف لوحة مفاتيحه وفأرته.";
+    PrivacyConfirmControl => "You keep seeing and controlling it.", "وتبقى أنت قادراً على رؤيته والتحكم به.";
+    PrivacyConfirmExit => "Someone there can end it: hold Ctrl+Alt+Shift+P for 3 s, or press Ctrl+Alt+Del.", "ويمكن لمن عنده إنهاؤه بالضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ، أو Ctrl+Alt+Del.";
+    PrivacyTurnOn => "Turn on", "تشغيل";
+    PrivacyOnBanner => "Privacy mode is on: the other screen is black, its keyboard and mouse are blocked.", "وضع الخصوصية مفعّل: شاشة الجهاز الآخر سوداء ولوحة مفاتيحه وفأرته معطّلة.";
+    PrivacyEnded => "Privacy mode is off: ended on the other device, or not available there.", "وضع الخصوصية متوقف: أُنهي من الجهاز الآخر أو أنه غير متاح هناك.";
+    PrivacyHostOn => "Privacy mode is on", "وضع الخصوصية مفعّل";
+    // Shown on the black privacy screen of the host, always in both languages.
+    PrivacyScreenTitle => "This PC is being used remotely with TLP-Desk", "هذا الحاسوب قيد الاستخدام عن بُعد عبر TLP-Desk";
+    PrivacyScreenViewer => "Connected: {name} ({id})", "متصل: {name} ({id})";
+    PrivacyScreenExit => "To end privacy mode here, hold Ctrl+Alt+Shift+P for 3 seconds or press Ctrl+Alt+Del.", "لإنهاء وضع الخصوصية من هنا، اضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ أو اضغط Ctrl+Alt+Del.";
 
     // --- settings/ux ---
 
