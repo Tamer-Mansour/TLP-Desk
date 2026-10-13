@@ -12,6 +12,8 @@
 //! alternate data streams or network paths) and the host's optional allow-list
 //! ([`FsConfig::allowed_roots`]). A viewer never serves its own disks to the host.
 
+mod client;
+mod feature;
 mod ops;
 pub mod path;
 mod roots;
@@ -21,6 +23,8 @@ mod windows;
 
 use std::path::PathBuf;
 
+pub use client::{FsClient, FsClientError, DEFAULT_TIMEOUT};
+pub use feature::{FsFeature, FEATURE_NAME};
 pub use ops::{entry_order, execute, map_io, sort_entries, unix_ms, MAX_LIST_ENTRIES};
 pub use roots::known_folder;
 

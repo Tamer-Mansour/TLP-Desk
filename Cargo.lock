@@ -4026,8 +4026,13 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "tempfile",
+ "thiserror 2.0.21",
+ "tlp-desk-crypto",
+ "tlp-desk-net",
  "tlp-desk-proto",
+ "tokio",
  "tracing",
+ "tracing-subscriber",
  "windows",
 ]
 
