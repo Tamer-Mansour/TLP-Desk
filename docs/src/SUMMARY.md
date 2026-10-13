@@ -34,6 +34,7 @@
   - [0001 One QUIC stream per video frame](adr/0001-quic-stream-per-video-frame.md)
   - [0002 SPAKE2 with channel binding](adr/0002-spake2-with-channel-binding.md)
   - [0003 Identity key and device ID](adr/0003-ecdsa-identity-and-device-id.md)
+  - [0004 Pinning and trust on first use](adr/0004-tofu-and-fingerprint-pinning.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
