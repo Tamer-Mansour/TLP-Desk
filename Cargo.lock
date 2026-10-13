@@ -4025,7 +4025,10 @@ name = "tlp-desk-files"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "tempfile",
  "tlp-desk-proto",
+ "tracing",
+ "windows",
 ]
 
 [[package]]
