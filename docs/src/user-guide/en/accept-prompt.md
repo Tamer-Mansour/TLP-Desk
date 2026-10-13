@@ -34,7 +34,7 @@ Nothing else — no files, no clipboard, no audio (those features are not availa
 their own permission).
 
 Only accept people you know and expect. If prompts keep appearing from a PC you do not recognise,
-decline them; after 5 requests in a minute TLP-Desk blocks that PC for 10 minutes.
+decline them; after more than 5 requests in a minute TLP-Desk blocks that PC for 10 minutes.
 
 ## The "who is connected" banner
 
