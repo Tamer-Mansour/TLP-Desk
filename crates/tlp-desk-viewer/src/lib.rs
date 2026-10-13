@@ -16,11 +16,14 @@
 //!   are refused before any packet is sent.
 //! * **Features.** Register feature modules in [`ViewerConfig::features`]; each session starts
 //!   them and routes the host's feature messages to them ([`ViewerEvent::Feature`] for the UI).
+//! * **Restart and reconnect.** [`ReconnectTickets`] keeps the ticket a host sends before it
+//!   restarts; [`Viewer::reconnect_with_ticket`] gets back in once the host is up again.
 //! * **Threads.** Decoding runs on a dedicated std thread; networking on tokio tasks. Cancel a
 //!   pending [`Viewer::connect`] by dropping its future (or aborting its task).
 #![forbid(unsafe_code)]
 
 mod frame;
+mod reconnect;
 mod session;
 
 use std::net::{IpAddr, SocketAddr};
@@ -34,6 +37,9 @@ use tlp_desk_net::{AllowList, DiscoveredDevice, Discovery, Endpoint, NetError, P
 use tlp_desk_proto::RejectReason;
 
 pub use frame::{DecodedFrame, FrameSlot, PixelFormat};
+pub use reconnect::{
+    AttemptFn, HeldTicket, ReconnectPolicy, ReconnectTickets, TicketReceived, RECONNECT_FEATURE,
+};
 pub use session::{EndReason, ViewerEvent, ViewerEvents, ViewerSession, ViewerStats};
 pub use tlp_desk_net::{
     AuthMethod, AwaitingAcceptFn, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo,
