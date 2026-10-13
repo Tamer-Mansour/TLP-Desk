@@ -19,6 +19,7 @@
   - [When the host key has changed](user-guide/en/host-key-changed.md)
   - [Security and privacy](user-guide/en/security-privacy.md)
   - [Command line](user-guide/en/command-line.md)
+  - [Troubleshooting](user-guide/en/troubleshooting.md)
 
 # Security
 
