@@ -9,6 +9,7 @@
   - [First run and the firewall](user-guide/en/first-run.md)
   - [Your device ID and one-time code](user-guide/en/device-id-and-code.md)
   - [Finding devices on your network](user-guide/en/finding-devices.md)
+  - [Connecting](user-guide/en/connecting.md)
 
 # Security
 
