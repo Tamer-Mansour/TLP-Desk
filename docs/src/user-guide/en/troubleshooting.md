@@ -44,7 +44,8 @@ The address answered nothing. Check:
 
 Another program — almost always a second copy of TLP-Desk, or `TLP-Desk-cli serve` — is using the
 port. This copy can still connect **out**, but nobody can connect **to** it. Close the other copy
-(check the system tray and Task Manager) and restart TLP-Desk.
+(look for a second TLP-Desk window, or end `TLP-Desk.exe` / `TLP-Desk-cli.exe` in Task Manager) and
+restart TLP-Desk.
 
 If some other application really needs UDP 47400, start TLP-Desk with `--port <other number>` and
 connect to it as `address:port`.
