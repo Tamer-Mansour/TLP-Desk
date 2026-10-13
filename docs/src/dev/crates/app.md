@@ -18,7 +18,8 @@ wgpu backend, in Arabic and English.
 | `app` | Top-level state machine: home / settings / session, modals (connecting, accept prompt, host-key warning, errors), banners |
 | `backend` | `Backend` trait between UI and networking; `RealBackend` and `FakeBackend` |
 | `ui::home`, `ui::session`, `ui::settings_view` | The three screens |
-| `ui::theme`, `ui::widgets` | Fonts, colours, RTL-aware rows/columns, text field, chevron button |
+| `ui::theme`, `ui::widgets` | Fonts, colours, RTL-aware rows/columns, text field, chevron button, copy and danger buttons |
+| `ui::icons` | Vendored SVG icon set (`assets/icons/`, allow-listed, licences in `assets/icons/licenses` and `THIRD_PARTY_NOTICES.md`), tinted to the theme, HiDPI-aware, directional icons mirrored in RTL. Icon-only buttons always carry a tooltip that is also their accessible name |
 | `i18n` | String table, shaping/bidi, digit and number formatting — see [i18n and Arabic](../i18n.md) |
 | `input_map` | egui keys → set-1 scancodes; pointer normalisation; wheel conversion |
 | `keygrab` | Turns the `tlp-desk-input` keyboard grab on and off with focus |
