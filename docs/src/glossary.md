@@ -24,7 +24,7 @@ in the Arabic user guide.
 | **mDNS** | — | Multicast DNS, used to find TLP-Desk devices on the LAN without any server (`_tlpdesk._udp.local.`). |
 | **Broadcast fallback** | البث الاحتياطي | A simple UDP broadcast on port 47401 that finds devices when mDNS is blocked. |
 | **Control stream** | — | The one bidirectional QUIC stream of a session that carries the handshake, input and every other message except bulk data and video. |
-| **Side stream** | — | An extra QUIC stream that starts with a 9-byte stream header (kind + id) and carries feature data such as video frames, file bytes, audio or tunnels (protocol v4). |
+| **Side stream** | — | An extra QUIC stream for feature data such as file bytes, audio, clipboard payloads or tunnels. Like the per-frame video streams, it starts with a 9-byte stream header (kind + id) (protocol v4). |
 | **Session feature** | — | A plug-in (files, clipboard, chat, ...) registered with the host or viewer that handles its own messages and side streams. |
 | **Keyframe** | الإطار المرجعي | A video frame that can be decoded on its own. After a lost frame the viewer asks for one. |
 | **Drop, don't queue** | — | The rule that a late video frame is thrown away instead of delayed, so latency never grows. |
