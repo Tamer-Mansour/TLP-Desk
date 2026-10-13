@@ -57,6 +57,33 @@ installer/           # Inno Setup setup.exe + portable zip build scripts
 docs/                # protocol.md, security.md, user-guide (Arabic + English)
 ```
 
+## Repository layout (strict)
+
+Every file has exactly one place. **Never add a new top-level file or folder without updating this
+section in the same commit.**
+
+| What | Where |
+|---|---|
+| Crate code | `crates/<crate>/src/`. One feature = one module folder `src/<feature>/mod.rs` (+ submodules); platform code in `src/<os>/` or `src/<feature>/windows.rs` |
+| Integration tests | `crates/<crate>/tests/*.rs` (shared helpers in `tests/common/mod.rs`); hardware tests `#[ignore]` |
+| Unit tests | `#[cfg(test)] mod tests` at the bottom of the file they test |
+| Dev examples, benchmarks | `crates/<crate>/examples/` |
+| App assets | `crates/tlp-desk-app/assets/{fonts,icon,icons}/` (licences next to the asset in `licenses/`) |
+| Build scripts | `crates/<crate>/build.rs` (shared helper: `crates/tlp-desk-app/winres.rs`) |
+| Installer | `installer/`: `TLP-Desk.iss`, `build-setup.ps1`, `portable.ps1`, `common.ps1`, `README-*.txt`, `assets/` (wizard images) |
+| Dev / CI scripts | `scripts/`, PowerShell named `verb-noun.ps1` (e.g. `check.ps1`, `vendor-icons.ps1`); `make_icon.py` is the one legacy exception |
+| Documentation | `docs/`: `protocol.md`, `CODE_STYLE.md`, `security.md`, user guides (`*-ar.md` for Arabic); mdBook sources in `docs/src/`, ADRs in `docs/src/adr/` |
+| GitHub | `.github/`: `workflows/`, `ISSUE_TEMPLATE/`, `pull_request_template.md`, `CODEOWNERS`, `dependabot.yml` |
+| Tool configs | dotfiles at the root: `.rustfmt.toml`, `.clippy.toml`, `.typos.toml`, `.gitignore`; cargo-deny in `.cargo/deny.toml` |
+| Root files (only these) | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `CLAUDE.md`, `ROADMAP.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `LICENSE-MIT`, `LICENSE-APACHE`, `THIRD_PARTY_NOTICES.md`, `CHANGELOG.md` |
+
+Naming: Rust files and modules `snake_case.rs`; scripts and docs `kebab-case` (scripts `verb-noun.ps1`);
+crates `tlp-desk-<concern>`; branches `TLP-<topic>`; the product is always written `TLP-Desk`.
+
+Never write screenshots, build output, logs or temp files inside the repo: build output goes to
+`CARGO_TARGET_DIR` (e.g. `C:\tlp-build\<lane>`), everything else to the OS temp dir. `target/`,
+`dist/` and screenshot patterns are git-ignored as a safety net, not as a place to put things.
+
 ## Tech choices (do not change without updating this file)
 
 | Concern | Choice |

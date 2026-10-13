@@ -140,6 +140,24 @@ Windows Firewall prompt the first time.
 
 ---
 
+## Documentation
+
+The full documentation is an [mdBook](https://rust-lang.github.io/mdBook/) in [`docs/`](docs/)
+(build it with `mdbook build docs`; it is published to GitHub Pages from `TLP-Desk`):
+
+- **User guide:** [English](docs/src/user-guide/en/index.md) ·
+  [العربية](docs/src/user-guide/ar/index.md) — installing, connecting, controlling, settings,
+  troubleshooting, FAQ.
+- **[Security model](docs/src/security.md)** — threat model, identity and pinning, known limitations.
+- **Contributor guide:** [architecture](docs/src/dev/architecture/index.md),
+  [one page per crate](docs/src/dev/crates/index.md), [building](docs/src/dev/building.md),
+  [testing](docs/src/dev/testing.md), [i18n and Arabic](docs/src/dev/i18n.md),
+  [release process](docs/src/dev/release.md).
+- **[Architecture decision records](docs/src/adr/index.md)** and the
+  [wire protocol](docs/protocol.md).
+
+---
+
 ## Build from source
 
 Prerequisites (Windows):
@@ -202,7 +220,8 @@ Contributions are welcome. In short:
 - Changed something visible? Run `scripts\update-readme-media.ps1` and commit the updated
   `docs/media/` in the same PR. Other screenshots never go into git.
 
-The full rules for humans and coding agents are in [CLAUDE.md](CLAUDE.md) and
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). The full rules for humans and coding agents are in
+[CLAUDE.md](CLAUDE.md) and
 [docs/CODE_STYLE.md](docs/CODE_STYLE.md).
 
 ---
@@ -210,7 +229,7 @@ The full rules for humans and coding agents are in [CLAUDE.md](CLAUDE.md) and
 ## Security
 
 TLP-Desk is designed for trusted local networks. Please report vulnerabilities privately through
-GitHub Security Advisories rather than public issues.
+GitHub Security Advisories rather than public issues; see [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -246,6 +265,8 @@ GitHub Security Advisories rather than public issues.
 للتثبيت: نزّل ملف `TLP-Desk-<version>-setup.exe` من صفحة
 [الإصدارات](https://github.com/Tamer-Mansour/TLP-Desk/releases) وشغّله على الجهازين.
 
+الدليل الكامل بالعربية: [دليل المستخدم](docs/src/user-guide/ar/index.md).
+
 </div>
 
 ---
@@ -254,8 +275,8 @@ GitHub Security Advisories rather than public issues.
 
 Dual-licensed under either of
 
-- MIT license
-- Apache License, Version 2.0
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 
 at your option. Bundled fonts and icons keep their own licenses (SIL OFL, MIT, ISC); see the
-license files shipped with the installer.
+license files shipped with the installer and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

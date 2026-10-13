@@ -1,0 +1,76 @@
+# Quality gate for every lane branch and every pull request into TLP-Desk.
+# Same steps as scripts/check.ps1: fmt, clippy -D warnings, tests, release build.
+# Tests that need a real desktop (screen capture, input injection) or LAN multicast are #[ignore]
+# and stay ignored here.
+name: CI
+
+on:
+  push:
+    branches: ["TLP-*"]
+  pull_request:
+    branches: ["TLP-Desk"]
+  workflow_dispatch:
+
+# A newer push to the same branch / PR cancels the outdated run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  windows:
+    name: Windows (fmt, clippy, test, release build)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      # Versions come from rust-toolchain.toml (stable + clippy + rustfmt).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # openh264 uses NASM for its assembly fast paths.
+      - uses: ilammy/setup-nasm@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Release build
+        run: cargo build --release --workspace
+
+  hygiene:
+    name: Spelling and dependency policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: typos-cli,cargo-deny
+
+      # Config: .typos.toml
+      - name: Spelling (typos)
+        run: typos
+
+      # Config: .cargo/deny.toml (licences, sources, bans, advisories)
+      - name: Dependency policy (cargo deny)
+        run: cargo deny check
