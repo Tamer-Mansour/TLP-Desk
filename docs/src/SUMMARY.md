@@ -34,6 +34,7 @@
     - [Wake-on-LAN](user-guide/en/coming-soon/wake-on-lan.md)
     - [Session recording](user-guide/en/coming-soon/recording.md)
     - [Port forwarding](user-guide/en/coming-soon/port-forwarding.md)
+    - [Whiteboard](user-guide/en/coming-soon/whiteboard.md)
 
 # Security
 
