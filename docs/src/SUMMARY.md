@@ -62,6 +62,7 @@
     - [مشاركة الحافظة](user-guide/ar/coming-soon/clipboard.md)
     - [المحادثة](user-guide/ar/coming-soon/chat.md)
     - [الصوت من الحاسوب البعيد](user-guide/ar/coming-soon/audio.md)
+    - [دفتر العناوين](user-guide/ar/coming-soon/address-book.md)
 
 # Security
 
