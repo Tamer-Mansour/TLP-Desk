@@ -205,6 +205,52 @@ The host checks `Message::required_permissions()` before acting on any message f
 a permission are dropped (requests get a `PermissionDenied` answer where the message has one).
 Side streams are checked by the feature that accepts them.
 
+## Features (v4)
+
+### Remote file system
+
+`FsRequest { req_id, op }` is answered by exactly one `FsResponse { req_id, result }`. `req_id` is
+chosen by the requester (unique per session and direction). Paths are UTF-8 strings in the
+receiver's native form (`C:\Users\مستخدم\Desktop`); the host converts them to UTF-16 losslessly, so
+Arabic file and folder names survive exactly.
+
+| `FsOp` | Reply |
+|---|---|
+| `ListDir { path }` | `Entries(Vec<FsEntry>)` (not recursive) |
+| `Stat { path }` | `Entry(FsEntry)` |
+| `Roots` | `Roots(Vec<FsRoot>)`: drives and known folders |
+| `MakeDir { path }` | `Done` (creates missing parents) |
+| `Rename { from, to }` | `Done` (same volume) |
+| `Delete { path, recursive }` | `Done` |
+
+- `FsEntry { name: String, is_dir: bool, size: u64, modified_unix_ms: i64, readonly: bool, hidden: bool }`
+- `FsRoot { path: String, label: String, kind: FsRootKind, total_bytes: Option<u64>, free_bytes: Option<u64> }`,
+  `FsRootKind = Drive | Home | Desktop | Documents | Downloads | Pictures | Music | Videos | Other`
+- `FsError = NotFound | PermissionDenied | AlreadyExists | NotEmpty | InvalidPath | NoSpace | Busy |
+  Declined | Cancelled | HashMismatch | Other(String)`
+
+### File transfer
+
+Control messages travel on the control stream; **file bytes never do**. They go on
+`StreamKind::FileData` uni streams so a multi-GB copy cannot delay input or video and can use
+several streams in parallel.
+
+1. The viewer sends `TransferOffer { id, direction, source_dir, dest_dir, items, total_bytes, resume }`.
+   `items` are `TransferItem { rel_path, size, modified_unix_ms, is_dir }`; `rel_path` is relative,
+   `/`-separated and must not contain `..` or be absolute (the receiver answers `InvalidPath`).
+2. The host answers `TransferAccept { id, resume }` or `TransferReject { id, error }`. For an
+   **upload** `resume` lists `(item, offset)` pairs the host already has; for a **download** the
+   viewer put its own resume points into the offer.
+3. The sender opens one or more FileData streams with stream id = transfer id. Each body starts
+   with a 12-byte `FileDataHeader { item: u32 LE, offset: u64 LE }` followed by raw bytes up to the
+   end of the stream. One item may be split into non-overlapping ranges on several streams.
+4. After the last byte of an item the sender sends `TransferDone { id, item, blake3 }`; the receiver
+   verifies the BLAKE3 hash of the complete file (`TransferError { HashMismatch }` on failure).
+5. The receiver reports `TransferProgress { id, bytes_done }` at most ~4 times per second.
+   Either side may send `TransferCancel` (both stop and reset the data streams) or
+   `TransferError`.
+
+Directories (`is_dir`) are created by the receiver; modification times are restored.
 ## Session flow
 
 ```
