@@ -277,6 +277,8 @@ strings! {
     TrayTooltip => "TLP-Desk — ID {id}", "TLP-Desk — المعرّف {id}";
     TrayTooltipPaused => "TLP-Desk — ID {id} (incoming paused)", "TLP-Desk — المعرّف {id} (الاتصالات الواردة متوقفة)";
     TrayTooltipRequest => "{name} wants to connect", "يطلب {name} الاتصال";
+    // Host banner (TLP-settings-tray)
+    BannerMore => "and {n} more", "و{n} آخرون";
     // Connection log (TLP-settings-tray)
     ConnectionLog => "Connection log", "سجل الاتصالات";
     LogSearchHint => "Search by name, ID or address", "ابحث بالاسم أو المعرّف أو العنوان";

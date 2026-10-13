@@ -4,6 +4,7 @@
 
 pub mod app;
 pub mod backend;
+pub mod banner;
 pub mod connection_log;
 pub mod i18n;
 pub mod input_map;
