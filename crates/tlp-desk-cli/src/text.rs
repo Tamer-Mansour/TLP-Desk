@@ -8,6 +8,7 @@ use tlp_desk_host::{CancelReason, ConnectedViewer, EndReason as HostEnd, Incomin
 use tlp_desk_net::{AuthKind, DiscoveredDevice, PeerInfo};
 use tlp_desk_proto::{Permissions, RejectReason};
 use tlp_desk_viewer::{EndReason as ViewerEnd, MonitorDesc, ViewerStats};
+use tlp_desk_viewer::{ForwardSpec, TunnelCloseReason, TunnelId, TunnelStatus, ViewerError};
 
 pub const ABOUT: &str = "Headless TLP-Desk client for scripts and testing (LAN only)";
 pub const WAITING_FOR_ACCEPT: &str = "Waiting for the host user to accept...";
@@ -223,4 +224,83 @@ pub fn monitors(list: &[MonitorDesc], active: u32) -> String {
 
 pub fn selecting_monitor(index: u32) -> String {
     format!("Switching to monitor {index}...")
+}
+
+// --- tunnels: port forwarding (TLP-tunnel) ---
+
+pub const TUNNELS_ALLOWED: &str =
+    "Port forwarding is ALLOWED for viewers (--allow-tunnels): they can reach services on this \
+     PC and its local network.";
+pub const TUNNEL_WAITING_PERMISSION: &str =
+    "The host has not allowed port forwarding yet. Waiting until the host user grants it \
+     (Ctrl+C to stop)...";
+pub const FORWARD_RUNNING: &str = "Forwarding. Press Ctrl+C to stop.";
+
+pub fn lan_bind_warning(bind: std::net::SocketAddr) -> String {
+    format!("WARNING: listening on {bind}: other devices on your network can use this tunnel too.")
+}
+
+pub fn lan_bind_needs_flag(bind: std::net::SocketAddr) -> String {
+    format!(
+        "{bind} is not a loopback address: other devices could use the tunnel. Add --bind-lan \
+         to confirm."
+    )
+}
+
+pub fn forward_started(s: &TunnelStatus) -> String {
+    format!(
+        "Forwarding {} -> {} on the host (rule {})",
+        s.local,
+        s.target_display(),
+        s.id
+    )
+}
+
+pub fn forward_failed(spec: &ForwardSpec, e: &ViewerError) -> String {
+    format!("Cannot forward {spec}: {e}")
+}
+
+pub fn forward_closed(id: TunnelId, reason: &TunnelCloseReason) -> String {
+    format!("Rule {id} closed by the host: {reason}")
+}
+
+pub fn forward_stats(list: &[TunnelStatus]) -> String {
+    let mut out = String::new();
+    for s in list {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "  {} -> {}: {} open, {} total, {} failed, sent {} B, received {} B",
+            s.local,
+            s.target_display(),
+            s.active,
+            s.connections,
+            s.failed,
+            s.bytes_sent,
+            s.bytes_received
+        ));
+    }
+    out
+}
+
+pub fn host_tunnels(list: &[tlp_desk_host::HostTunnelInfo]) -> String {
+    if list.is_empty() {
+        return "Port forwarding: no tunnel open.".into();
+    }
+    let mut out = String::from("Port forwarding:");
+    for t in list {
+        out.push_str(&format!(
+            "\n  tunnel {} -> {}: {} open, {} total, {} failed",
+            t.id, t.target, t.active, t.connections, t.failed
+        ));
+    }
+    out
+}
+
+pub fn host_tunnel_refused(target_host: Option<&str>, port: u16, reason: &str) -> String {
+    format!(
+        "Refused port forwarding to {:?}:{port} ({reason})",
+        target_host.unwrap_or("localhost")
+    )
 }

@@ -2,6 +2,7 @@
 //! session (real capture/encode/input), or connect as a viewer and report statistics.
 #![forbid(unsafe_code)]
 
+mod forward;
 mod text;
 
 use std::io::{BufRead, Write};
@@ -13,8 +14,11 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use tlp_desk_crypto::Identity;
-use tlp_desk_host::{Host, HostConfig, HostEvent, DEFAULT_PERMISSIONS};
-use tlp_desk_net::{Discovery, DiscoveryConfig, Endpoint, EndpointConfig};
+use tlp_desk_host::{
+    Host, HostConfig, HostEvent, HostTunnelEvent, HostTunnels, TunnelHostConfig,
+    DEFAULT_PERMISSIONS,
+};
+use tlp_desk_net::{Discovery, DiscoveryConfig, Endpoint, EndpointConfig, FeatureSet};
 use tlp_desk_proto::{InputEvent, Permissions};
 use tlp_desk_viewer::{
     AuthMethod, ConnectTarget, DecodedFrame, KnownHostsStore, PixelFormat, Viewer, ViewerConfig,
@@ -76,6 +80,36 @@ enum Cmd {
         /// Do not show the green marker at the pointer while a viewer moves it.
         #[arg(long)]
         no_pointer_marker: bool,
+        /// Let viewers forward TCP ports to services on this PC and its LAN (TUNNEL
+        /// permission; off by default).
+        #[arg(long)]
+        allow_tunnels: bool,
+    },
+    /// Viewer: forward local TCP ports to services on (or next to) the host until Ctrl+C,
+    /// e.g. `forward 192.168.1.20 8080:127.0.0.1:80`. The host must allow port forwarding.
+    Forward {
+        /// 9-digit device ID, IP[:port], ID@IP[:port], or a device name on the LAN.
+        target: String,
+        /// LOCAL_PORT:REMOTE_HOST:REMOTE_PORT (or LOCAL_PORT:REMOTE_PORT for the host itself,
+        /// or BIND_IP:LOCAL_PORT:REMOTE_HOST:REMOTE_PORT). REMOTE_HOST is an IP address as seen
+        /// from the host (loopback or LAN). Repeatable.
+        #[arg(required = true)]
+        rules: Vec<String>,
+        /// The host's one-time code (otherwise the host user is asked to accept).
+        #[arg(long)]
+        code: Option<String>,
+        /// Use the unattended password from the TLP_DESK_PASSWORD environment variable.
+        #[arg(long)]
+        password: bool,
+        /// Local UDP port (0 = any).
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+        /// Forget a changed host key and trust the new one (only after verifying it!).
+        #[arg(long)]
+        forget_key: bool,
+        /// Allow listening on a non-loopback BIND_IP (other devices can use the tunnel).
+        #[arg(long)]
+        bind_lan: bool,
     },
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect {
@@ -168,23 +202,53 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             name,
             local_grace_ms,
             no_pointer_marker,
+            allow_tunnels,
         } => {
+            let base = if view_only {
+                Permissions::VIEW
+            } else {
+                DEFAULT_PERMISSIONS
+            };
             let cfg = HostConfig {
                 local_input_grace: Duration::from_millis(local_grace_ms),
                 remote_pointer_marker: !no_pointer_marker,
                 monitor,
                 fps,
                 allow_one_time_code: code,
-                default_permissions: if view_only {
-                    Permissions::VIEW
+                default_permissions: if allow_tunnels {
+                    base | Permissions::TUNNEL
                 } else {
-                    DEFAULT_PERMISSIONS
+                    base
                 },
                 advertise: !no_discovery,
                 device_name: name.unwrap_or_else(tlp_desk_net::default_device_name),
+                features: FeatureSet::new().with(HostTunnels::new(TunnelHostConfig::default())),
                 ..HostConfig::default()
             };
+            if allow_tunnels {
+                println!("{}", text::TUNNELS_ALLOWED);
+            }
             serve(&dir, port, cfg, auto_accept).await
+        }
+        Cmd::Forward {
+            target,
+            rules,
+            code,
+            password,
+            port,
+            forget_key,
+            bind_lan,
+        } => {
+            let auth = auth_method(code, password)?;
+            let opts = forward::ForwardOpts {
+                target,
+                rules,
+                auth,
+                port,
+                forget_key,
+                bind_lan,
+            };
+            forward::forward(&dir, opts).await
         }
         Cmd::Connect {
             target,
@@ -197,14 +261,7 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             monitor,
             move_pointer,
         } => {
-            let auth = match (code, password) {
-                (Some(c), _) => AuthMethod::OneTimeCode(c),
-                (None, true) => AuthMethod::Password(
-                    std::env::var("TLP_DESK_PASSWORD")
-                        .context("--password needs the TLP_DESK_PASSWORD environment variable")?,
-                ),
-                (None, false) => AuthMethod::AcceptPrompt,
-            };
+            let auth = auth_method(code, password)?;
             let opts = ConnectOpts {
                 seconds,
                 snapshot,
@@ -216,6 +273,18 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             connect(&dir, &target, auth, opts).await
         }
     }
+}
+
+/// `--code` wins over `--password`; neither = ask the host user to accept.
+fn auth_method(code: Option<String>, password: bool) -> Result<AuthMethod> {
+    Ok(match (code, password) {
+        (Some(c), _) => AuthMethod::OneTimeCode(c),
+        (None, true) => AuthMethod::Password(
+            std::env::var("TLP_DESK_PASSWORD")
+                .context("--password needs the TLP_DESK_PASSWORD environment variable")?,
+        ),
+        (None, false) => AuthMethod::AcceptPrompt,
+    })
 }
 
 async fn list(seconds: u64) -> Result<()> {
@@ -267,6 +336,7 @@ async fn serve(dir: &Path, port: u16, cfg: HostConfig, auto_accept: bool) -> Res
         println!("{}", text::auto_accept());
     }
 
+    let mut last_tunnels: Vec<(u64, usize)> = Vec::new();
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
@@ -314,7 +384,22 @@ async fn serve(dir: &Path, port: u16, cfg: HostConfig, auto_accept: bool) -> Res
                         println!("{}", text::viewer_left(&peer, &reason));
                     }
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { .. } => {}
+                    HostEvent::Feature { event, .. } => {
+                        match event.payload::<HostTunnelEvent>() {
+                            Some(HostTunnelEvent::Changed(list)) => {
+                                // Counters alone change every second; print open/close only.
+                                let shape: Vec<_> = list.iter().map(|t| (t.id, t.active)).collect();
+                                if shape != last_tunnels {
+                                    println!("{}", text::host_tunnels(list));
+                                    last_tunnels = shape;
+                                }
+                            }
+                            Some(HostTunnelEvent::Refused { target_host, target_port, reason, .. }) => {
+                                println!("{}", text::host_tunnel_refused(target_host.as_deref(), *target_port, reason));
+                            }
+                            None => {}
+                        }
+                    }
                 }
             }
         }
