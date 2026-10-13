@@ -37,6 +37,8 @@ pub struct ViewerSession {
     pub show_stats: bool,
     pub stats: Option<SessionStats>,
     started: Instant,
+    /// Session duration to show instead of the wall clock (deterministic README media).
+    fixed_elapsed: Option<std::time::Duration>,
     pressed: Vec<MouseButton>,
     last_pos: Option<(u16, u16)>,
     focus_requested: bool,
@@ -83,6 +85,7 @@ impl ViewerSession {
             show_stats: true,
             stats: None,
             started: Instant::now(),
+            fixed_elapsed: None,
             pressed: Vec::new(),
             last_pos: None,
             focus_requested: false,
@@ -104,6 +107,12 @@ impl ViewerSession {
         }
         self.monitors = monitors;
         self.active_monitor = active;
+    }
+
+    /// Show `elapsed` as the session duration instead of the wall clock (`None` = wall clock).
+    /// Used by the README media generator so screenshots and the demo are reproducible.
+    pub fn set_fixed_elapsed(&mut self, elapsed: Option<std::time::Duration>) {
+        self.fixed_elapsed = elapsed;
     }
 
     /// Monitors and the active index, as last reported by the host.
@@ -424,41 +433,11 @@ impl ViewerSession {
     }
 
     fn stats_overlay(&self, ui: &egui::Ui, tx: Tx, area: Rect) {
-        let d = tx.digits;
-        let mut lines: Vec<(S, String)> = Vec::new();
-        if let Some(s) = self.stats {
-            lines.push((
-                S::StatFps,
-                format!(
-                    "{} {}",
-                    format::number(f64::from(s.fps), 0, d),
-                    tx.raw(S::UnitFps)
-                ),
-            ));
-            lines.push((
-                S::StatLatency,
-                format!(
-                    "{} {}",
-                    format::number(f64::from(s.latency_ms), 0, d),
-                    tx.raw(S::UnitMs)
-                ),
-            ));
-            lines.push((S::StatBitrate, format::bitrate(s.bitrate_kbps, tx.lang, d)));
-        }
-        lines.push((
-            S::StatResolution,
-            tx.digits(&format!("{}×{}", self.frame_size[0], self.frame_size[1])),
-        ));
-        lines.push((
-            S::StatDuration,
-            ltr_isolate(&format::duration(self.started.elapsed(), d)),
-        ));
-
         let font = egui::FontId::proportional(13.5);
-        let galleys: Vec<_> = lines
-            .iter()
-            .map(|(k, v)| {
-                let text = tx.p(&format!("{}: {}", tx.raw(*k), v));
+        let galleys: Vec<_> = self
+            .stat_lines(tx)
+            .into_iter()
+            .map(|text| {
                 ui.painter()
                     .layout_no_wrap(text, font.clone(), Color32::from_gray(235))
             })
@@ -488,6 +467,46 @@ impl ViewerSession {
         }
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
+    /// The overlay's lines, display-ready ("label: value" in the UI direction).
+    fn stat_lines(&self, tx: Tx) -> Vec<String> {
+        let d = tx.digits;
+        let mut lines: Vec<(S, String)> = Vec::new();
+        if let Some(s) = self.stats {
+            lines.push((
+                S::StatFps,
+                format!(
+                    "{} {}",
+                    format::number(f64::from(s.fps), 0, d),
+                    tx.raw(S::UnitFps)
+                ),
+            ));
+            lines.push((
+                S::StatLatency,
+                format!(
+                    "{} {}",
+                    format::number(f64::from(s.latency_ms), 0, d),
+                    tx.raw(S::UnitMs)
+                ),
+            ));
+            lines.push((S::StatBitrate, format::bitrate(s.bitrate_kbps, tx.lang, d)));
+        }
+        lines.push((
+            S::StatResolution,
+            tx.digits(&format!("{}×{}", self.frame_size[0], self.frame_size[1])),
+        ));
+        lines.push((
+            S::StatDuration,
+            ltr_isolate(&format::duration(
+                self.fixed_elapsed.unwrap_or_else(|| self.started.elapsed()),
+                d,
+            )),
+        ));
+        lines
+            .iter()
+            .map(|(k, v)| tx.p(&format!("{}: {}", tx.raw(*k), v)))
+            .collect()
     }
 
     fn handle_input(
@@ -907,6 +926,38 @@ mod tests {
             out.textures_delta.clear(); // headless: no renderer consumes the uploads
         }
         assert!(backend.1.lock().unwrap().is_empty());
+    }
+
+    /// The resolution value keeps its W×H order inside the Arabic overlay line: it is displayed
+    /// exactly like the standalone number `tx.n("1024×768")` (Arabic-Indic digit runs are
+    /// pre-reversed for egui, which draws Arabic-font runs right to left).
+    #[test]
+    fn arabic_overlay_keeps_resolution_order() {
+        let frames = FrameSlot::new();
+        let peer = PeerInfo {
+            device_id: DeviceId(2),
+            name: "حاسوب-المكتب".into(),
+            address: "192.168.1.2".parse().unwrap(),
+        };
+        let mut session = ViewerSession::new(SessionId(1), peer, Permissions::ALL, frames);
+        session.frame_size = [1024, 768];
+        for digits in [DigitStyle::Western, DigitStyle::ArabicIndic] {
+            for lang in [Lang::Ar, Lang::En] {
+                let tx = Tx::new(lang, digits);
+                let want = tx.n("1024×768");
+                let lines = session.stat_lines(tx);
+                assert!(
+                    lines[0].contains(&want),
+                    "{lang:?} {digits:?}: {:?}",
+                    lines[0]
+                );
+            }
+        }
+        // And the standalone form is W first for Western digits.
+        assert_eq!(
+            Tx::new(Lang::Ar, DigitStyle::Western).n("1024×768"),
+            "1024×768"
+        );
     }
 
     #[test]
