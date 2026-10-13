@@ -29,6 +29,7 @@
     - [Sound from the remote PC](user-guide/en/coming-soon/audio.md)
     - [Address book](user-guide/en/coming-soon/address-book.md)
     - [Unattended access](user-guide/en/coming-soon/unattended-access.md)
+    - [Ctrl+Alt+Del and lock](user-guide/en/coming-soon/ctrl-alt-del.md)
 
 # Security
 
