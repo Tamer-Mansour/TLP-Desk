@@ -42,6 +42,7 @@
   - [0009 Rename to TLP-Desk](adr/0009-rename-to-tlp-desk.md)
   - [0010 Local input priority](adr/0010-local-input-priority.md)
   - [0011 Pointer marker excluded from capture](adr/0011-capture-exclusion-for-pointer-marker.md)
+  - [0012 Capture size cap](adr/0012-capture-size-cap.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
