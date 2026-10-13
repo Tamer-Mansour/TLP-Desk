@@ -40,8 +40,8 @@ pub use feature::{
 };
 pub use quinn::{RecvStream, SendStream};
 pub use session::{
-    stream_priority, PeerInfo, Session, SideStream, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT,
-    STREAM_REFUSED,
+    stream_priority, PeerInfo, Session, SideStream, TransportStats, VideoSendStatus,
+    DEFAULT_MAX_VIDEO_IN_FLIGHT, STREAM_REFUSED,
 };
 pub use tlp_desk_proto::{StreamHeader, StreamKind};
 pub use tls::{Pin, ALPN};
