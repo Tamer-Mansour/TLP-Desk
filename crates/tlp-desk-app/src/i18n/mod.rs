@@ -217,6 +217,23 @@ strings! {
     // --- clipboard ---
 
     // --- chat ---
+    Chat => "Chat", "الدردشة";
+    ChatWith => "Chat with {name}", "دردشة مع {name}";
+    ChatInputHint => "Write a message…", "اكتب رسالة…";
+    ChatSend => "Send", "إرسال";
+    ChatSendHint => "Enter sends, Shift+Enter starts a new line.", "يرسل Enter الرسالة، ويبدأ Shift+Enter سطراً جديداً.";
+    ChatEmpty => "No messages yet. Say hello!", "لا توجد رسائل بعد. ابدأ بالتحية!";
+    ChatOffViewer => "The other side has turned chat off.", "أوقف الطرف الآخر الدردشة.";
+    ChatOffHost => "Chat is turned off for this session.", "الدردشة متوقفة في هذه الجلسة.";
+    ChatTurnOff => "Turn off chat", "إيقاف الدردشة";
+    ChatTurnOn => "Allow chat", "السماح بالدردشة";
+    ChatTooLong => "Too long: at most {max} characters.", "الرسالة طويلة: الحد الأقصى {max} حرف.";
+    ChatCount => "{count} / {max}", "{count} / {max} حرف";
+    ChatRateLimited => "You are sending too fast. Wait a moment.", "ترسل بسرعة كبيرة. انتظر لحظة.";
+    ChatUnavailable => "Chat is not available in this session.", "الدردشة غير متاحة في هذه الجلسة.";
+    ChatUnread => "{count} unread", "{count} غير مقروءة";
+    TimeAm => "AM", "ص";
+    TimePm => "PM", "م";
 
     // --- audio ---
 
