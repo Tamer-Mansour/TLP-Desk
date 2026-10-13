@@ -63,6 +63,7 @@
     - [المحادثة](user-guide/ar/coming-soon/chat.md)
     - [الصوت من الحاسوب البعيد](user-guide/ar/coming-soon/audio.md)
     - [دفتر العناوين](user-guide/ar/coming-soon/address-book.md)
+    - [الوصول غير المراقَب](user-guide/ar/coming-soon/unattended-access.md)
 
 # Security
 
