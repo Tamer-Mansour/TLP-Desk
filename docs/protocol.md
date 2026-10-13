@@ -1,7 +1,16 @@
 # tlp-desk wire protocol
 
-Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-proto` (messages),
+Status: **draft**, `PROTOCOL_VERSION = 5`. Source of truth: `crates/tlp-desk-proto` (messages),
 `crates/tlp-desk-net` (transport, discovery) and `crates/tlp-desk-crypto` (keys, PAKE).
+
+### Changes in v5
+
+- Appended `ClipboardData::Png { width, height, png }` (index 2 inside `ClipboardData`): a
+  PNG-compressed clipboard image, so a 4K screenshot (33 MB of RGBA) fits well inside the
+  16 MiB frame limit. `ClipboardData::Image` (raw RGBA) stays valid for tiny or legacy images.
+  Receivers check `width * height * 4` against their cap *before* decoding and reject a PNG whose
+  header disagrees with `width`/`height`. Needs `CLIPBOARD`, like the other clipboard messages.
+- Nothing else changed; every v4 index is unchanged.
 
 ### Changes in v4
 
@@ -148,6 +157,7 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `VideoFrame { seq, timestamp_us, width, height, codec, keyframe, data }` | host → viewer (one uni stream per frame) | One encoded frame, H.264 Annex-B |
 | `InputEvent` | viewer → host | Mouse/keyboard; see below |
 | `ClipboardData::Text / Image` | both | Clipboard sync (needs `CLIPBOARD`) |
+| `ClipboardData::Png { width, height, png }` | both | PNG-compressed clipboard image (v5, `CLIPBOARD`) |
 | `FileChunk { transfer_id, offset, data, last }` | both | File transfer (needs `FILES`) |
 | `Permissions(u16)` | host → viewer | Live permission update/revocation |
 | `Bye { reason }` | both | Graceful close |
@@ -295,6 +305,8 @@ Directories (`is_dir`) are created by the receiver; modification times are resto
 - `ClipboardData::Text / Image` (v1) keep working; text is sent byte-exact (Arabic, RTL marks,
   ZWJ/ZWNJ preserved). Payloads larger than about 1 MiB should go on a `StreamKind::Clipboard` uni
   stream (body = one framed `Message`) instead of the control stream.
+- `ClipboardData::Png { width, height, png }` (v5): images travel PNG-compressed. The decoded
+  RGBA size is capped (64 MiB by default) before allocating.
 - `ClipboardHtml { html, alt_text }`: the `CF_HTML` fragment as UTF-8 plus a plain-text fallback.
 - `ClipboardFiles { transfer_id, items }`: files were copied on one side. Nothing is sent until the
   user pastes on the other side; then the viewer starts a `TransferOffer` with the same id
