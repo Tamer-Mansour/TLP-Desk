@@ -371,6 +371,17 @@ fn v4_samples() -> Vec<Message> {
             text: "السلام عليكم 👋 — can you see my screen? ١٢٣".into(),
             sent_unix_ms: 1_760_000_000_123,
         },
+        // --- audio ---
+        Message::AudioControl {
+            enabled: true,
+            sample_rate: 48_000,
+            channels: 2,
+        },
+        Message::AudioControl {
+            enabled: false,
+            sample_rate: 0,
+            channels: 0,
+        },
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -421,6 +432,14 @@ fn v4_variants_are_appended_in_order() {
                 sent_unix_ms: 0,
             },
             24,
+        ),
+        (
+            Message::AudioControl {
+                enabled: false,
+                sample_rate: 0,
+                channels: 0,
+            },
+            25,
         ),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];

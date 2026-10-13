@@ -113,6 +113,15 @@ pub enum Message {
         text: String,
         sent_unix_ms: u64,
     },
+
+    // --- audio (AUDIO); Opus packets travel on a `StreamKind::Audio` stream ---
+    /// Viewer -> host: start/stop system-audio streaming with this format. Host -> viewer: the
+    /// format actually used (sent before the first audio stream opens). (v4)
+    AudioControl {
+        enabled: bool,
+        sample_rate: u32,
+        channels: u8,
+    },
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -149,6 +158,7 @@ impl Message {
             M::ClipboardHtml { .. } => Permissions::CLIPBOARD,
             M::ClipboardFiles { .. } => Permissions::CLIPBOARD.union(Permissions::FILES),
             M::ChatMessage { .. } => Permissions::CHAT,
+            M::AudioControl { .. } => Permissions::AUDIO,
             // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }
