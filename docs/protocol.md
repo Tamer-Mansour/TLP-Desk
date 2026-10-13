@@ -16,6 +16,14 @@ Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-pro
 - The host enforces `Message::required_permissions()` for every message from the viewer.
 - Appended only; all v1-v3 variants keep their indices.
 
+**Implementation status (v4).** The v4 wire format is specified ahead of the features so lanes can
+work in parallel. Today the host and viewer act only on the v1-v3 messages; the transport does not
+yet write or read stream headers (video streams still carry a bare framed `VideoFrame`), and the
+host answers `AuthRequest::ReconnectTicket` with `Rejected(NotAllowed)`. The host does not call
+`required_permissions()` yet; it gates the messages it handles itself (mouse events need `CONTROL`,
+keys need `KEYBOARD`) and ignores the rest. Each feature section below
+describes the intended behaviour; check the roadmap for what has landed.
+
 ### Changes in v3
 
 - Added `Message::HostInputPriority { local_active }` (host user has taken over the input).
@@ -38,8 +46,9 @@ Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-pro
   ALPN `tlp-desk` (version-less on purpose so a version mismatch reaches the `Hello` check).
   No 0-RTT.
 - **Identity**: each install has an ECDSA P-256 key (`identity.key.pem`, PKCS#8) in
-  `%ProgramData%\tlp-desk\`, or the per-user fallback `%LOCALAPPDATA%\tlp-desk\` when ProgramData
-  is not writable. The self-signed X.509 certificate is regenerated from the key on every start;
+  `%ProgramData%\TLP-Desk\`, or the per-user fallback `%LOCALAPPDATA%\TLP-Desk\` when ProgramData
+  is not writable (Windows paths are case-insensitive, so folders created as `tlp-desk` by older
+  builds are the same folders). The self-signed X.509 certificate is regenerated from the key on every start;
   only the key matters.
 - **Fingerprint** = SHA-256 of the DER `SubjectPublicKeyInfo` of the certificate.
 - **Device ID** = `u64::from_be_bytes(fingerprint[0..8]) % 900_000_000 + 100_000_000`
