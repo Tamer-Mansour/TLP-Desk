@@ -49,6 +49,7 @@
   - [التحكم بالحاسوب البعيد](user-guide/ar/controlling.md)
   - [التبديل بين الشاشات](user-guide/ar/monitors.md)
   - [خيارات العرض](user-guide/ar/view-options.md)
+  - [لوحة الإحصاءات](user-guide/ar/stats.md)
 
 # Security
 
