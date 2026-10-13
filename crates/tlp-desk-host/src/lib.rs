@@ -35,6 +35,7 @@
 //! All methods except [`Host::start`] are non-blocking and may be called from any thread.
 #![forbid(unsafe_code)]
 
+mod adapt;
 mod cursor;
 mod input;
 mod pipeline;
@@ -61,6 +62,7 @@ use tlp_desk_proto::{ByeReason, Message, MonitorDesc, Permissions, RejectReason}
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 
+pub use adapt::{capture_cap, BitrateMode, QualityTarget};
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 
