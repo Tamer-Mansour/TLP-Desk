@@ -120,13 +120,15 @@ Get-ChildItem $out -Filter '*.svg' | Where-Object { -not $written.ContainsKey($_
 }
 
 # ---------------------------------------------------------------- licenses
-Copy-Item (Join-Path $Source 'LICENSE') (Join-Path $out 'LICENSE-tlp-icons.txt')
-Copy-Item (Join-Path $Source 'licenses\lucide.LICENSE.txt') (Join-Path $out 'LICENSE-lucide.txt')
-$tablerLicense = Join-Path $out 'LICENSE-tabler.txt'
-$licenses = '`LICENSE-tlp-icons.txt` (MIT), `LICENSE-lucide.txt` (ISC)'
+$licDir = Join-Path $out 'licenses'
+New-Item -ItemType Directory -Force $licDir | Out-Null
+Copy-Item (Join-Path $Source 'LICENSE') (Join-Path $licDir 'tlp-icons-LICENSE.txt')
+Copy-Item (Join-Path $Source 'licenses\lucide.LICENSE.txt') (Join-Path $licDir 'lucide-LICENSE.txt')
+$tablerLicense = Join-Path $licDir 'tabler-LICENSE.txt'
+$licenses = '`licenses/tlp-icons-LICENSE.txt` (MIT), `licenses/lucide-LICENSE.txt` (ISC)'
 if ($usedTabler) {
     Copy-Item (Join-Path $Source 'licenses\tabler.LICENSE.txt') $tablerLicense
-    $licenses += ', `LICENSE-tabler.txt` (MIT)'
+    $licenses += ', `licenses/tabler-LICENSE.txt` (MIT)'
 } elseif (Test-Path $tablerLicense) {
     Remove-Item $tablerLicense
 }

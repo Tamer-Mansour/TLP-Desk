@@ -7,7 +7,7 @@ SVG files by hand: change the allow-list and re-run the script.
 | --- | --- |
 | Source | [tlp-icons](https://github.com/Tamer-Mansour/tlp-icons) 0.4.1, commit `3c4650a222a8819e56399bf2612e5f4077e4e0f6` (2026-10-12) |
 | Upstream snapshots | Lucide 1.55.0 (ISC), Tabler Icons 3.49.0 (MIT; only if a row below says tabler) |
-| Licenses | `LICENSE-tlp-icons.txt` (MIT), `LICENSE-lucide.txt` (ISC) |
+| Licenses | `licenses/tlp-icons-LICENSE.txt` (MIT), `licenses/lucide-LICENSE.txt` (ISC) |
 
 Each file is the static frame of the tlp-icons icon (animations are not used in the app): a 24x24
 viewBox, `stroke="currentColor"`, stroke width 2, round caps and joins. The app embeds the files with
