@@ -649,3 +649,76 @@ async fn unknown_stream_kind_is_refused() {
         Message::RequestKeyframe
     );
 }
+
+/// Moves `total` bytes viewer -> host over `streams` parallel FileData side streams and
+/// returns MB/s (10^6 bytes per second).
+async fn bulk_throughput(total: usize, streams: usize) -> f64 {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let (h, v) = (Arc::new(h), Arc::new(v));
+    let per = total / streams;
+    let start = std::time::Instant::now();
+    let readers = tokio::spawn({
+        let h = h.clone();
+        async move {
+            let mut tasks = Vec::new();
+            for _ in 0..streams {
+                let s = h.accept_side_stream(StreamKind::FileData).await.unwrap();
+                tasks.push(tokio::spawn(async move {
+                    let mut recv = s.recv;
+                    let mut buf = vec![0u8; 1 << 20];
+                    let mut n = 0usize;
+                    while let Some(k) = recv.read(&mut buf).await.unwrap() {
+                        n += k;
+                    }
+                    n
+                }));
+            }
+            let mut n = 0;
+            for t in tasks {
+                n += t.await.unwrap();
+            }
+            n
+        }
+    });
+    let chunk = vec![0x5Au8; 1 << 20];
+    let mut writers = Vec::new();
+    for i in 0..streams {
+        let v = v.clone();
+        let chunk = chunk.clone();
+        writers.push(tokio::spawn(async move {
+            let mut s = v.open_uni(StreamKind::FileData, i as u64).await.unwrap();
+            let mut left = per;
+            while left > 0 {
+                let k = left.min(chunk.len());
+                s.write_all(&chunk[..k]).await.unwrap();
+                left -= k;
+            }
+            s.finish().unwrap();
+            let _ = s.stopped().await;
+        }));
+    }
+    for w in writers {
+        w.await.unwrap();
+    }
+    let got = timeout(Duration::from_secs(300), readers)
+        .await
+        .unwrap()
+        .unwrap();
+    let secs = start.elapsed().as_secs_f64();
+    assert_eq!(got, per * streams);
+    got as f64 / secs / 1e6
+}
+
+/// Bulk throughput on loopback (run in release: `cargo test --release -p tlp-desk-net --test
+/// session -- --ignored --nocapture bulk_side_stream_throughput`). Target: >= 1 GB/s on one
+/// stream. Ignored because it moves several GB and its result depends on the machine.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "benchmark: moves several GB over loopback"]
+async fn bulk_side_stream_throughput() {
+    const TOTAL: usize = 4 << 30;
+    let one = bulk_throughput(TOTAL, 1).await;
+    println!("loopback FileData throughput, 1 stream: {one:.0} MB/s");
+    let four = bulk_throughput(TOTAL, 4).await;
+    println!("loopback FileData throughput, 4 streams: {four:.0} MB/s");
+}
