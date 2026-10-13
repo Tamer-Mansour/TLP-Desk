@@ -31,6 +31,7 @@ mod keys;
 mod mapping;
 mod marker_shape;
 mod tracker;
+pub mod whiteboard;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
