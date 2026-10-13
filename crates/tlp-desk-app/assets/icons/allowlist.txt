@@ -1,0 +1,115 @@
+# Icons vendored from tlp-icons (https://github.com/Tamer-Mansour/tlp-icons) by scripts/vendor-icons.ps1.
+# One icon per line: <Icon variant> <tlp-icons name> <purpose...>
+# The variant must match `ui::icons::Icon` (a test checks this file against the enum).
+# Prefer Lucide geometry for a consistent look; tlp-icons originals only where Lucide has nothing.
+
+# Session / viewer
+Connect             log-in                  connect button (directional)
+Disconnect          log-out                 end a viewer session (directional)
+EndSession          unplug                  host banner: end an incoming session
+Monitor             monitor                 screens / monitor picker
+AllMonitors         layout-grid             show all monitors
+MonitorOff          monitor-off             host screen blanked
+Fullscreen          maximize                enter fullscreen
+ExitFullscreen      minimize                leave fullscreen
+FitToWindow         shrink                  scale the remote screen to the window
+ActualSize          scan                    one remote pixel per screen pixel
+ViewOnly            eye                     view-only mode
+Hidden              eye-off                 hidden / not visible
+Stats               activity                stats overlay
+Gauge               gauge                   performance
+Latency             timer                   latency overlay
+Quality             sliders-horizontal      quality settings
+Keyboard            keyboard                keyboard permission / capture
+MousePointer        mouse-pointer-2         mouse control permission
+CtrlAltDel          command                 send Ctrl+Alt+Del
+Privacy             privacy-eye-shield      privacy mode (tlp-icons original)
+Record              circle-dot              session recording
+Playback            circle-play             recording playback
+Camera              camera                  screenshot
+Whiteboard          pen-tool                whiteboard
+Chat                message-square          chat
+Send                send-horizontal         send a chat message (directional)
+Volume              volume-2                audio on
+Mute                volume-x                audio muted
+Power               power                   power / shutdown
+Restart             rotate-ccw              restart the remote PC
+WakeOnLan           zap                     Wake-on-LAN
+PortForward         arrow-right-left        TCP port forwarding
+Plug                plug                    tunnel / connection
+
+# App chrome
+Settings            settings                settings
+Language            languages               language picker
+Globe               globe                   language / network scope
+Sun                 sun                     light theme
+Moon                moon                    dark theme
+Copy                copy                    copy to clipboard
+Copied              copy-check              copied feedback
+Refresh             refresh-cw              new one-time code / refresh
+Check               check                   confirm
+Close               x                       close / dismiss
+Accept              circle-check            accept an incoming request
+Reject              circle-x                decline an incoming request
+Lock                lock                    secure / encrypted
+Unlock              lock-open               unlocked
+Shield              shield                  security
+ShieldCheck         shield-check            verified identity
+Key                 key-round               one-time code / password
+Fingerprint         fingerprint-pattern     host key fingerprint
+Hash                hash                    device ID
+Warning             triangle-alert          warning
+Error               circle-alert            error
+Info                info                    information
+Help                circle-question-mark    help
+Wifi                wifi                    wireless network
+Network             network                 LAN / network
+Lan                 ethernet-port           wired LAN
+Radar               radar                   discovering devices
+Search              search                  search
+Laptop              laptop                  this device / remote device
+Server              server                  unattended host
+DeviceInfo          cpu                     device information
+HardDrive           hard-drive              disks
+Home                house                   home screen
+User                user                    user
+Users               users                   group of users
+AddressBook         book-user               address book
+Star                star                    favorite
+Tag                 tag                     tag / group
+Bell                bell                    notifications
+Log                 scroll-text             log
+List                list                    list view
+History             rotate-ccw-clock        recent sessions
+Clock               clock                   duration
+Tray                app-window              tray / window
+Minimize            minimize-2              minimize to tray
+Menu                menu                    menu
+More                ellipsis                more actions
+Plus                plus                    add
+Minus               minus                   remove
+Save                save                    save
+
+# File transfer / clipboard
+Upload              upload                  upload a file
+Download            download                download a file
+Folder              folder                  folder
+FolderOpen          folder-open             open folder
+NewFolder           folder-plus             new folder
+File                file                    file
+Trash               trash                   delete
+Rename              pencil                  rename / edit
+Pause               pause                   pause a transfer
+Play                play                    resume a transfer
+Stop                square                  stop / cancel a transfer
+Clipboard           clipboard               clipboard sync
+
+# Navigation
+Back                arrow-left              back (directional)
+Forward             arrow-right             forward (directional)
+ChevronLeft         chevron-left            previous (directional)
+ChevronRight        chevron-right           next (directional)
+ChevronUp           chevron-up              collapse
+ChevronDown         chevron-down            expand / dropdown
+Undo                undo-2                  undo (directional)
+Redo                redo-2                  redo (directional)
