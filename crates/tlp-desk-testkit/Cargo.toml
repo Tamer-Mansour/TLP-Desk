@@ -1,0 +1,30 @@
+[package]
+name = "tlp-desk-testkit"
+description = "Dev-only test harness: fake capture/encoder/input/clipboard/audio and a host+viewer pair in one call"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+# Only ever a dev-dependency; never shipped.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tlp-desk-proto.workspace = true
+tlp-desk-crypto.workspace = true
+tlp-desk-net.workspace = true
+tlp-desk-capture.workspace = true
+tlp-desk-codec.workspace = true
+tlp-desk-input.workspace = true
+tlp-desk-host.workspace = true
+tlp-desk-viewer.workspace = true
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Resident memory of the test process for the soak/leak tests (no unsafe on our side).
+memory-stats = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
