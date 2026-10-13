@@ -101,6 +101,10 @@ pub fn permissions(p: Permissions) -> String {
         (Permissions::AUDIO, "audio"),
         (Permissions::RESTART, "restart"),
         (Permissions::PRIVACY_MODE, "privacy"),
+        (Permissions::CHAT, "chat"),
+        (Permissions::TUNNEL, "tunnel"),
+        (Permissions::WHITEBOARD, "whiteboard"),
+        (Permissions::SYSTEM, "system"),
     ];
     let v: Vec<&str> = names
         .iter()

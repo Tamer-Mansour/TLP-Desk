@@ -195,9 +195,17 @@ impl Permissions {
     pub const AUDIO: Self = Self(1 << 5);
     pub const RESTART: Self = Self(1 << 6);
     pub const PRIVACY_MODE: Self = Self(1 << 7);
+    /// Chat panel messages. (v4)
+    pub const CHAT: Self = Self(1 << 8);
+    /// TCP port forwarding through the session. (v4)
+    pub const TUNNEL: Self = Self(1 << 9);
+    /// Draw on the host screen. (v4)
+    pub const WHITEBOARD: Self = Self(1 << 10);
+    /// Ctrl+Alt+Del and lock workstation (restarting stays `RESTART`). (v4)
+    pub const SYSTEM: Self = Self(1 << 11);
 
     pub const NONE: Self = Self(0);
-    pub const ALL: Self = Self((1 << 8) - 1);
+    pub const ALL: Self = Self((1 << 12) - 1);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

@@ -150,6 +150,29 @@ fn permissions_bit_ops() {
 }
 
 #[test]
+fn permission_bits_are_stable_and_distinct() {
+    let bits = [
+        Permissions::VIEW,
+        Permissions::CONTROL,
+        Permissions::KEYBOARD,
+        Permissions::CLIPBOARD,
+        Permissions::FILES,
+        Permissions::AUDIO,
+        Permissions::RESTART,
+        Permissions::PRIVACY_MODE,
+        Permissions::CHAT,
+        Permissions::TUNNEL,
+        Permissions::WHITEBOARD,
+        Permissions::SYSTEM,
+    ];
+    for (i, b) in bits.iter().enumerate() {
+        assert_eq!(b.0, 1 << i, "bit {i} moved");
+        assert!(Permissions::ALL.contains(*b));
+    }
+    assert_eq!(Permissions::ALL.0, 0x0FFF);
+}
+
+#[test]
 fn v1_variant_indices_are_stable() {
     // v2 only appended variants; existing encodings must not change so an older peer can still
     // decode `Rejected { VersionMismatch }`.
