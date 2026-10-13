@@ -12,6 +12,7 @@
   - [Connecting](user-guide/en/connecting.md)
   - [The Accept prompt and the banner](user-guide/en/accept-prompt.md)
   - [Controlling the remote PC](user-guide/en/controlling.md)
+  - [Switching monitors](user-guide/en/monitors.md)
 
 # Security
 
