@@ -70,6 +70,7 @@ pub use privacy::{
     PrivacyCause, PrivacyFeature, PrivacyStatus, PrivacyTextFn, PrivacyViewer, ShieldFactory,
     FEATURE_NAME as PRIVACY_FEATURE,
 };
+pub use tlp_desk_input::{PrivacyScreenText, ScreenLine};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).

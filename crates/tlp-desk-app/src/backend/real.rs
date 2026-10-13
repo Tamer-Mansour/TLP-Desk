@@ -22,8 +22,8 @@ use std::time::Duration;
 
 use tlp_desk_crypto::{Fingerprint, HostKey, Identity};
 use tlp_desk_host::{
-    EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, RequestId as HostRequestId,
-    SessionId as HostSessionId,
+    EndReason as HostEnd, FeatureSet, Host, HostConfig, HostEvent, HostEvents, PrivacyFeature,
+    RequestId as HostRequestId, SessionId as HostSessionId,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
@@ -31,12 +31,14 @@ use tlp_desk_net::{
 };
 use tlp_desk_proto::{InputEvent, RejectReason};
 use tlp_desk_viewer::{
-    AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, KnownHostsStore,
-    PixelFormat, Viewer, ViewerConfig, ViewerError, ViewerEvent, ViewerEvents, ViewerSession,
+    privacy_request, AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd,
+    KnownHostsStore, PixelFormat, PrivacyViewerFeature, Viewer, ViewerConfig, ViewerError,
+    ViewerEvent, ViewerEvents, ViewerSession,
 };
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::privacy;
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
@@ -311,6 +313,12 @@ impl RealBackend {
         if let Some((ep, true)) = &endpoint {
             let host_cfg = HostConfig {
                 device_name: device_name.clone(),
+                // Privacy mode (TLP-privacy): only viewers granted PRIVACY_MODE can use it.
+                features: cfg
+                    .host
+                    .features
+                    .clone()
+                    .with(Arc::new(PrivacyFeature::new(privacy::text_fn()))),
                 ..cfg.host.clone()
             };
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
@@ -357,6 +365,7 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
+                features: FeatureSet::new().with(Arc::new(PrivacyViewerFeature)),
                 ..ViewerConfig::default()
             };
             match Viewer::new(ep.clone(), vcfg) {
@@ -494,6 +503,15 @@ impl Inner {
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 HostEvent::Feature { id, event } => {
                     tracing::debug!(session = id.0, feature = event.feature, "feature event");
+                    let session = self
+                        .state()
+                        .host_sessions
+                        .iter()
+                        .find(|(_, h)| **h == id)
+                        .map(|(k, _)| *k);
+                    if let Some(ev) = session.and_then(|s| privacy::host_event(s, &event)) {
+                        self.emit(ev);
+                    }
                 }
             }
         }
@@ -754,6 +772,9 @@ impl Inner {
                         feature = event.feature,
                         "feature event"
                     );
+                    if let Some(ev) = privacy::viewer_event(session, &event) {
+                        self.emit(ev);
+                    }
                 }
                 ViewerEvent::Ended(r) => {
                     reason = map_viewer_end(r);
@@ -853,6 +874,13 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn set_privacy_mode(&self, session: SessionId, enabled: bool) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            s.send_message(privacy_request(enabled));
         }
     }
 
