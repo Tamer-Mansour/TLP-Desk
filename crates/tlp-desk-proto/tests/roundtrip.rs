@@ -291,6 +291,67 @@ fn v4_samples() -> Vec<Message> {
             req_id: 6,
             result: Err(FsError::NotEmpty),
         },
+        // --- file transfer ---
+        Message::TransferOffer(TransferOffer {
+            id: 9,
+            direction: TransferDirection::Upload,
+            source_dir: r"C:\Users\مستخدم\Documents".into(),
+            dest_dir: r"D:\وارد".into(),
+            items: vec![
+                TransferItem {
+                    rel_path: "مجلد".into(),
+                    size: 0,
+                    modified_unix_ms: 1,
+                    is_dir: true,
+                },
+                TransferItem {
+                    rel_path: "مجلد/ملف.bin".into(),
+                    size: 5 << 30,
+                    modified_unix_ms: 1_760_000_000_000,
+                    is_dir: false,
+                },
+            ],
+            total_bytes: 5 << 30,
+            resume: vec![],
+        }),
+        Message::TransferOffer(TransferOffer {
+            id: 10,
+            direction: TransferDirection::Download,
+            source_dir: r"C:\".into(),
+            dest_dir: String::new(),
+            items: vec![],
+            total_bytes: 0,
+            resume: vec![(1, 4096)],
+        }),
+        Message::TransferAccept {
+            id: 9,
+            resume: vec![(1, 1 << 20), (u32::MAX, u64::MAX)],
+        },
+        Message::TransferReject {
+            id: 9,
+            error: FsError::Declined,
+        },
+        Message::TransferProgress {
+            id: 9,
+            bytes_done: 3 << 30,
+        },
+        Message::TransferCancel { id: 9 },
+        Message::TransferDone {
+            id: 9,
+            item: 1,
+            blake3: [0xAB; 32],
+        },
+        Message::TransferError {
+            id: 9,
+            item: Some(1),
+            error: FsError::HashMismatch,
+        },
+        Message::TransferError {
+            id: 9,
+            item: None,
+            error: FsError::NoSpace,
+        },
+        // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
 
@@ -317,6 +378,16 @@ fn v4_variants_are_appended_in_order() {
             },
             14,
         ),
+        (Message::TransferCancel { id: 0 }, 19),
+        (
+            Message::TransferError {
+                id: 0,
+                item: None,
+                error: FsError::Cancelled,
+            },
+            21,
+        ),
+        // FEATURE HOOK: pin the index of every newly appended message here.
     ];
     for (m, i) in expected {
         assert_eq!(index(m), *i, "{m:?}");

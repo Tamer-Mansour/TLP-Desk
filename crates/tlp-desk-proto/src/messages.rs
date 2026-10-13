@@ -52,6 +52,43 @@ pub enum Message {
         req_id: u64,
         result: Result<FsReply, FsError>,
     },
+
+    // --- file transfer (FILES); bulk bytes travel on `StreamKind::FileData` streams ---
+    /// Viewer -> host: start a transfer (see [`TransferOffer`]). (v4)
+    TransferOffer(TransferOffer),
+    /// Host -> viewer: the offer is accepted. For uploads `resume` lists `(item index, byte
+    /// offset)` pairs the host already has (partial files); the sender starts there. (v4)
+    TransferAccept {
+        id: u64,
+        resume: Vec<(u32, u64)>,
+    },
+    /// Host -> viewer: the offer is refused (user declined, no permission, path error). (v4)
+    TransferReject {
+        id: u64,
+        error: FsError,
+    },
+    /// Receiver -> sender: bytes durably written so far (at most ~4 per second). (v4)
+    TransferProgress {
+        id: u64,
+        bytes_done: u64,
+    },
+    /// Either direction: abort the transfer; both sides stop and reset its data streams. (v4)
+    TransferCancel {
+        id: u64,
+    },
+    /// Sender -> receiver: every byte of item `item` was written to its data stream(s);
+    /// `blake3` is the hash of the complete file for end-to-end verification. (v4)
+    TransferDone {
+        id: u64,
+        item: u32,
+        blake3: [u8; 32],
+    },
+    /// Either direction: the transfer (`item: None`) or one item of it failed. (v4)
+    TransferError {
+        id: u64,
+        item: Option<u32>,
+        error: FsError,
+    },
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -75,7 +112,16 @@ impl Message {
             M::RequestKeyframe | M::SelectMonitor { .. } => Permissions::VIEW,
             M::InputEvent(_) => Permissions::CONTROL,
             M::ClipboardData(_) => Permissions::CLIPBOARD,
-            M::FileChunk(_) | M::FsRequest { .. } | M::FsResponse { .. } => Permissions::FILES,
+            M::FileChunk(_)
+            | M::FsRequest { .. }
+            | M::FsResponse { .. }
+            | M::TransferOffer(_)
+            | M::TransferAccept { .. }
+            | M::TransferReject { .. }
+            | M::TransferProgress { .. }
+            | M::TransferCancel { .. }
+            | M::TransferDone { .. }
+            | M::TransferError { .. } => Permissions::FILES,
         }
     }
 }
@@ -382,4 +428,46 @@ pub enum ByeReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bye {
     pub reason: ByeReason,
+}
+
+/// Direction of a transfer, from the viewer's point of view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransferDirection {
+    /// Viewer -> host: the viewer sends the bytes.
+    Upload,
+    /// Host -> viewer: the host sends the bytes.
+    Download,
+}
+
+/// One file or directory in a transfer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferItem {
+    /// Path relative to the transfer's `source_dir` / `dest_dir`, `/`-separated, UTF-8. Must
+    /// not be absolute or contain `..` (the receiver rejects it with `InvalidPath`).
+    pub rel_path: String,
+    /// Bytes (0 for directories).
+    pub size: u64,
+    /// Milliseconds since the Unix epoch; the receiver restores it.
+    pub modified_unix_ms: i64,
+    pub is_dir: bool,
+}
+
+/// A transfer request, always sent by the viewer. Data then flows from the sender (viewer for
+/// `Upload`, host for `Download`) on one or more `StreamKind::FileData` uni streams with
+/// stream id = the transfer id, each body starting with a [`crate::FileDataHeader`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferOffer {
+    /// Unique per session and viewer; also the side-stream id.
+    pub id: u64,
+    pub direction: TransferDirection,
+    /// Directory on the sending side that `items[].rel_path` are relative to.
+    pub source_dir: String,
+    /// Directory on the receiving side to write into.
+    pub dest_dir: String,
+    pub items: Vec<TransferItem>,
+    /// Sum of `items[].size`.
+    pub total_bytes: u64,
+    /// `Download` only: `(item index, byte offset)` the viewer already has (resume). For
+    /// uploads the host answers with offsets in `Message::TransferAccept::resume` instead.
+    pub resume: Vec<(u32, u64)>,
 }
