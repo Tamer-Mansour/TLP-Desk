@@ -16,6 +16,8 @@
 //!   are refused before any packet is sent.
 //! * **Features.** Register feature modules in [`ViewerConfig::features`]; each session starts
 //!   them and routes the host's feature messages to them ([`ViewerEvent::Feature`] for the UI).
+//! * **Recording.** [`Recording::start`] writes what a session receives to an MP4 file;
+//!   [`recording::Player`] plays such files back (see the [`recording`] module).
 //! * **Threads.** Decoding runs on a dedicated std thread; networking on tokio tasks. Cancel a
 //!   pending [`Viewer::connect`] by dropping its future (or aborting its task).
 #![forbid(unsafe_code)]
@@ -35,6 +37,7 @@ use tlp_desk_net::{AllowList, DiscoveredDevice, Discovery, Endpoint, NetError, P
 use tlp_desk_proto::RejectReason;
 
 pub use frame::{DecodedFrame, FrameSlot, PixelFormat};
+pub use recording::{Recording, RecordingConfig, RecordingSummary};
 pub use session::{EndReason, ViewerEvent, ViewerEvents, ViewerSession, ViewerStats};
 pub use tlp_desk_net::{
     AuthMethod, AwaitingAcceptFn, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo,
@@ -196,6 +199,21 @@ pub enum ViewerError {
     KnownHosts(#[from] CryptoError),
     #[error(transparent)]
     Net(NetError),
+    /// Reading or writing a recording file failed.
+    #[error("recording file: {0}")]
+    RecordingIo(#[source] std::io::Error),
+    /// Not enough free disk space to (keep) recording.
+    #[error("only {available} bytes free on the recording disk, {needed} needed")]
+    DiskFull { available: u64, needed: u64 },
+    /// A recording file is damaged or not one of ours.
+    #[error("unusable recording: {0}")]
+    BadRecording(&'static str),
+    /// The received H.264 stream could not be parsed for recording.
+    #[error("unrecordable video: {0}")]
+    BadVideo(&'static str),
+    /// The video decoder failed (playback).
+    #[error("video decoder: {0}")]
+    Decoder(String),
 }
 
 impl ViewerError {
