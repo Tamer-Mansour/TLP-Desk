@@ -477,7 +477,7 @@ fn player_seeks_from_the_nearest_keyframe() {
     // 1.2 s shows frame 35 (1.169 s), decoded starting from the keyframe at frame 30.
     player.seek(Duration::from_millis(1200));
     let mut got = None;
-    wait_for("seeked frame", || {
+    wait_for("frame after seeking", || {
         got = player.take_frame();
         got.is_some()
     });
