@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, RichText};
 
+use super::icons::{self, Icon};
 use super::{theme, widgets};
 use crate::app::{App, Screen};
 use crate::i18n::{DigitStyle, Lang, S};
@@ -24,7 +25,8 @@ impl App {
             .show(ui, |ui| {
                 theme::column(ui, tx.rtl(), |ui| {
                     theme::row(ui, tx.rtl(), |ui| {
-                        if widgets::chevron_button(ui, tx, tx.t(S::Back), false, false, true)
+                        if ui
+                            .add(icons::icon_text_button(tx, Icon::Back, tx.t(S::Back)))
                             .clicked()
                         {
                             back = true;
@@ -36,7 +38,7 @@ impl App {
 
                     theme::card(ui, |ui| {
                         theme::column(ui, tx.rtl(), |ui| {
-                            ui.label(RichText::new(tx.t(S::Appearance)).heading());
+                            widgets::icon_heading(ui, tx, Icon::Language, tx.t(S::Appearance));
                             ui.add_space(6.0);
                             ui.label(theme::caption(ui, tx.t(S::Language)));
                             theme::row(ui, tx.rtl(), |ui| {
@@ -67,7 +69,12 @@ impl App {
                     ui.add_space(12.0);
                     theme::card(ui, |ui| {
                         theme::column(ui, tx.rtl(), |ui| {
-                            ui.label(RichText::new(tx.t(S::ThisDeviceSettings)).heading());
+                            widgets::icon_heading(
+                                ui,
+                                tx,
+                                Icon::Laptop,
+                                tx.t(S::ThisDeviceSettings),
+                            );
                             ui.add_space(6.0);
                             ui.label(theme::caption(ui, tx.t(S::DeviceName)));
                             let resp = theme::row(ui, tx.rtl(), |ui| {
@@ -86,7 +93,15 @@ impl App {
                                 let changed = self.name_edit.trim() != self.local.device_name
                                     && !self.name_edit.trim().is_empty();
                                 if ui
-                                    .add_enabled(changed, theme::primary_button(ui, tx.t(S::Save)))
+                                    .add_enabled(
+                                        changed,
+                                        widgets::primary_icon_button(
+                                            ui,
+                                            tx,
+                                            Icon::Save,
+                                            tx.t(S::Save),
+                                        ),
+                                    )
                                     .clicked()
                                     || (enter && changed)
                                 {
