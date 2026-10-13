@@ -1,10 +1,10 @@
-﻿; tlp-desk - single setup.exe (Inno Setup 6.6+).
+﻿; TLP-Desk - single setup.exe (Inno Setup 6.6+).
 ; Build with installer\build-setup.ps1, which passes /DMyAppVersion=<workspace version>
 ; and /DStageDir=<folder with the exes, README.txt and licenses\>.
 ;
-; Upgrade-safe: AppId is fixed forever (never change it). Running tlp-desk is closed through
-; the Restart Manager. Uninstall keeps %ProgramData%\tlp-desk (identity key = device ID) and
-; %APPDATA%\tlp-desk (settings) on purpose: a reinstall keeps the same 9-digit device ID.
+; Upgrade-safe: AppId is fixed forever (never change it). Running TLP-Desk is closed through
+; the Restart Manager. Uninstall keeps %ProgramData%\TLP-Desk (identity key = device ID) and
+; %APPDATA%\TLP-Desk (settings) on purpose: a reinstall keeps the same 9-digit device ID.
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
@@ -12,11 +12,11 @@
 #ifndef StageDir
   #define StageDir "..\dist\setup-stage"
 #endif
-#define MyAppName "tlp-desk"
-#define MyAppExe "tlp-desk.exe"
-#define FwQuic "tlp-desk (QUIC)"
-#define FwDisc "tlp-desk (discovery)"
-#define FwMdns "tlp-desk (mDNS)"
+#define MyAppName "TLP-Desk"
+#define MyAppExe "TLP-Desk.exe"
+#define FwQuic "TLP-Desk (QUIC)"
+#define FwDisc "TLP-Desk (discovery)"
+#define FwMdns "TLP-Desk (mDNS)"
 
 [Setup]
 AppId={{2BD625D0-C78E-4CFB-BFEA-524A00171A2A}
@@ -39,7 +39,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\dist
 OutputBaseFilename={#MyAppName}-{#MyAppVersion}-setup
-SetupIconFile=..\crates\tlp-desk-app\assets\icon\tlp-desk.ico
+SetupIconFile=..\crates\tlp-desk-app\assets\icon\TLP-Desk.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
 UninstallDisplayName={#MyAppName}
 WizardStyle=modern dynamic
@@ -67,8 +67,8 @@ ar.FirewallStatus=جارٍ إضافة قواعد جدار حماية ويندو�
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#StageDir}\tlp-desk.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#StageDir}\tlp-desk-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\TLP-Desk.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\TLP-Desk-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#StageDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
 
@@ -77,15 +77,19 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Comment: "{c
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Comment: "{cm:AppComment}"; Tasks: desktopicon
 
 [Run]
-; Windows Firewall: inbound UDP for tlp-desk.exe on Private + Domain profiles only (never Public).
+; Windows Firewall: inbound UDP for TLP-Desk.exe on Private + Domain profiles only (never Public).
 ; Delete first so upgrades/reinstalls never accumulate duplicates (a missing rule is harmless).
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#FwQuic}"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#FwDisc}"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#FwMdns}"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwQuic}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=47400 profile=private,domain enable=yes description=""tlp-desk LAN remote desktop connections (QUIC/TLS 1.3)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwQuic}"" dir=in action=allow program=""{app}\tlp-desk-cli.exe"" protocol=UDP localport=47400 profile=private,domain enable=yes description=""tlp-desk CLI LAN remote desktop connections (QUIC/TLS 1.3)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwDisc}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=47401 profile=private,domain enable=yes description=""tlp-desk LAN device discovery (broadcast)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwMdns}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=5353 profile=private,domain enable=yes description=""tlp-desk LAN device discovery (mDNS)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+; Rules named by builds before the TLP-Desk rename (harmless no-op if already gone).
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""tlp-desk (QUIC)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""tlp-desk (discovery)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""tlp-desk (mDNS)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwQuic}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=47400 profile=private,domain enable=yes description=""TLP-Desk LAN remote desktop connections (QUIC/TLS 1.3)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwQuic}"" dir=in action=allow program=""{app}\TLP-Desk-cli.exe"" protocol=UDP localport=47400 profile=private,domain enable=yes description=""TLP-Desk CLI LAN remote desktop connections (QUIC/TLS 1.3)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwDisc}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=47401 profile=private,domain enable=yes description=""TLP-Desk LAN device discovery (broadcast)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwMdns}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=5353 profile=private,domain enable=yes description=""TLP-Desk LAN device discovery (mDNS)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
 Filename: "{app}\{#MyAppExe}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -93,4 +97,4 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#FwDisc}"""; Flags: runhidden; RunOnceId: "DelFwDisc"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#FwMdns}"""; Flags: runhidden; RunOnceId: "DelFwMdns"
 
-; Intentionally no [UninstallDelete] for {commonappdata}\tlp-desk: keeps the device identity.
+; Intentionally no [UninstallDelete] for {commonappdata}\TLP-Desk: keeps the device identity.

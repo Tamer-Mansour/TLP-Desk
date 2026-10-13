@@ -1,4 +1,4 @@
-//! Headless tlp-desk CLI for scripts and agents: print identity, list LAN devices, host a
+//! Headless TLP-Desk CLI for scripts and agents: print identity, list LAN devices, host a
 //! session (real capture/encode/input), or connect as a viewer and report statistics.
 #![forbid(unsafe_code)]
 
@@ -22,7 +22,7 @@ use tlp_desk_viewer::{
 };
 
 #[derive(Parser)]
-#[command(name = "tlp-desk-cli", version, about = text::ABOUT)]
+#[command(name = "TLP-Desk-cli", version, about = text::ABOUT)]
 struct Cli {
     /// Directory holding the identity key and known hosts (default: the app's data dir).
     #[arg(long, global = true)]
@@ -38,7 +38,7 @@ struct Cli {
 enum Cmd {
     /// Print this device's ID and key fingerprint.
     Id,
-    /// Discover tlp-desk devices on the LAN.
+    /// Discover TLP-Desk devices on the LAN.
     List {
         #[arg(long, default_value_t = 5)]
         seconds: u64,

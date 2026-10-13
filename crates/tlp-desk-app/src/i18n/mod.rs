@@ -96,7 +96,7 @@ macro_rules! strings {
 
 strings! {
     // Brand: kept in Latin script in both languages.
-    AppTitle => "tlp-desk", "tlp-desk";
+    AppTitle => "TLP-Desk", "TLP-Desk";
     LanguageNameAr => "Arabic", "العربية";
     Language => "Language", "اللغة";
 
@@ -157,7 +157,7 @@ strings! {
     Decline => "Decline", "رفض";
     HostBanner => "{name} is connected to this device", "{name} متصل بهذا الجهاز";
     EndSession => "End session", "إنهاء الجلسة";
-    HostPortInUse => "Port {port} is already in use, probably by another running tlp-desk. This device cannot accept connections, but you can still connect to other devices.", "المنفذ {port} مستخدم بالفعل، وربما يعمل tlp-desk مسبقاً. لا يستطيع هذا الجهاز استقبال اتصالات، لكن ما زال بإمكانك الاتصال بأجهزة أخرى.";
+    HostPortInUse => "Port {port} is already in use, probably by another running TLP-Desk. This device cannot accept connections, but you can still connect to other devices.", "المنفذ {port} مستخدم بالفعل، وربما يعمل TLP-Desk مسبقاً. لا يستطيع هذا الجهاز استقبال اتصالات، لكن ما زال بإمكانك الاتصال بأجهزة أخرى.";
     HostUnavailable => "This device cannot accept connections: {detail}", "لا يستطيع هذا الجهاز استقبال اتصالات: {detail}";
     NoNetwork => "Networking is unavailable: {detail}", "الشبكة غير متاحة: {detail}";
 
@@ -203,7 +203,7 @@ strings! {
     DigitsHint => "IDs, codes and addresses are always copied with 0-9 digits.", "تُنسخ المعرّفات والرموز والعناوين دائماً بالأرقام \u{2066}0-9\u{2069}.";
     DeviceNameHint => "Other devices on the network see this name.", "تظهر هذه التسمية للأجهزة الأخرى على الشبكة.";
     Save => "Save", "حفظ";
-    DeviceNameRestart => "Restart tlp-desk to announce the new name on the network.", "أعد تشغيل tlp-desk لإعلان الاسم الجديد على الشبكة.";
+    DeviceNameRestart => "Restart TLP-Desk to announce the new name on the network.", "أعد تشغيل TLP-Desk لإعلان الاسم الجديد على الشبكة.";
     Appearance => "Language and display", "اللغة والعرض";
     ThisDeviceSettings => "This device", "هذا الجهاز";
 }

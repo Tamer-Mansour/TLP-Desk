@@ -9,7 +9,7 @@ use tlp_desk_net::{AuthKind, DiscoveredDevice, PeerInfo};
 use tlp_desk_proto::{Permissions, RejectReason};
 use tlp_desk_viewer::{EndReason as ViewerEnd, MonitorDesc, ViewerStats};
 
-pub const ABOUT: &str = "Headless tlp-desk client for scripts and testing (LAN only)";
+pub const ABOUT: &str = "Headless TLP-Desk client for scripts and testing (LAN only)";
 pub const WAITING_FOR_ACCEPT: &str = "Waiting for the host user to accept...";
 pub const PROMPT_HINT: &str = "Type y + Enter to accept, anything else to reject.";
 pub const STOPPING: &str = "Stopping.";

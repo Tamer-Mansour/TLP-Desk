@@ -1,4 +1,4 @@
-"""Generate the tlp-desk application icon and installer wizard images.
+"""Generate the TLP-Desk application icon and installer wizard images.
 
 Original design (not derived from any other product): a rounded teal tile carrying two
 overlapping screens -- a faint "remote" screen behind and a solid "local" monitor in front
@@ -10,8 +10,8 @@ Reproduce (needs Pillow):
     .venv\\Scripts\\python scripts\\make_icon.py
 
 Outputs:
-    crates/tlp-desk-app/assets/icon/tlp-desk.ico        16..256 px, multi-resolution
-    crates/tlp-desk-app/assets/icon/tlp-desk-{256,512,1024}.png
+    crates/tlp-desk-app/assets/icon/TLP-Desk.ico        16..256 px, multi-resolution
+    crates/tlp-desk-app/assets/icon/TLP-Desk-{256,512,1024}.png
     installer/assets/wizard-*.png, wizard-small-*.png  Inno Setup wizard images
 """
 
@@ -190,9 +190,9 @@ def main() -> None:
     os.makedirs(ICON_DIR, exist_ok=True)
     os.makedirs(WIZ_DIR, exist_ok=True)
     images = [render_icon(n) for n in ICO_SIZES]
-    write_ico(os.path.join(ICON_DIR, "tlp-desk.ico"), images)
+    write_ico(os.path.join(ICON_DIR, "TLP-Desk.ico"), images)
     for n in (256, 512, 1024):
-        render_icon(n).save(os.path.join(ICON_DIR, f"tlp-desk-{n}.png"), optimize=True)
+        render_icon(n).save(os.path.join(ICON_DIR, f"TLP-Desk-{n}.png"), optimize=True)
     # Inno Setup 6 recommended wizard image sizes (100% .. 250% DPI).
     for scale, (w, h) in zip((100, 125, 150, 175, 200, 225, 250),
                              ((164, 314), (192, 386), (246, 459), (273, 556), (328, 628), (355, 691), (410, 797))):

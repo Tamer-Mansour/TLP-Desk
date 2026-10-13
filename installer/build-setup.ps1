@@ -1,5 +1,5 @@
 # Builds the single Windows installer:
-#   dist\tlp-desk-<version>-setup.exe   (everything in one file; Arabic + English wizard)
+#   dist\TLP-Desk-<version>-setup.exe   (everything in one file; Arabic + English wizard)
 #   dist\SHA256SUMS.txt                 (line for the setup exe added/updated)
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File installer\build-setup.ps1
 # Needs Inno Setup 6.6+ (free):
@@ -24,11 +24,11 @@ $stage = Join-Path $Dist 'setup-stage'
 New-PayloadStage -Stage $stage -ReadmeSource (Join-Path $PSScriptRoot 'README-setup.txt')
 
 Write-Host "==> $iscc" -ForegroundColor Cyan
-& $iscc /Q "/DMyAppVersion=$version" "/DStageDir=$stage" (Join-Path $PSScriptRoot 'tlp-desk.iss')
+& $iscc /Q "/DMyAppVersion=$version" "/DStageDir=$stage" (Join-Path $PSScriptRoot 'TLP-Desk.iss')
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
 Remove-Item -Recurse -Force $stage
 
-$setup = Join-Path $Dist "tlp-desk-$version-setup.exe"
+$setup = Join-Path $Dist "TLP-Desk-$version-setup.exe"
 if (-not (Test-Path $setup)) { throw "expected $setup" }
 $hash = Update-Sha256Sums $setup
 $size = (Get-Item $setup).Length

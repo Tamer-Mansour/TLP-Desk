@@ -1,13 +1,13 @@
 [package]
 name = "tlp-desk-cli"
-description = "Headless tlp-desk CLI"
+description = "Headless TLP-Desk CLI"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "tlp-desk-cli"
+name = "TLP-Desk-cli"
 path = "src/main.rs"
 
 [dependencies]

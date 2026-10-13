@@ -1,13 +1,13 @@
-tlp-desk — portable (Windows 10/11 x64)
+TLP-Desk — portable (Windows 10/11 x64)
 =======================================
 
-tlp-desk is a free remote desktop app for your LOCAL NETWORK only: no cloud, no relay
+TLP-Desk is a free remote desktop app for your LOCAL NETWORK only: no cloud, no relay
 server, no account, no telemetry. It works with the internet unplugged.
 
 HOW TO RUN
   1. Unzip this folder anywhere (USB stick, Desktop...). No installation needed.
-  2. Run tlp-desk.exe on both PCs.
-  3. The first time, Windows Firewall asks whether to allow tlp-desk. Tick
+  2. Run TLP-Desk.exe on both PCs.
+  3. The first time, Windows Firewall asks whether to allow TLP-Desk. Tick
      "Private networks" (home/office) and click Allow. Do NOT allow it on Public networks.
      If you clicked Cancel by mistake: Windows Security > Firewall > Allow an app.
   4. Both PCs must be on the same LAN / Wi-Fi, and that network should be set to "Private"
@@ -28,32 +28,32 @@ CONNECTING
   - Leave the code field empty: the other side sees an Accept / Decline prompt.
     Or type the one-time code: no prompt needed. The code changes after each use.
   - Connecting by ID is checked cryptographically: the PC must own that ID. If a PC you
-    connected to before suddenly shows a different key, tlp-desk warns you loudly. Only
+    connected to before suddenly shows a different key, TLP-Desk warns you loudly. Only
     continue if you know that PC was reinstalled.
-  - While someone is connected to your PC, a coloured banner at the top of the tlp-desk
+  - While someone is connected to your PC, a coloured banner at the top of the TLP-Desk
     window says who it is (the window comes to the front when they connect). Click
     "End session" to disconnect them at any time.
 
 COMMAND LINE (optional)
-  tlp-desk.exe --connect 192.168.1.20 --code 123456   connect at start
-  tlp-desk.exe --lang ar                               Arabic interface
-  tlp-desk-cli.exe --help                              headless tool for scripts
+  TLP-Desk.exe --connect 192.168.1.20 --code 123456   connect at start
+  TLP-Desk.exe --lang ar                               Arabic interface
+  TLP-Desk-cli.exe --help                              headless tool for scripts
 
-Settings: %APPDATA%\tlp-desk\settings.json
-Identity key and known hosts: %ProgramData%\tlp-desk\ (or %LOCALAPPDATA%\tlp-desk\)
+Settings: %APPDATA%\TLP-Desk\settings.json
+Identity key and known hosts: %ProgramData%\TLP-Desk\ (or %LOCALAPPDATA%\TLP-Desk\)
 Fonts: see the licenses folder (SIL Open Font License, Ubuntu Font Licence, MIT, Hack).
 
 
-tlp-desk — نسخة محمولة (ويندوز 10/11، 64 بت)
+TLP-Desk — نسخة محمولة (ويندوز 10/11، 64 بت)
 =============================================
 
-tlp-desk تطبيق مجاني للتحكم بالحاسوب عن بُعد داخل شبكتك المحلية فقط: بلا سحابة،
+TLP-Desk تطبيق مجاني للتحكم بالحاسوب عن بُعد داخل شبكتك المحلية فقط: بلا سحابة،
 بلا خادم وسيط، بلا حساب، وبلا إرسال أي بيانات استخدام. يعمل حتى مع فصل الإنترنت.
 
 طريقة التشغيل
   ١. فكّ ضغط هذا المجلد في أي مكان (ذاكرة USB، سطح المكتب...). لا حاجة للتثبيت.
-  ٢. شغّل tlp-desk.exe على الحاسوبين.
-  ٣. في أول تشغيل يسألك جدار حماية ويندوز عن السماح لـ tlp-desk. اختر
+  ٢. شغّل TLP-Desk.exe على الحاسوبين.
+  ٣. في أول تشغيل يسألك جدار حماية ويندوز عن السماح لـ TLP-Desk. اختر
      «الشبكات الخاصة» (المنزل/المكتب) ثم «سماح». لا تسمح به على الشبكات العامة.
      إن ضغطت «إلغاء» بالخطأ: أمان ويندوز > جدار الحماية > السماح لتطبيق.
   ٤. يجب أن يكون الحاسوبان على نفس الشبكة المحلية أو الواي فاي، وأن تكون الشبكة
@@ -73,15 +73,15 @@ tlp-desk تطبيق مجاني للتحكم بالحاسوب عن بُعد دا�
   - اترك خانة الرمز فارغة: يظهر للطرف الآخر طلب «قبول / رفض».
     أو اكتب الرمز لمرة واحدة فلا حاجة للموافقة. يتغيّر الرمز بعد كل استخدام.
   - الاتصال بالمعرّف مُتحقَّق منه تشفيرياً: يجب أن يملك الحاسوب ذلك المعرّف فعلاً.
-    إذا قدّم حاسوب اتصلت به سابقاً مفتاحاً مختلفاً فجأة، يحذّرك tlp-desk بوضوح.
+    إذا قدّم حاسوب اتصلت به سابقاً مفتاحاً مختلفاً فجأة، يحذّرك TLP-Desk بوضوح.
     لا تتابع إلا إذا كنت تعلم أن ذلك الحاسوب أُعيد تثبيته.
-  - ما دام أحد متصلاً بحاسوبك يظهر شريط ملوّن أعلى نافذة tlp-desk يبيّن من هو
+  - ما دام أحد متصلاً بحاسوبك يظهر شريط ملوّن أعلى نافذة TLP-Desk يبيّن من هو
     (وتظهر النافذة في المقدمة عند اتصاله). اضغط «إنهاء الجلسة»
     لقطع اتصاله في أي وقت.
 
 سطر الأوامر (اختياري)
-  tlp-desk.exe --connect 192.168.1.20 --code 123456   الاتصال عند البدء
-  tlp-desk.exe --lang ar                               الواجهة بالعربية
-  tlp-desk-cli.exe --help                              أداة بلا واجهة للبرامج النصية
+  TLP-Desk.exe --connect 192.168.1.20 --code 123456   الاتصال عند البدء
+  TLP-Desk.exe --lang ar                               الواجهة بالعربية
+  TLP-Desk-cli.exe --help                              أداة بلا واجهة للبرامج النصية
 
 الخطوط المضمّنة: راجع مجلد licenses.

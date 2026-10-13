@@ -1,4 +1,4 @@
-//! tlp-desk GUI library: the egui app, the backend boundary and i18n. The `tlp-desk` binary
+//! TLP-Desk GUI library: the egui app, the backend boundary and i18n. The `TLP-Desk` binary
 //! (`main.rs`) wires it to a backend implementation.
 #![forbid(unsafe_code)]
 

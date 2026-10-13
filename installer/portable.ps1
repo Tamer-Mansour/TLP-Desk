@@ -1,5 +1,5 @@
 # Builds the portable package:
-#   dist\tlp-desk-<version>-win-x64-portable.zip   (tlp-desk.exe, tlp-desk-cli.exe, README.txt, licenses\)
+#   dist\TLP-Desk-<version>-win-x64-portable.zip   (TLP-Desk.exe, TLP-Desk-cli.exe, README.txt, licenses\)
 #   dist\SHA256SUMS.txt                            (line for the zip added/updated)
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File installer\portable.ps1
 # Works offline (uses only the local cargo registry cache). The exe icon is embedded by build.rs.
@@ -8,7 +8,7 @@
 Invoke-ReleaseBuild
 $version = Get-WorkspaceVersion
 
-$name = "tlp-desk-$version-win-x64-portable"
+$name = "TLP-Desk-$version-win-x64-portable"
 $stage = Join-Path $Dist $name
 New-PayloadStage -Stage $stage -ReadmeSource (Join-Path $PSScriptRoot 'README-portable.txt')
 

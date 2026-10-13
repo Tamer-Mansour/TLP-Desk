@@ -1,6 +1,6 @@
 [package]
 name = "tlp-desk-app"
-description = "tlp-desk GUI application (host + viewer)"
+description = "TLP-Desk GUI application (host + viewer)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -32,5 +32,5 @@ tempfile = "3"
 path = "src/lib.rs"
 
 [[bin]]
-name = "tlp-desk"
+name = "TLP-Desk"
 path = "src/main.rs"

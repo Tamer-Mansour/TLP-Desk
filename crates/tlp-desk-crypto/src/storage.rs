@@ -1,12 +1,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Storage folder name. On Windows the product name `TLP-Desk`; paths there are
+/// case-insensitive, so this is the same folder older builds created as `tlp-desk` and the
+/// existing identity key (= device ID) is kept. Other OSes keep the conventional lowercase name.
+#[cfg(windows)]
+const APP_DIR: &str = "TLP-Desk";
+#[cfg(not(windows))]
 const APP_DIR: &str = "tlp-desk";
 
 /// Default directory for identity and trust files.
 ///
-/// Windows: `%ProgramData%\tlp-desk` when it exists-and-is-writable or can be created, else
-/// `%LOCALAPPDATA%\tlp-desk` (attended, non-admin runs). Other OSes: `/var/lib/tlp-desk` if
+/// Windows: `%ProgramData%\TLP-Desk` when it exists-and-is-writable or can be created, else
+/// `%LOCALAPPDATA%\TLP-Desk` (attended, non-admin runs). Other OSes: `/var/lib/tlp-desk` if
 /// writable, else `$XDG_DATA_HOME/tlp-desk` or `~/.local/share/tlp-desk`.
 ///
 /// The returned directory may not exist yet; [`crate::Identity::load_or_generate`] creates it.

@@ -111,7 +111,7 @@ BEGIN
       VALUE "InternalName", "{orig}"
       VALUE "LegalCopyright", "MIT OR Apache-2.0"
       VALUE "OriginalFilename", "{orig}"
-      VALUE "ProductName", "tlp-desk"
+      VALUE "ProductName", "TLP-Desk"
       VALUE "ProductVersion", "{version}"
     END
   END

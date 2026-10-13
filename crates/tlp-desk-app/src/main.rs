@@ -1,4 +1,4 @@
-//! tlp-desk: single binary acting as both host and viewer.
+//! TLP-Desk: single binary acting as both host and viewer.
 //!
 //! Command line (all optional):
 //! * `--lang en|ar` — override the UI language for this run;
@@ -23,7 +23,7 @@ use tlp_desk_app::ui;
 
 /// Window/taskbar icon: the same artwork as the exe icon (scripts/make_icon.py).
 fn window_icon() -> eframe::egui::IconData {
-    eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon/tlp-desk-256.png"))
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon/TLP-Desk-256.png"))
         .unwrap_or_else(|_| ui::theme::app_icon())
 }
 
@@ -86,7 +86,7 @@ fn main() -> anyhow::Result<()> {
 
     let Args { start, fake, port } = args;
     eframe::run_native(
-        "tlp-desk",
+        "TLP-Desk",
         options,
         Box::new(move |cc| {
             let ctx = cc.egui_ctx.clone();

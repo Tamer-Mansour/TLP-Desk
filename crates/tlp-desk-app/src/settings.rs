@@ -1,7 +1,7 @@
-//! Small per-user UI settings file: `%APPDATA%\tlp-desk\settings.json`.
+//! Small per-user UI settings file: `%APPDATA%\TLP-Desk\settings.json`.
 //!
 //! Only UI preferences live here (language, digit style). Keys and security settings live under
-//! `%ProgramData%\tlp-desk\` and are owned by the crypto/host crates.
+//! `%ProgramData%\TLP-Desk\` and are owned by the crypto/host crates.
 
 use std::path::PathBuf;
 
@@ -19,9 +19,13 @@ pub struct Settings {
     pub device_name: Option<String>,
 }
 
+/// Settings folder name under `%APPDATA%`. Windows paths are case-insensitive, so this is the
+/// same folder older builds created as `tlp-desk` (existing settings are kept).
+const APP_DIR: &str = "TLP-Desk";
+
 fn path() -> Option<PathBuf> {
     let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
-    Some(base.join("tlp-desk").join("settings.json"))
+    Some(base.join(APP_DIR).join("settings.json"))
 }
 
 impl Settings {

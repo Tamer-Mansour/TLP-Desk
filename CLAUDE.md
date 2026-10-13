@@ -1,10 +1,24 @@
-# tlp-desk — Project Rules for Claude Code
+# TLP-Desk — Project Rules for Claude Code
 
-tlp-desk is a free, open-source, **LAN-only** remote desktop app (AnyDesk-style) written in pure Rust.
+TLP-Desk is a free, open-source, **LAN-only** remote desktop app (AnyDesk-style) written in pure Rust.
 It works 100% offline inside a local network: no cloud, no relay server, no account, no telemetry.
 One single binary acts as both **host** (being controlled) and **viewer** (controlling), like AnyDesk.
 
 Read `ROADMAP.md` before starting any task. Work only on the lane/milestone you were assigned.
+
+## Naming
+
+- The product name is **TLP-Desk** everywhere a user can see it: window title, i18n app name (also in
+  the Arabic UI, written in Latin letters), CLI help, installer (`installer/TLP-Desk.iss`,
+  `TLP-Desk-<ver>-setup.exe`, `TLP-Desk-<ver>-win-x64-portable.zip`), firewall rule names
+  (`TLP-Desk (QUIC)` ...), exe resources. Binaries: `TLP-Desk.exe` (GUI) and `TLP-Desk-cli.exe`.
+- Data folders are `%ProgramData%\TLP-Desk\` and `%APPDATA%\TLP-Desk\`. Windows paths are
+  case-insensitive, so these are the same folders older `tlp-desk` builds used: identities
+  (device IDs) and settings survive the rename.
+- **Deliberately unchanged** (renaming would break compatibility for no gain): crate names
+  `tlp-desk-*`, the mDNS service type `_tlpdesk._udp.local.`, the ALPN `tlp-desk`, the TLS
+  server name, SPAKE2/HMAC/exporter labels (`tlp-desk/...`), the installer AppId GUID, and every
+  other wire identifier. Never rename these.
 
 ## Hard rules
 
@@ -65,7 +79,7 @@ docs/                # protocol.md, security.md, user-guide (Arabic + English)
 
 ## Security model (must hold at all times)
 
-- Each install generates a long-term key pair on first run, stored in `%ProgramData%\tlp-desk\` (ACL: SYSTEM + Administrators).
+- Each install generates a long-term key pair on first run, stored in `%ProgramData%\TLP-Desk\` (ACL: SYSTEM + Administrators).
 - **Device ID** = 9 digits derived from SHA-256 of the public key. Connecting by ID therefore pins the
   key: a viewer must reject any host whose cert does not hash to the ID it dialed (MITM-proof on LAN).
 - When connecting by IP/hostname only, use trust-on-first-use and warn loudly if the key changes.
@@ -91,4 +105,7 @@ docs/                # protocol.md, security.md, user-guide (Arabic + English)
 - All user-facing strings go through the i18n table; ship Arabic (RTL) and English.
   Arabic is first-class: any feature that displays, stores or transfers text must work in Arabic
   (shaping, bidi, RTL layout, UTF-8/UTF-16 paths) before it is done — see "Arabic" in ROADMAP.md.
-- Commit messages: `lane(crate): what changed`.
+- Commit messages: `TLP-<area>: what changed` (e.g. `TLP-proto: add v4 messages`), small and often.
+- Branches: every branch is named `TLP-<topic>` (e.g. `TLP-files`); the main branch is `TLP-Desk`.
+- Build output may live outside the repo: set `CARGO_TARGET_DIR` (e.g. `C:\tlp-build\<lane>`);
+  `scripts\check.ps1` and the installer scripts honour it. Never commit `target/` or `dist/`.

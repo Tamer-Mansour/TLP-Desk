@@ -32,7 +32,7 @@ function Get-WorkspaceVersion {
     return $Matches[1]
 }
 
-# Copies tlp-desk.exe, tlp-desk-cli.exe, README.txt (from $ReadmeSource) and licenses\ into $Stage.
+# Copies TLP-Desk.exe, TLP-Desk-cli.exe, README.txt (from $ReadmeSource) and licenses\ into $Stage.
 function New-PayloadStage([string]$Stage, [string]$ReadmeSource) {
     # egui's built-in fonts are embedded in the exe: ship their licenses too.
     $lock = Get-Content (Join-Path $script:Root 'Cargo.lock') -Raw
@@ -46,8 +46,10 @@ function New-PayloadStage([string]$Stage, [string]$ReadmeSource) {
 
     if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
     New-Item -ItemType Directory -Force (Join-Path $Stage 'licenses') | Out-Null
-    Copy-Item (Join-Path $script:Root 'target\release\tlp-desk.exe') $Stage
-    Copy-Item (Join-Path $script:Root 'target\release\tlp-desk-cli.exe') $Stage
+    # Honour CARGO_TARGET_DIR (build output may live outside the repo, e.g. on another drive).
+    $target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $script:Root 'target' }
+    Copy-Item (Join-Path $target 'release\TLP-Desk.exe') $Stage
+    Copy-Item (Join-Path $target 'release\TLP-Desk-cli.exe') $Stage
     # README as UTF-8 with BOM so every Notepad version shows the Arabic text.
     $readme = Get-Content $ReadmeSource -Raw -Encoding UTF8
     [System.IO.File]::WriteAllText((Join-Path $Stage 'README.txt'), $readme, $script:Utf8Bom)

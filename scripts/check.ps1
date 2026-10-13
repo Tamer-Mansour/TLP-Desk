@@ -1,4 +1,4 @@
-# tlp-desk quality gate: release build, clippy with warnings as errors, tests.
+# TLP-Desk quality gate: release build, clippy with warnings as errors, tests.
 # Usage: pwsh scripts/check.ps1   (from anywhere)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
