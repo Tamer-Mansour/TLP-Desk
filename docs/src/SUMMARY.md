@@ -2,6 +2,10 @@
 
 [Introduction](introduction.md)
 
+# Security
+
+- [Security model](security.md)
+
 # Contributor guide
 
 - [Architecture](dev/architecture/index.md)
