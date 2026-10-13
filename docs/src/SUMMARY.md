@@ -61,6 +61,7 @@
     - [نقل الملفات ومستعرض الملفات البعيد](user-guide/ar/coming-soon/file-transfer.md)
     - [مشاركة الحافظة](user-guide/ar/coming-soon/clipboard.md)
     - [المحادثة](user-guide/ar/coming-soon/chat.md)
+    - [الصوت من الحاسوب البعيد](user-guide/ar/coming-soon/audio.md)
 
 # Security
 
