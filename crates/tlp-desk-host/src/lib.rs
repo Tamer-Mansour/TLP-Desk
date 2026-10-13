@@ -29,6 +29,9 @@
 //!   [`HostConfig::features`]. Each session starts a `FeatureDispatch`; control messages the
 //!   core does not handle go to the feature that claims them, after the permission check
 //!   `Message::required_permissions`. Features report to the UI with [`HostEvent::Feature`].
+//! * **Privacy mode**: register a [`PrivacyFeature`] to let viewers with `PRIVACY_MODE` blank
+//!   this PC's screens and block its local input (auto-off on session end, revoke, emergency
+//!   exit).
 //! * **Monitors**: the viewer gets `Message::MonitorList` (after accept, on hot-plug and on
 //!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`.
 //!
@@ -39,6 +42,7 @@ mod cursor;
 mod input;
 mod pipeline;
 mod priority;
+mod privacy;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
@@ -62,6 +66,10 @@ use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
+pub use privacy::{
+    PrivacyCause, PrivacyFeature, PrivacyStatus, PrivacyTextFn, PrivacyViewer, ShieldFactory,
+    FEATURE_NAME as PRIVACY_FEATURE,
+};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
