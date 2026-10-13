@@ -3,6 +3,16 @@
 //! Every message on a stream is a [`Message`] serialized with `postcard` and prefixed by its
 //! length as a little-endian `u32`. See `docs/protocol.md`.
 #![forbid(unsafe_code)]
+// Never-crash set (docs/CODE_STYLE.md, "Lints"): everything here parses hostile input.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable,
+    clippy::indexing_slicing
+)]
 
 mod framing;
 mod messages;

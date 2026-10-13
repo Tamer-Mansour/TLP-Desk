@@ -21,8 +21,9 @@ pub fn encode_frame(msg: &Message) -> Result<Vec<u8>, ProtoError> {
     if body.len() > MAX_FRAME_LEN {
         return Err(ProtoError::FrameTooLarge(body.len()));
     }
+    let len = u32::try_from(body.len()).map_err(|_| ProtoError::FrameTooLarge(body.len()))?;
     let mut out = Vec::with_capacity(LEN_PREFIX + body.len());
-    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    out.extend_from_slice(&len.to_le_bytes());
     out.extend_from_slice(&body);
     Ok(out)
 }
@@ -34,15 +35,27 @@ pub struct FrameDecoder {
 }
 
 impl FrameDecoder {
+    /// An empty decoder.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Appends received bytes. Call [`FrameDecoder::next_message`] until it returns `Ok(None)`
+    /// after every push: then at most one incomplete frame (`MAX_FRAME_LEN + 4` bytes) plus
+    /// the latest chunk is ever buffered.
     pub fn push(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
     }
 
+    /// Bytes received but not yet returned as messages.
+    pub fn buffered_len(&self) -> usize {
+        self.buf.len()
+    }
+
     /// Returns the next complete message, `Ok(None)` if more bytes are needed.
+    ///
+    /// A malformed body is consumed and reported as an error; an oversized length prefix is
+    /// reported as [`ProtoError::FrameTooLarge`] before any of the body is buffered.
     pub fn next_message(&mut self) -> Result<Option<Message>, ProtoError> {
         let Some(prefix) = self.buf.first_chunk::<LEN_PREFIX>() else {
             return Ok(None);
@@ -51,11 +64,12 @@ impl FrameDecoder {
         if len > MAX_FRAME_LEN {
             return Err(ProtoError::FrameTooLarge(len));
         }
-        if self.buf.len() < LEN_PREFIX + len {
+        let end = LEN_PREFIX + len;
+        let Some(body) = self.buf.get(LEN_PREFIX..end) else {
             return Ok(None);
-        }
-        let msg = decode_message(&self.buf[LEN_PREFIX..LEN_PREFIX + len]);
-        self.buf.drain(..LEN_PREFIX + len);
+        };
+        let msg = decode_message(body);
+        self.buf.drain(..end);
         msg.map(Some)
     }
 }
