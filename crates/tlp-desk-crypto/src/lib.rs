@@ -9,6 +9,7 @@
 //! * [`RateLimiter`]: 5 attempts/min per peer then a 10-minute lockout (pure logic).
 //! * [`KnownHosts`]: trust-on-first-use store of peer fingerprints.
 //! * [`PasswordVerifier`]: Argon2id-derived secret for the unattended password (stored at rest).
+//! * [`TicketStore`]: single-use reconnect tickets for restart-and-reconnect (hashes only).
 #![forbid(unsafe_code)]
 
 mod code;
@@ -20,6 +21,7 @@ pub mod pake;
 mod password;
 mod ratelimit;
 mod storage;
+mod ticket;
 
 pub use code::{OneTimeCode, MAX_FAILURES_PER_CODE};
 pub use device_id::{DeviceId, Fingerprint};
@@ -29,3 +31,7 @@ pub use known_hosts::{HostKey, KnownHosts, TrustCheck, KNOWN_HOSTS_FILE};
 pub use password::PasswordVerifier;
 pub use ratelimit::{RateLimitConfig, RateLimited, RateLimiter};
 pub use storage::{default_dir, harden_dir};
+pub use ticket::{
+    now_unix_ms, IssuedTicket, TicketRejected, TicketStore, DEFAULT_TICKET_TTL, TICKETS_FILE,
+    TICKET_LEN,
+};
