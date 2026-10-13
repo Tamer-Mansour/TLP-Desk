@@ -1,0 +1,61 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems** must not be filed here: see SECURITY.md.
+        Never paste passwords, one-time codes or private keys.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start TLP-Desk on PC A and PC B
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TLP-Desk version
+      placeholder: "0.1.0 (setup / portable / built from source at commit ...)"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version on both sides
+      placeholder: "Host: Windows 11 24H2, viewer: Windows 10 22H2"
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network
+      options:
+        - Wired LAN
+        - Wi-Fi
+        - Mixed (one wired, one Wi-Fi)
+        - Same PC (loopback)
+  - type: dropdown
+    id: language
+    attributes:
+      label: UI language
+      options:
+        - English
+        - Arabic
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant lines from the local log file (remove anything private).
+      render: text

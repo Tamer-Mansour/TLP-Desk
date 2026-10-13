@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement or a new feature
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        TLP-Desk is LAN-only by design: features that need the internet, a relay server or an
+        account are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: roadmap
+    attributes:
+      label: Related ROADMAP.md item
+      placeholder: "e.g. M4 - Wake-on-LAN for devices in the address book"
