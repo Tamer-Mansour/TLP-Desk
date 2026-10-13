@@ -437,6 +437,28 @@ pub trait Backend: Send + Sync {
     // --- perf (TLP-perf) ---
 
     // --- power (TLP-power) ---
+
+    // --- address book + Wake-on-LAN (TLP-addressbook) ---
+    /// MAC address of the LAN neighbour `ip`, read from the OS neighbour (ARP) cache. Reads
+    /// a local table only and sends nothing; `None` when it is not cached.
+    fn neighbor_mac(&self, ip: IpAddr) -> Option<[u8; 6]> {
+        tracing::debug!(%ip, "neighbor_mac not supported by this backend");
+        None
+    }
+
+    /// Short fingerprint of the key pinned for `id` in the known-hosts store, if any.
+    fn pinned_fingerprint(&self, id: DeviceId) -> Option<String> {
+        tracing::debug!(%id, "pinned_fingerprint not supported by this backend");
+        None
+    }
+
+    /// Send a Wake-on-LAN magic packet for `mac`, aimed at the subnets of `last_ips` (all
+    /// interfaces when none matches). One UDP datagram per target, so it returns at once.
+    /// The error is a detail string for the user-facing message.
+    fn wake_on_lan(&self, mac: [u8; 6], last_ips: &[IpAddr]) -> Result<(), String> {
+        tracing::debug!(?mac, ?last_ips, "wake_on_lan not supported by this backend");
+        Err("not supported".into())
+    }
 }
 
 #[cfg(test)]

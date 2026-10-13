@@ -503,6 +503,39 @@ impl Backend for FakeBackend {
             });
         }
     }
+
+    // --- address book + Wake-on-LAN (TLP-addressbook) ---
+    /// Fake devices have a stable, locally administered MAC derived from their IPv4 address.
+    fn neighbor_mac(&self, ip: IpAddr) -> Option<[u8; 6]> {
+        let st = self.inner.state();
+        st.devices.iter().find(|d| d.address == ip)?;
+        match ip {
+            IpAddr::V4(v4) => {
+                let [a, b, c, d] = v4.octets();
+                Some([0x02, 0x00, a, b, c, d])
+            }
+            IpAddr::V6(_) => None,
+        }
+    }
+
+    fn pinned_fingerprint(&self, id: DeviceId) -> Option<String> {
+        let st = self.inner.state();
+        st.devices.iter().find(|d| d.device_id == id)?;
+        let hex = format!("{:08x}{:08x}", id.0, id.0.rotate_left(13));
+        Some(format!(
+            "{} {} {} {}",
+            hex.get(0..4)?,
+            hex.get(4..8)?,
+            hex.get(8..12)?,
+            hex.get(12..16)?
+        ))
+    }
+
+    /// Never sends anything: only logs, so the fake backend stays off the network.
+    fn wake_on_lan(&self, mac: [u8; 6], last_ips: &[IpAddr]) -> Result<(), String> {
+        tracing::info!(?mac, ?last_ips, "fake backend: Wake-on-LAN (nothing sent)");
+        Ok(())
+    }
 }
 
 /// Synthetic "remote desktop": animated gradient, a grid, a sweeping bar, and indicators that
@@ -637,6 +670,25 @@ mod tests {
         // Unknown index: nothing happens.
         backend.select_monitor(session, 9);
         backend.disconnect(session);
+    }
+
+    #[test]
+    fn fake_address_book_hooks_stay_offline_and_deterministic() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (backend, _rx) = FakeBackend::start(rt.handle(), Arc::new(|| {}));
+        let ip: IpAddr = "192.168.1.40".parse().unwrap();
+        assert_eq!(
+            backend.neighbor_mac(ip),
+            Some([0x02, 0x00, 192, 168, 1, 40])
+        );
+        assert_eq!(backend.neighbor_mac("192.168.1.99".parse().unwrap()), None);
+        let fp = backend.pinned_fingerprint(DeviceId(715_204_386)).unwrap();
+        assert_eq!(fp.split(' ').count(), 4);
+        assert_eq!(backend.pinned_fingerprint(DeviceId(1)), None);
+        assert_eq!(backend.wake_on_lan([0x02, 0, 1, 2, 3, 4], &[ip]), Ok(()));
     }
 
     #[test]
