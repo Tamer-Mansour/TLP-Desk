@@ -149,6 +149,7 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `WhiteboardClear` | both | Erase all strokes (v4, `WHITEBOARD`) |
 | `DeviceInfoRequest` | viewer → host | Ask for system info (v4) |
 | `DeviceInfo(DeviceInfo)` | host → viewer | OS, CPU, RAM, disks, uptime (v4) |
+
 `MonitorDesc { index: u32, name: String, width: u32, height: u32, primary: bool, x: i32, y: i32 }`
 (physical pixels on the host virtual desktop).
 
@@ -251,6 +252,7 @@ several streams in parallel.
    `TransferError`.
 
 Directories (`is_dir`) are created by the receiver; modification times are restored.
+
 ### Clipboard
 
 - `ClipboardData::Text / Image` (v1) keep working; text is sent byte-exact (Arabic, RTL marks,
@@ -311,6 +313,7 @@ key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited l
   of the monitor height; `WhiteboardClear` erases all.
 - **Device info**: `DeviceInfoRequest` → `DeviceInfo { os, version, cpu, cores, ram_bytes, disks:
   Vec<DiskInfo { mount, label, total_bytes, free_bytes }>, uptime_s, hostname }`.
+
 ## Session flow
 
 ```
