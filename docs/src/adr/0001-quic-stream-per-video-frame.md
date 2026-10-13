@@ -41,7 +41,10 @@ The host opens **one unidirectional QUIC stream per encoded frame**, writes exac
 - Each frame is still delivered reliably and completely, which the decoder needs.
 - Frames are independent: a late frame never blocks a newer one.
 - Dropping is simple: just do not open a stream.
-- Many short streams need generous stream limits (`max_concurrent_uni_streams = 32`).
+- Many short streams need generous stream limits (originally 32 concurrent uni streams, now 256
+  to leave room for parallel side streams).
+- Video streams share the connection with bulk side streams since v4; QUIC stream priorities
+  (video 5, file data −10) keep a large file copy from delaying frames.
 - `seq` must increase by exactly one per encoded frame, and the first frame of a session must be a
   keyframe, so the viewer can detect gaps.
 
