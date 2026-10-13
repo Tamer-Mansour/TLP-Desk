@@ -10,9 +10,10 @@ TLP-Desk ships two artifacts for Windows x64, plus a checksum file:
 
 All three are written to `dist\` (git-ignored).
 
-> **Status:** no version has been tagged yet and there is no automated release workflow; releases
-> are built locally with the scripts below. A tag-triggered workflow that runs the same scripts on
-> a Windows runner and attaches the files to a GitHub Release is planned.
+> **Status:** no version has been tagged yet. Pushing a tag `v*` runs
+> `.github/workflows/release.yml`, which builds both artifacts with the same scripts on a Windows
+> runner (NASM and Inno Setup installed) and attaches them with `SHA256SUMS.txt` to a **draft**
+> GitHub Release. The scripts below also work locally.
 
 ## Version number
 
@@ -47,8 +48,11 @@ executables' VERSIONINFO, and the setup's file name uses it. The wire protocol h
    switches; firewall rules are added in silent mode too, the app is not launched).
 7. **Commit** the version bump and changelog: `TLP-release: x.y.z`.
 8. **Tag** the commit on `TLP-Desk`: `git tag -a vx.y.z -m "TLP-Desk x.y.z"` and push the tag.
-9. **Publish** a GitHub Release for the tag with the three files from `dist\`. Paste the
-   changelog section as the description and include the SHA256 lines.
+9. **Publish.** The release workflow creates a draft GitHub Release for the tag with the setup,
+   the portable zip and `SHA256SUMS.txt`. Check that the version in the file names matches the
+   tag (the version comes from `Cargo.toml`, not from the tag), paste the changelog section as
+   the description, include the SHA256 lines, and publish the draft. Without CI, build with the
+   scripts and upload the three files from `dist\` by hand.
 
 ## What the installer does
 
