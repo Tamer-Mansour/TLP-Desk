@@ -726,3 +726,81 @@ async fn bulk_side_stream_throughput() {
     let four = bulk_throughput(TOTAL, 4).await;
     println!("loopback FileData throughput, 4 streams: {four:.0} MB/s");
 }
+
+/// A tiny feature for the dispatch test: answers every chat message with an upper-cased
+/// echo (Arabic is left untouched by `to_uppercase`) and reports it to the UI.
+struct EchoChat;
+
+impl tlp_desk_net::Feature for EchoChat {
+    fn name(&self) -> &'static str {
+        "echo-chat"
+    }
+
+    fn handles(&self, msg: &Message) -> bool {
+        matches!(msg, Message::ChatMessage { .. })
+    }
+
+    fn start(
+        &self,
+        ctx: tlp_desk_net::FeatureCtx,
+        mut inbox: tokio::sync::mpsc::UnboundedReceiver<Message>,
+    ) {
+        tokio::spawn(async move {
+            while let Some(msg) = inbox.recv().await {
+                if let Message::ChatMessage { id, text, .. } = msg {
+                    let reply = Message::ChatMessage {
+                        id: id + 1,
+                        text: text.to_uppercase(),
+                        sent_unix_ms: 0,
+                    };
+                    ctx.emit("echo-chat", text);
+                    ctx.session.send(&reply).await.unwrap();
+                }
+            }
+            ctx.emit("echo-chat", String::from("stopped"));
+        });
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feature_dispatch_routes_messages_and_stops_with_the_session() {
+    use tlp_desk_net::{FeatureDispatch, FeatureEvent, FeatureSet};
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let h = Arc::new(h);
+    let (ev_tx, mut ev_rx) = tokio::sync::mpsc::unbounded_channel::<FeatureEvent>();
+    let sink: tlp_desk_net::FeatureEventSink = Arc::new(move |e| {
+        let _ = ev_tx.send(e);
+    });
+    let set = FeatureSet::new().with(Arc::new(EchoChat));
+    assert_eq!(set.names(), ["echo-chat"]);
+    let dispatch = FeatureDispatch::start(&set, h.clone(), 42, Permissions::VIEW, sink);
+
+    let chat = Message::ChatMessage {
+        id: 1,
+        text: "hi مرحبا".into(),
+        sent_unix_ms: 5,
+    };
+    assert_eq!(dispatch.dispatch(chat), Ok("echo-chat"));
+    // Unhandled messages come back to the caller.
+    assert_eq!(
+        dispatch.dispatch(Message::WhiteboardClear),
+        Err(Box::new(Message::WhiteboardClear))
+    );
+    let reply = timeout(T, v.recv()).await.unwrap().unwrap();
+    assert_eq!(
+        reply,
+        Message::ChatMessage {
+            id: 2,
+            text: "HI مرحبا".into(),
+            sent_unix_ms: 0
+        }
+    );
+    let ev = timeout(T, ev_rx.recv()).await.unwrap().unwrap();
+    assert_eq!((ev.feature, ev.session_key), ("echo-chat", 42));
+    assert_eq!(ev.payload::<String>().map(String::as_str), Some("hi مرحبا"));
+    // Dropping the dispatch (session over) ends the feature.
+    drop(dispatch);
+    let ev = timeout(T, ev_rx.recv()).await.unwrap().unwrap();
+    assert_eq!(ev.payload::<String>().map(String::as_str), Some("stopped"));
+}
