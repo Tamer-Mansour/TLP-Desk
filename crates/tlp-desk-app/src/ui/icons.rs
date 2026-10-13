@@ -329,6 +329,30 @@ pub fn icon_button(ui: &mut Ui, tx: Tx, icon: Icon, tooltip: &str) -> Response {
     resp.on_hover_text(tooltip)
 }
 
+/// Icon-only toggle (selectable look) with a tooltip that is also its accessible name, for
+/// compact toolbars.
+pub fn icon_toggle(ui: &mut Ui, tx: Tx, selected: bool, icon: Icon, tooltip: &str) -> Response {
+    icon_toggle_enabled(ui, tx, true, selected, icon, tooltip)
+}
+
+/// [`icon_toggle`] that can be disabled.
+pub fn icon_toggle_enabled(
+    ui: &mut Ui,
+    tx: Tx,
+    enabled: bool,
+    selected: bool,
+    icon: Icon,
+    tooltip: &str,
+) -> Response {
+    let image = icon.image_dir(tx.rtl(), TOOL_ICON, Color32::WHITE);
+    let button = egui::Button::selectable(selected, image).image_tint_follows_text_color(true);
+    let resp = ui.add_enabled(enabled, button);
+    resp.widget_info(|| {
+        WidgetInfo::selected(WidgetType::SelectableLabel, enabled, selected, tooltip)
+    });
+    resp.on_hover_text(tooltip)
+}
+
 /// Button with an icon at the reading start of its text (left in English, right in Arabic).
 /// The icon follows the widget text color.
 pub fn icon_text_button<'a>(tx: Tx, icon: Icon, text: impl Into<WidgetText>) -> egui::Button<'a> {
