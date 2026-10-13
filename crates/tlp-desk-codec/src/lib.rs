@@ -1,19 +1,28 @@
 //! Video encode/decode traits and implementations.
 //!
-//! The only backend today is software H.264 via OpenH264 ([`H264Encoder`], [`H264Decoder`]),
-//! compiled from the bundled source at build time (no runtime download). Colour conversion uses
-//! BT.709 limited range, which the encoder signals in the SPS VUI.
+//! Backends: software H.264 via OpenH264 ([`H264Encoder`], [`H264Decoder`]), compiled from the
+//! bundled source at build time (no runtime download), and on Windows hardware H.264 through
+//! Media Foundation encoder MFTs (`MfEncoder`: Intel Quick Sync, NVIDIA, AMD). Colour
+//! conversion uses BT.709 limited range, which the software encoder signals in the SPS VUI.
 //!
-//! `unsafe` is denied crate-wide; the single exception is the small OpenH264 runtime-bitrate
-//! shim in `h264::raw`, which documents its `// SAFETY:` invariants.
+//! `unsafe` is denied crate-wide; the exceptions are the OpenH264 encoder FFI in `h264::ffi`
+//! and the Windows Media Foundation / DXGI wrappers in `mf`, which document their
+//! `// SAFETY:` invariants.
 #![deny(unsafe_code)]
 
 use tlp_desk_capture::BgraFrame;
 
 pub mod convert;
 mod h264;
+#[cfg(windows)]
+mod mf;
 
 pub use h264::{Downscale, H264Complexity, H264Decoder, H264Encoder, H264Tuning};
+#[cfg(windows)]
+pub use mf::{
+    list_adapters, list_hw_encoders, GpuAdapter, HwAdapter, HwEncoderInfo, MfEncoder, VENDOR_AMD,
+    VENDOR_INTEL, VENDOR_NVIDIA,
+};
 
 /// Encoder settings. `width`/`height` are the size of the *input* frames (the captured
 /// monitor); the encoded size may be smaller, see [`H264Encoder::encoded_size`].
