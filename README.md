@@ -152,7 +152,7 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). The full rules for humans and cod
 ## Security
 
 TLP-Desk is designed for trusted local networks. Please report vulnerabilities privately through
-GitHub Security Advisories rather than public issues.
+GitHub Security Advisories rather than public issues; see [SECURITY.md](SECURITY.md).
 
 ---
 
