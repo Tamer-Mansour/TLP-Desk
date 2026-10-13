@@ -29,12 +29,21 @@
 //! The pure logic lives in small, unit-tested modules (IPC framing in [`ipc`]); Windows calls
 //! are confined to the platform module.
 
+mod agent;
 mod desktop;
 pub mod ipc;
 mod pipe_security;
+mod remote;
 mod session;
 mod supervisor;
 mod system;
+#[cfg(test)]
+mod testutil;
+
+pub use agent::{
+    serve_connection, AgentPlatform, DESKTOP_CHECK_EVERY, DESKTOP_POLL_EVERY, MAX_FRAME_WAIT,
+};
+pub use remote::{AgentConn, AgentConnector, AgentLink, RemoteCapturer, RemoteInjector};
 
 pub use desktop::{
     is_secure_desktop, DesktopChange, DesktopFollower, DesktopSource, DesktopStatus,
