@@ -1071,3 +1071,146 @@ fn scaled_video_maps_clicks_to_physical_monitor_pixels() {
     );
     assert_eq!(monitor.normalized_to_pixel(nx, ny), (-1, 2399));
 }
+
+/// Next HostEvent::Feature (other events are skipped).
+async fn next_feature_event(
+    events: &mut HostEvents,
+) -> (tlp_desk_host::SessionId, tlp_desk_host::FeatureEvent) {
+    match host_event(events, |e| matches!(e, HostEvent::Feature { .. })).await {
+        HostEvent::Feature { id, event } => (id, event),
+        _ => unreachable!(),
+    }
+}
+
+/// Test feature: records the chat texts it receives and answers each with "ack: <text>".
+struct ChatProbe {
+    name: &'static str,
+    reply: bool,
+}
+
+impl tlp_desk_host::Feature for ChatProbe {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn handles(&self, msg: &tlp_desk_proto::Message) -> bool {
+        matches!(msg, tlp_desk_proto::Message::ChatMessage { .. })
+    }
+
+    fn start(
+        &self,
+        ctx: tlp_desk_host::FeatureCtx,
+        mut inbox: tokio::sync::mpsc::UnboundedReceiver<tlp_desk_proto::Message>,
+    ) {
+        let (name, reply) = (self.name, self.reply);
+        tokio::spawn(async move {
+            while let Some(tlp_desk_proto::Message::ChatMessage { id, text, .. }) =
+                inbox.recv().await
+            {
+                ctx.emit(name, text.clone());
+                if reply {
+                    let ack = tlp_desk_proto::Message::ChatMessage {
+                        id,
+                        text: format!("ack: {text}"),
+                        sent_unix_ms: 0,
+                    };
+                    let _ = ctx.session.send(&ack).await;
+                }
+            }
+        });
+    }
+}
+
+/// Features plug in without touching the session loops: the host routes a viewer's chat to
+/// its feature only while the session holds `CHAT`, and the viewer routes the host's answer
+/// to its own feature; both surface as `Feature` events.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn features_receive_permitted_messages_on_both_sides() {
+    let host_chat: Arc<dyn tlp_desk_host::Feature> = Arc::new(ChatProbe {
+        name: "chat",
+        reply: true,
+    });
+    let mut h = harness(false, |cfg| {
+        cfg.features = tlp_desk_host::FeatureSet::new().with(host_chat);
+    })
+    .await;
+    let viewer_chat: Arc<dyn tlp_desk_viewer::Feature> = Arc::new(ChatProbe {
+        name: "chat-viewer",
+        reply: false,
+    });
+    let viewer = Viewer::new(
+        h.viewer_ep.clone(),
+        ViewerConfig {
+            known_hosts: KnownHostsStore::InMemory,
+            features: tlp_desk_viewer::FeatureSet::new().with(viewer_chat),
+            ..ViewerConfig::default()
+        },
+    )
+    .unwrap();
+    let target = h.target.clone();
+    let conn = tokio::spawn(async move { viewer.connect(target, AuthMethod::AcceptPrompt).await });
+    let req = incoming(&mut h.events).await;
+    let with_chat = tlp_desk_host::DEFAULT_PERMISSIONS | Permissions::CHAT;
+    assert!(h.host.accept(req, Some(with_chat)));
+    let (session, mut vevents) = conn.await.unwrap().expect("connect");
+    let HostEvent::SessionStarted(cv) =
+        host_event(&mut h.events, |e| matches!(e, HostEvent::SessionStarted(_))).await
+    else {
+        unreachable!()
+    };
+    let chat = |text: &str| tlp_desk_proto::Message::ChatMessage {
+        id: 1,
+        text: text.into(),
+        sent_unix_ms: 0,
+    };
+    let wait_chat_perm = |want: bool| {
+        let s = &session;
+        within("viewer sees the CHAT change", async move {
+            while s.permissions().contains(Permissions::CHAT) != want {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+    };
+
+    // Routed while CHAT is held.
+    assert!(session.send_message(chat("مرحبا")));
+    let (id, event) = next_feature_event(&mut h.events).await;
+    assert_eq!(
+        (id, event.feature, event.session_key),
+        (cv.id, "chat", cv.id.0)
+    );
+    assert_eq!(event.payload::<String>().map(String::as_str), Some("مرحبا"));
+
+    // Revoked: the host updates its gate before telling the viewer, so anything sent after the
+    // viewer saw the change is checked against the new permissions and dropped. (The viewer's
+    // feature still gets the earlier answer below.)
+    assert!(h
+        .host
+        .set_permissions(cv.id, tlp_desk_host::DEFAULT_PERMISSIONS));
+    wait_chat_perm(false).await;
+    assert!(session.send_message(chat("blocked")));
+    let leaked = tokio::time::timeout(
+        Duration::from_millis(500),
+        next_feature_event(&mut h.events),
+    )
+    .await;
+    assert!(
+        leaked.is_err(),
+        "a message without CHAT reached the feature: {leaked:?}"
+    );
+    let ev = within("viewer feature event", async {
+        loop {
+            if let Some(ViewerEvent::Feature(e)) = vevents.recv().await {
+                return e;
+            }
+        }
+    })
+    .await;
+    assert_eq!(ev.feature, "chat-viewer");
+    assert_eq!(ev.session_key, session.feature_key());
+    assert_eq!(
+        ev.payload::<String>().map(String::as_str),
+        Some("ack: مرحبا")
+    );
+    session.disconnect();
+}

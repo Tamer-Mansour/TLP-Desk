@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, Id, RichText};
 
+use super::icons::{self, Icon};
 use super::{theme, widgets};
 use crate::app::{App, Screen};
 use crate::backend::{ConnectTarget, DiscoveredDevice};
@@ -42,10 +43,20 @@ fn top_bar(ui: &mut egui::Ui, tx: Tx, actions: &mut Vec<Action>, show_settings_b
                                 ui.selectable_value(&mut lang, l, l.native_name());
                             }
                         });
+                    let weak = ui.visuals().weak_text_color();
+                    icons::icon(ui, tx, Icon::Language, 18.0, weak);
                     if lang != tx.lang {
                         actions.push(Action::SetLang(lang));
                     }
-                    if show_settings_button && ui.button(tx.t(S::Settings)).clicked() {
+                    if show_settings_button
+                        && ui
+                            .add(icons::icon_text_button(
+                                tx,
+                                Icon::Settings,
+                                tx.t(S::Settings),
+                            ))
+                            .clicked()
+                    {
                         actions.push(Action::OpenSettings);
                     }
                 });
@@ -98,7 +109,7 @@ impl App {
         let tx = self.tx;
         theme::card(ui, |ui| {
             theme::column(ui, tx.rtl(), |ui| {
-                ui.label(RichText::new(tx.t(S::ThisDevice)).heading());
+                widgets::icon_heading(ui, tx, Icon::Laptop, tx.t(S::ThisDevice));
                 ui.add_space(8.0);
 
                 ui.label(theme::caption(ui, tx.t(S::DeviceId)));
@@ -125,7 +136,10 @@ impl App {
                             .color(theme::accent(ui.visuals().dark_mode)),
                     );
                     widgets::copy_button(ui, tx, Id::new("copy-code"), code);
-                    if ui.button(tx.t(S::NewCode)).clicked() {
+                    if ui
+                        .add(icons::icon_text_button(tx, Icon::Refresh, tx.t(S::NewCode)))
+                        .clicked()
+                    {
                         actions.push(Action::NewCode);
                     }
                 });
@@ -155,10 +169,10 @@ impl App {
         let tx = self.tx;
         theme::card(ui, |ui| {
             theme::column(ui, tx.rtl(), |ui| {
-                ui.label(RichText::new(tx.t(S::ConnectTitle)).heading());
+                widgets::icon_heading(ui, tx, Icon::Monitor, tx.t(S::ConnectTitle));
                 ui.add_space(8.0);
                 let resp = theme::row(ui, tx.rtl(), |ui| {
-                    let button_w = 120.0;
+                    let button_w = 130.0;
                     let field_w = (ui.available_width() - button_w - 12.0).max(120.0);
                     // In RTL the row flows right-to-left: field first (rightmost), then button.
                     let resp = widgets::text_field(
@@ -171,9 +185,9 @@ impl App {
                     );
                     let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let has_text = !self.address.trim().is_empty();
-                    let clicked =
-                        widgets::chevron_button(ui, tx, tx.t(S::Connect), true, true, has_text)
-                            .clicked();
+                    let button =
+                        widgets::primary_icon_button(ui, tx, Icon::Connect, tx.t(S::Connect));
+                    let clicked = ui.add_enabled(has_text, button).clicked();
                     if (enter || clicked) && has_text {
                         actions.push(Action::ConnectAddress);
                     }
@@ -201,7 +215,7 @@ impl App {
         ui.add_space(12.0);
         theme::card(ui, |ui| {
             theme::column(ui, tx.rtl(), |ui| {
-                ui.label(RichText::new(tx.t(S::NearbyDevices)).heading());
+                widgets::icon_heading(ui, tx, Icon::Network, tx.t(S::NearbyDevices));
                 ui.add_space(6.0);
                 match &self.devices {
                     None => {
@@ -252,7 +266,10 @@ fn device_row(ui: &mut egui::Ui, tx: Tx, dev: &DiscoveredDevice, actions: &mut V
                 });
                 theme::row_end(ui, tx.rtl(), |ui| {
                     if ui
-                        .add_enabled(dev.online, egui::Button::new(tx.t(S::Connect)))
+                        .add_enabled(
+                            dev.online,
+                            icons::icon_text_button(tx, Icon::Connect, tx.t(S::Connect)),
+                        )
                         .clicked()
                     {
                         actions.push(Action::Connect(ConnectTarget::Id(dev.device_id)));

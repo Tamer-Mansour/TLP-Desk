@@ -13,8 +13,9 @@ use crate::backend::{
 use crate::i18n::{format::to_western_digits, Lang, Tx, S};
 use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
+use crate::ui::icons::{self, Icon};
 use crate::ui::session::ViewerSession;
-use crate::ui::theme;
+use crate::ui::{theme, widgets};
 
 /// Which full-window screen is shown when no viewer session is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,9 +384,12 @@ impl App {
                 for (session, peer) in &self.host_sessions {
                     theme::row(ui, tx.rtl(), |ui| {
                         let text = tx.f(S::HostBanner, &[("name", &peer.name)]);
+                        icons::icon(ui, tx, Icon::ViewOnly, 18.0, egui::Color32::WHITE);
                         ui.label(RichText::new(text).color(egui::Color32::WHITE).strong());
                         theme::row_end(ui, tx.rtl(), |ui| {
-                            if ui.button(tx.t(S::EndSession)).clicked() {
+                            let end_button =
+                                icons::icon_text_button(tx, Icon::EndSession, tx.t(S::EndSession));
+                            if ui.add(end_button).clicked() {
                                 end = Some(*session);
                             }
                         });
@@ -418,7 +422,8 @@ impl App {
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
             .show(ui, |ui| {
-                theme::column(ui, tx.rtl(), |ui| {
+                theme::row(ui, tx.rtl(), |ui| {
+                    icons::icon(ui, tx, Icon::Warning, 18.0, egui::Color32::WHITE);
                     ui.label(RichText::new(text).color(egui::Color32::WHITE).strong());
                 });
             });
@@ -435,7 +440,7 @@ impl App {
             egui::Modal::new(Id::new("incoming-request")).show(ctx, |ui| {
                 ui.set_width(400.0);
                 theme::column(ui, tx.rtl(), |ui| {
-                    ui.heading(tx.t(S::IncomingTitle));
+                    widgets::icon_heading(ui, tx, Icon::Monitor, tx.t(S::IncomingTitle));
                     ui.add_space(4.0);
                     ui.label(tx.f(S::IncomingBody, &[("name", &peer.name)]));
                     ui.add_space(6.0);
@@ -460,10 +465,13 @@ impl App {
                         });
                     ui.add_space(10.0);
                     theme::row(ui, tx.rtl(), |ui| {
-                        if ui.add(theme::primary_button(ui, tx.t(S::Accept))).clicked() {
+                        let accept =
+                            widgets::primary_icon_button(ui, tx, Icon::Accept, tx.t(S::Accept));
+                        if ui.add(accept).clicked() {
                             answer = Some(true);
                         }
-                        if ui.button(tx.t(S::Decline)).clicked() {
+                        let decline = icons::icon_text_button(tx, Icon::Reject, tx.t(S::Decline));
+                        if ui.add(decline).clicked() {
                             answer = Some(false);
                         }
                     });
@@ -482,12 +490,15 @@ impl App {
                 ui.set_width(460.0);
                 let dark = ui.visuals().dark_mode;
                 theme::column(ui, tx.rtl(), |ui| {
-                    ui.label(
-                        RichText::new(tx.t(S::KeyChangedTitle))
-                            .heading()
-                            .strong()
-                            .color(theme::danger(dark)),
-                    );
+                    theme::row(ui, tx.rtl(), |ui| {
+                        icons::icon(ui, tx, Icon::Warning, 22.0, theme::danger(dark));
+                        ui.label(
+                            RichText::new(tx.t(S::KeyChangedTitle))
+                                .heading()
+                                .strong()
+                                .color(theme::danger(dark)),
+                        );
+                    });
                     ui.add_space(6.0);
                     let target = tx.digits(&w.target);
                     ui.label(tx.f(S::KeyChangedBody, &[("target", &target)]));
@@ -512,15 +523,16 @@ impl App {
                         });
                     ui.add_space(10.0);
                     theme::row(ui, tx.rtl(), |ui| {
-                        if ui.button(tx.t(S::Cancel)).clicked() {
+                        let cancel = icons::icon_text_button(tx, Icon::Close, tx.t(S::Cancel));
+                        if ui.add(cancel).clicked() {
                             decision = Some(false);
                         }
-                        let b = egui::Button::new(
-                            RichText::new(tx.t(S::ForgetKeyAndConnect))
-                                .color(egui::Color32::WHITE)
-                                .strong(),
-                        )
-                        .fill(theme::danger(dark));
+                        let b = widgets::danger_icon_button(
+                            ui,
+                            tx,
+                            Icon::Key,
+                            tx.t(S::ForgetKeyAndConnect),
+                        );
                         if ui.add(b).clicked() {
                             decision = Some(true);
                         }
@@ -561,7 +573,8 @@ impl App {
                     }
                     ui.add_space(8.0);
                     theme::row(ui, tx.rtl(), |ui| {
-                        if ui.button(tx.t(S::Cancel)).clicked() {
+                        let button = icons::icon_text_button(tx, Icon::Close, tx.t(S::Cancel));
+                        if ui.add(button).clicked() {
                             cancel = true;
                         }
                     });
@@ -585,12 +598,13 @@ impl App {
                     ui.set_width(360.0);
                     theme::column(ui, tx.rtl(), |ui| {
                         if let Some(t) = title {
-                            ui.heading(tx.t(t));
+                            widgets::icon_heading(ui, tx, Icon::Error, tx.t(t));
                         }
                         ui.label(msg);
                         ui.add_space(8.0);
                         theme::row(ui, tx.rtl(), |ui| {
-                            if ui.button(tx.t(S::Ok)).clicked() {
+                            let ok = icons::icon_text_button(tx, Icon::Check, tx.t(S::Ok));
+                            if ui.add(ok).clicked() {
                                 close = true;
                             }
                         });

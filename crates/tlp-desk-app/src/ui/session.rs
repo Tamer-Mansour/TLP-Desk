@@ -9,7 +9,8 @@ use eframe::egui::{
 };
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
-use super::theme;
+use super::icons::{self, Icon};
+use super::{theme, widgets};
 use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, SessionStats};
 use crate::i18n::{format, ltr_isolate, Tx, S};
 use crate::input_map;
@@ -248,20 +249,35 @@ impl ViewerSession {
                         RichText::new(tx.f(S::SessionWith, &[("name", &self.peer.name)])).strong(),
                     );
                     ui.separator();
-                    ui.selectable_value(&mut self.mode, ViewMode::Fit, tx.t(S::FitToWindow));
-                    ui.selectable_value(&mut self.mode, ViewMode::Original, tx.t(S::OriginalSize));
+                    for (mode, icon, key) in [
+                        (ViewMode::Fit, Icon::FitToWindow, S::FitToWindow),
+                        (ViewMode::Original, Icon::ActualSize, S::OriginalSize),
+                    ] {
+                        let selected = self.mode == mode;
+                        if icons::icon_toggle(ui, tx, selected, icon, tx.t(key)).clicked() {
+                            self.mode = mode;
+                        }
+                    }
                     ui.separator();
                     let fs = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                    let fs_label = if fs { S::ExitFullscreen } else { S::Fullscreen };
-                    if ui.selectable_label(fs, tx.t(fs_label)).clicked() {
+                    let (fs_icon, fs_label) = if fs {
+                        (Icon::ExitFullscreen, S::ExitFullscreen)
+                    } else {
+                        (Icon::Fullscreen, S::Fullscreen)
+                    };
+                    if icons::icon_toggle(ui, tx, fs, fs_icon, tx.t(fs_label)).clicked() {
                         ui.ctx()
                             .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fs));
                     }
                     let control_allowed = self.permissions.contains(Permissions::CONTROL);
                     let vo = self.view_only || !control_allowed;
-                    let resp = ui.add_enabled(
+                    let resp = icons::icon_toggle_enabled(
+                        ui,
+                        tx,
                         control_allowed,
-                        egui::Button::selectable(vo, tx.t(S::ViewOnly)),
+                        vo,
+                        Icon::ViewOnly,
+                        tx.t(S::ViewOnly),
                     );
                     let resp = if control_allowed {
                         resp
@@ -275,7 +291,11 @@ impl ViewerSession {
                         }
                         backend.set_view_only(self.id, self.view_only);
                     }
-                    ui.toggle_value(&mut self.show_stats, tx.t(S::Stats));
+                    if icons::icon_toggle(ui, tx, self.show_stats, Icon::Stats, tx.t(S::Stats))
+                        .clicked()
+                    {
+                        self.show_stats = !self.show_stats;
+                    }
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
                         self.release_all(backend);
@@ -283,16 +303,33 @@ impl ViewerSession {
                     }
                     if self.grab_on {
                         ui.separator();
-                        ui.label(theme::caption(ui, tx.t(S::KeysCaptured)))
-                            .on_hover_text(tx.t(S::KeysCapturedHint));
+                        // Accent icon = keys are captured. The caption is shown only when it fits
+                        // next to Disconnect; otherwise it moves into the tooltip.
+                        let accent = theme::accent(dark);
+                        let caption = theme::caption(ui, tx.t(S::KeysCaptured));
+                        let caption_w = egui::WidgetText::from(caption.clone())
+                            .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Small)
+                            .size()
+                            .x;
+                        let fits = ui.available_width() > caption_w + 200.0;
+                        let hint = if fits {
+                            tx.t(S::KeysCapturedHint).to_owned()
+                        } else {
+                            format!("{}\n{}", tx.t(S::KeysCaptured), tx.t(S::KeysCapturedHint))
+                        };
+                        icons::icon(ui, tx, Icon::Keyboard, icons::BUTTON_ICON, accent)
+                            .on_hover_text(&hint);
+                        if fits {
+                            ui.label(caption).on_hover_text(&hint);
+                        }
                     }
                     theme::row_end(ui, tx.rtl(), |ui| {
-                        let b = egui::Button::new(
-                            RichText::new(tx.t(S::Disconnect))
-                                .color(Color32::WHITE)
-                                .strong(),
-                        )
-                        .fill(theme::danger(dark));
+                        let b = widgets::danger_icon_button(
+                            ui,
+                            tx,
+                            Icon::Disconnect,
+                            tx.t(S::Disconnect),
+                        );
                         if ui.add(b).clicked() {
                             disconnect = true;
                         }
@@ -313,7 +350,10 @@ impl ViewerSession {
             return None;
         }
         ui.separator();
-        ui.label(theme::caption(ui, tx.t(S::Screens)));
+        let weak = ui.visuals().weak_text_color();
+        // Icon only (the label is its tooltip): the toolbar must fit 760 pt in Arabic too.
+        icons::icon(ui, tx, Icon::Monitor, icons::BUTTON_ICON, weak)
+            .on_hover_text(tx.t(S::Screens));
         let mut picked = None;
         // Number the screens left to right as they are arranged on the host; the toolbar row
         // itself is mirrored in Arabic by `theme::row`.
@@ -366,6 +406,7 @@ impl ViewerSession {
             )
             .show(ui, |ui| {
                 theme::row(ui, tx.rtl(), |ui| {
+                    icons::icon(ui, tx, Icon::MousePointer, icons::BUTTON_ICON, text);
                     ui.label(RichText::new(tx.t(S::HostUsingInput)).color(text));
                 });
             });
@@ -624,6 +665,7 @@ mod tests {
 
     fn drive_with(view_only: bool, grab: Option<Box<dyn KeyGrab>>) -> Vec<InputEvent> {
         let ctx = egui::Context::default();
+        icons::install(&ctx);
         let backend = Recorder::default();
         let frames = FrameSlot::new();
         frames.publish(VideoImage {
@@ -755,6 +797,7 @@ mod tests {
     fn monitor_picker_selects_and_follows_host() {
         for lang in [Lang::En, Lang::Ar] {
             let ctx = egui::Context::default();
+            icons::install(&ctx);
             let backend = Recorder::default();
             let frames = FrameSlot::new();
             frames.publish(VideoImage {
@@ -833,6 +876,7 @@ mod tests {
     #[test]
     fn picker_hidden_with_one_monitor_and_banner_renders() {
         let ctx = egui::Context::default();
+        icons::install(&ctx);
         let backend = Recorder::default();
         let peer = PeerInfo {
             device_id: DeviceId(2),

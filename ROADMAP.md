@@ -1,4 +1,4 @@
-# tlp-desk Roadmap
+# TLP-Desk Roadmap
 
 Goal: a usable LAN-only AnyDesk replacement as fast as possible, then grow to full feature parity.
 Milestones are ordered; inside each milestone, **lanes** can run in parallel (one Claude Code agent per lane).
@@ -35,6 +35,7 @@ until it works in Arabic. Check these per milestone as features land.
 
 **Layout & language (M1)**
 - [x] Full RTL mirroring in Arabic: layouts, toolbars, lists, dialogs, alignment, icons with direction (back/forward arrows)
+      _(icons: tlp-icons set in `ui::icons`, directional ones mirrored; evidence: `icons::tests::rtl_mirroring_flips_the_image`, `directional_icons_are_flagged`, `image_dir_mirrors_only_directional_icons_in_rtl`; en/ar screenshots of home, settings, session, incoming dialog)_
 - [x] Every user-facing string in the i18n table with Arabic + English; test fails on a missing key
       _(evidence: missing translation is a compile error; `every_key_has_english_and_arabic`)_
 - [x] Language auto-detected from Windows UI language on first run; switchable live in Settings, persisted
@@ -114,6 +115,36 @@ Lanes run in parallel after M0.
 
 ---
 
+## Parallel lanes (M2–M5)
+
+The foundation (protocol v4, typed side streams, feature hooks) is in place, so the remaining
+Windows work of M2–M5 runs as parallel lanes, one agent and one branch each (`TLP-<lane>`,
+branched from and merged back into `TLP-Desk` by PR). Shared groundwork every lane builds on:
+
+- **Wire protocol v4** (`docs/protocol.md`): messages for every lane already exist. A lane that
+  needs a new message appends it at the end of `Message` and bumps `PROTOCOL_VERSION`.
+- **Side streams** (`tlp-desk-net`): `Session::open_uni/open_bi(kind, id)`,
+  `Session::accept_side_stream(kind)`; kinds `FileData`, `Tunnel`, `Audio`, `Clipboard`.
+- **Feature hooks**: implement `tlp_desk_net::Feature` in your own module and register it in
+  `HostConfig::features` / `ViewerConfig::features`; UI events arrive as
+  `HostEvent::Feature` / `ViewerEvent::Feature`. Append app/i18n items only inside your
+  lane's `// --- <lane> ---` section (`backend/mod.rs`, `i18n/mod.rs`).
+
+| Lane (branch) | Scope | Roadmap items |
+|---|---|---|
+| `TLP-files` | Remote file browser (`FsRequest`), ultra-fast transfer on parallel `FileData` streams with resume + BLAKE3, drag-and-drop, Explorer copy/paste of files (`ClipboardFiles`) | M2 Lane A items 2–3; Arabic file names |
+| `TLP-clipboard` | Text / image / HTML clipboard sync both ways, permission-gated, Arabic byte-exact (RTL marks, ZWJ/ZWNJ), large payloads on `Clipboard` streams | M2 Lane A item 1; Arabic clipboard |
+| `TLP-service` | Windows service as SYSTEM, session agent in the active console session, secure desktop (lock/login/UAC), Ctrl+Alt+Del (`SendSAS`), unattended password, restart + auto-reconnect (`ReconnectTicket`), lock workstation | M3 (all but privacy mode) |
+| `TLP-privacy` | Privacy mode: blank the host's physical screen and block local input (`PrivacyMode`) | M3 privacy mode |
+| `TLP-ux` | Address book (aliases, groups, last seen, online status), chat panel (`ChatMessage`), settings (permission defaults, allow-list, presets), tray icon, start minimized, top-most host "who is connected" banner | M2 Lane D |
+| `TLP-audio` | System audio: WASAPI loopback → Opus on an `Audio` stream (`AudioControl`), mute toggle | M2 Lane C audio |
+| `TLP-perf` | Adaptive bitrate (`ViewerFeedback`), dirty-region / static-screen detection, Media Foundation HW encode behind the trait, latency overlay (`LatencyProbe`), quality presets (`SetQuality`), all-monitors view (`SelectAllMonitors`), configurable capture cap | M2 Lane B, Lane C all monitors |
+| `TLP-power` | Wake-on-LAN from the address book, session recording + playback, TCP port forwarding (`Tunnel*`), whiteboard, connection log, device info panel, CLI commands | M4 |
+| `TLP-docs` | README, user guide (Arabic + English), `docs/security.md`, CONTRIBUTING, CI | M5 docs items |
+
+Each lane ticks its own items below, with evidence, when its PR merges.
+
+---
 ## M2 — Daily-driver features
 
 **Lane A — files + clipboard**

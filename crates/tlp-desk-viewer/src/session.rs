@@ -4,7 +4,9 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use tlp_desk_net::{NetError, PeerInfo, Session};
+use tlp_desk_net::{
+    FeatureDispatch, FeatureEvent, FeatureEventSink, FeatureSet, NetError, PeerInfo, Session,
+};
 use tlp_desk_proto::{ByeReason, InputEvent, Message, MonitorDesc, Permissions, VideoFrame};
 use tokio::sync::{mpsc, watch, Notify};
 
@@ -62,6 +64,8 @@ pub enum ViewerEvent {
         monitors: Vec<MonitorDesc>,
         active: u32,
     },
+    /// Something a session feature reports (see `FeatureEvent::payload`).
+    Feature(FeatureEvent),
     /// The session is over; no more events follow.
     Ended(EndReason),
 }
@@ -131,9 +135,13 @@ impl Shared {
     }
 }
 
+/// Source of [`ViewerSession::feature_key`]s, unique per process.
+static NEXT_FEATURE_KEY: AtomicU64 = AtomicU64::new(1);
+
 /// An established viewer session. Dropping it disconnects.
 pub struct ViewerSession {
     shared: Arc<Shared>,
+    feature_key: u64,
     /// Viewer -> host control messages (input, monitor selection), in order.
     input: mpsc::UnboundedSender<Message>,
     ended: watch::Receiver<Option<EndReason>>,
@@ -159,8 +167,10 @@ impl ViewerSession {
         session: Session,
         format: PixelFormat,
         on_frame: Option<RepaintFn>,
+        features: &FeatureSet,
     ) -> (ViewerSession, ViewerEvents) {
         let session = Arc::new(session);
+        let feature_key = NEXT_FEATURE_KEY.fetch_add(1, Ordering::Relaxed);
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let (end_tx, end_rx) = watch::channel(None);
         let shared = Arc::new(Shared {
@@ -195,13 +205,32 @@ impl ViewerSession {
             }
         }
         tokio::spawn(video_task(shared.clone(), job_tx));
-        tokio::spawn(control_task(shared.clone()));
+        // FEATURE HOOK: every registered feature starts here; nothing per feature in this file.
+        let dispatch = {
+            let events = shared.events.clone();
+            let repaint = shared.on_frame.clone();
+            let sink: FeatureEventSink = Arc::new(move |event| {
+                let _ = events.send(ViewerEvent::Feature(event));
+                if let Some(f) = &repaint {
+                    f();
+                }
+            });
+            FeatureDispatch::start(
+                features,
+                shared.session.clone(),
+                feature_key,
+                shared.session.initial_permissions(),
+                sink,
+            )
+        };
+        tokio::spawn(control_task(shared.clone(), dispatch));
         tokio::spawn(input_task(shared.clone(), input_rx, end_rx.clone()));
         tokio::spawn(stats_task(shared.clone(), end_rx.clone()));
 
         (
             ViewerSession {
                 shared,
+                feature_key,
                 input: input_tx,
                 ended: end_rx,
             },
@@ -255,6 +284,19 @@ impl ViewerSession {
     /// host. Returns `false` once the session has ended.
     pub fn select_monitor(&self, index: u32) -> bool {
         self.ended.borrow().is_none() && self.input.send(Message::SelectMonitor { index }).is_ok()
+    }
+
+    /// Key identifying this session to features (`FeatureCtx::session_key`,
+    /// `FeatureEvent::session_key`); unique within the process.
+    pub fn feature_key(&self) -> u64 {
+        self.feature_key
+    }
+
+    /// Queues any control message for the host, in order with input (non-blocking). Features
+    /// normally send through their `FeatureCtx`; this is for the UI and tests. Returns `false`
+    /// once the session has ended.
+    pub fn send_message(&self, msg: Message) -> bool {
+        self.ended.borrow().is_none() && self.input.send(msg).is_ok()
     }
 
     /// Whether the host user currently has input priority (our input is being ignored).
@@ -385,7 +427,7 @@ fn decode_thread(shared: Arc<Shared>, mut jobs: mpsc::Receiver<Job>, rt: tokio::
     tracing::debug!("decode thread stopped");
 }
 
-async fn control_task(shared: Arc<Shared>) {
+async fn control_task(shared: Arc<Shared>, features: FeatureDispatch) {
     let reason = loop {
         tokio::select! {
             _ = shared.disconnect.notified() => {
@@ -396,6 +438,7 @@ async fn control_task(shared: Arc<Shared>) {
                 Ok(Message::Permissions(p)) => {
                     tracing::info!(?p, "host changed permissions");
                     shared.perms.store(p.0, Ordering::Release);
+                    features.set_permissions(p);
                     shared.emit(ViewerEvent::PermissionsChanged(p));
                 }
                 Ok(Message::HostInputPriority { local_active }) => {
@@ -409,12 +452,18 @@ async fn control_task(shared: Arc<Shared>) {
                     shared.emit(ViewerEvent::MonitorsChanged { monitors, active });
                 }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
-                Ok(_) => {}
+                Ok(other) => {
+                    if let Err(msg) = features.dispatch(other) {
+                        tracing::debug!(msg = ?std::mem::discriminant(&*msg), "no feature handles this control message; ignoring");
+                    }
+                }
                 Err(NetError::Closed) => break EndReason::ConnectionLost("control stream closed".into()),
                 Err(e) => break EndReason::ConnectionLost(e.to_string()),
             }
         }
     };
+    // Ends every feature's inbox: features stop with the session.
+    drop(features);
     shared.end(reason);
 }
 

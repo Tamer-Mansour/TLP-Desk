@@ -337,12 +337,35 @@ pub enum BackendEvent {
     /// This device cannot accept incoming connections (connecting to others may still work).
     /// Sent at startup; the UI shows it until the app restarts.
     HostUnavailable(HostProblem),
+    // =======================================================================================
+    // FEATURE HOOK: feature lanes append their variants ONLY inside their own section below,
+    // so parallel branches never touch the same lines. Keep payload types in your own module
+    // (e.g. `backend/files.rs`) and map `HostEvent::Feature` / `ViewerEvent::Feature` to these
+    // in real.rs.
+    // =======================================================================================
+    // --- files: remote browser, transfers, Explorer copy/paste (TLP-files) ---
+
+    // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
+
+    // --- chat (TLP-ux) ---
+
+    // --- audio (TLP-audio) ---
+
+    // --- service: unattended access, secure desktop, Ctrl+Alt+Del, restart (TLP-service) ---
+
+    // --- privacy mode (TLP-privacy) ---
+
+    // --- settings / ux: address book, tray, banner (TLP-ux) ---
+
+    // --- perf: quality presets, latency overlay, all monitors (TLP-perf) ---
+
+    // --- power: WOL, recording, tunnels, whiteboard, connection log, device info (TLP-power) ---
 }
 
 /// Why this device cannot act as a host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostProblem {
-    /// The UDP port is taken, most likely by another running tlp-desk.
+    /// The UDP port is taken, most likely by another running TLP-Desk.
     PortInUse(u16),
     /// Networking could not start at all (no connections in either direction).
     NoNetwork(String),
@@ -391,6 +414,29 @@ pub trait Backend: Send + Sync {
     /// Viewer side: ask the host to stream (and map input to) another monitor. Confirmed by
     /// [`BackendEvent::MonitorsChanged`].
     fn select_monitor(&self, session: SessionId, index: u32);
+
+    // =======================================================================================
+    // FEATURE HOOK: feature lanes append methods ONLY inside their own section below. Give
+    // every new method a default body (a no-op or `tracing::debug!`) so `FakeBackend` and
+    // `RealBackend` only change where the lane actually implements it.
+    // =======================================================================================
+    // --- files (TLP-files) ---
+
+    // --- clipboard (TLP-clipboard) ---
+
+    // --- chat (TLP-ux) ---
+
+    // --- audio (TLP-audio) ---
+
+    // --- service (TLP-service) ---
+
+    // --- privacy mode (TLP-privacy) ---
+
+    // --- settings / ux (TLP-ux) ---
+
+    // --- perf (TLP-perf) ---
+
+    // --- power (TLP-power) ---
 }
 
 #[cfg(test)]

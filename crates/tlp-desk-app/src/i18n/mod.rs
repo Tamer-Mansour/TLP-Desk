@@ -206,6 +206,29 @@ strings! {
     DeviceNameRestart => "Restart TLP-Desk to announce the new name on the network.", "أعد تشغيل TLP-Desk لإعلان الاسم الجديد على الشبكة.";
     Appearance => "Language and display", "اللغة والعرض";
     ThisDeviceSettings => "This device", "هذا الجهاز";
+
+    // =======================================================================================
+    // FEATURE HOOK: feature lanes add their keys ONLY inside their own section below (English
+    // + Arabic on one line, natural Arabic wording, "TLP-Desk" stays in Latin letters). Keeping
+    // to your section avoids merge conflicts between parallel branches.
+    // =======================================================================================
+    // --- files ---
+
+    // --- clipboard ---
+
+    // --- chat ---
+
+    // --- audio ---
+
+    // --- service ---
+
+    // --- privacy ---
+
+    // --- settings/ux ---
+
+    // --- perf ---
+
+    // --- power ---
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.

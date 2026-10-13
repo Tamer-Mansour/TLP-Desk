@@ -22,10 +22,10 @@ we only looked at its structure and copied nothing from it.
 
 ```text
 Cargo.toml          workspace: members, [workspace.package], [workspace.dependencies], [workspace.lints]
-clippy.toml         lint tuning (tests may unwrap); lint *levels* live in Cargo.toml
-rustfmt.toml        stable rustfmt options only
-deny.toml           cargo-deny: licences, sources, advisories
-typos.toml          spell checker allow-list
+.clippy.toml        lint tuning (tests may unwrap); lint *levels* live in Cargo.toml
+.rustfmt.toml       stable rustfmt options only
+.cargo/deny.toml    cargo-deny: licences, sources, advisories
+.typos.toml         spell checker allow-list
 rust-toolchain.toml stable + clippy + rustfmt
 crates/tlp-desk-*   one crate per concern (see CLAUDE.md "Workspace layout")
 crates/*/tests/     integration tests (public API only)
@@ -159,8 +159,8 @@ let name = buf.get(4..end).ok_or(ProtoError::Truncated { need: end, have: buf.le
 - **Comments explain *why*, not *what***. A comment that restates the code is noise; a comment that
   records a measured number, an OS quirk or a rejected alternative is gold. *(photocraft
   contributing guide)*
-- **Config files explain themselves**: every non-obvious setting in `Cargo.toml`, `deny.toml`,
-  `clippy.toml` has a one-line comment saying why it is there, and every advisory ignore has a
+- **Config files explain themselves**: every non-obvious setting in `Cargo.toml`, `.cargo/deny.toml`,
+  `.clippy.toml` has a one-line comment saying why it is there, and every advisory ignore has a
   reason and a "revisit when". *(photocraft profile comments, pdfcraft deny.toml)*
 - Doc examples compile (`cargo test --doc`) or are marked `no_run` / `ignore` with a reason.
 
@@ -244,7 +244,7 @@ Rules:
 - **Add a dependency to `[workspace.dependencies]`** when a second crate needs it; pin to a major
   (`"1"`) or minor (`"0.36"`) version, never `"*"`.
 - **Permissive licences only**: MIT, Apache-2.0, BSD-2/3, ISC, Zlib, Unicode-3.0, BSL-1.0. No GPL,
-  LGPL, AGPL or MPL in the binary. `cargo deny check` enforces it (`deny.toml`). *(pdfcraft
+  LGPL, AGPL or MPL in the binary. `cargo deny check` enforces it (`.cargo/deny.toml`). *(pdfcraft
   deny.toml)*
 - **crates.io only.** A git dependency needs an immutable `rev` and an `allow-git` entry with a
   comment. *(photocraft / pdfcraft pin `craft-libs` by commit)*
@@ -266,8 +266,8 @@ Enabled now (root `Cargo.toml`, `[workspace.lints]`; all crates opt in):
 | `clippy::dbg_macro`, `clippy::todo`, `clippy::unimplemented` | warn | no debug leftovers or stubs in shipped code *(photocraft, pdfcraft, craft-libs)* |
 | `clippy::mem_forget` | warn | leaks OS handles / encoder instances |
 
-`-D warnings` in the gate turns every `warn` into an error. `clippy.toml` lets tests `unwrap`,
-`expect`, `panic` and index *(all four reference repos)*. `rustfmt.toml` uses stable options only and
+`-D warnings` in the gate turns every `warn` into an error. `.clippy.toml` lets tests `unwrap`,
+`expect`, `panic` and index *(all four reference repos)*. `.rustfmt.toml` uses stable options only and
 the default width.
 
 **Targets** (not enabled yet because they need refactors; counts are from 2026-10-13). Enable one per
