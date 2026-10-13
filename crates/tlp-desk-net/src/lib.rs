@@ -9,6 +9,7 @@
 //! * Feature data: [`Session::open_uni`] / [`Session::open_bi`] /
 //!   [`Session::accept_side_stream`] carry typed side streams ([`StreamKind`]) next to the
 //!   control and video streams.
+//! * [`Feature`] / [`FeatureSet`] / [`FeatureDispatch`]: how feature lanes plug into sessions.
 //! * [`Discovery`]: mDNS `_tlpdesk._udp.local.` + broadcast fallback on UDP 47401.
 //! * [`send_wake_on_lan`].
 //!
@@ -19,6 +20,7 @@ mod allow;
 mod discovery;
 mod endpoint;
 mod error;
+mod feature;
 mod session;
 mod tls;
 mod wol;
@@ -33,6 +35,9 @@ pub use endpoint::{
     PendingSession,
 };
 pub use error::NetError;
+pub use feature::{
+    Feature, FeatureCtx, FeatureDispatch, FeatureEvent, FeatureEventSink, FeatureSet,
+};
 pub use quinn::{RecvStream, SendStream};
 pub use session::{
     stream_priority, PeerInfo, Session, SideStream, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT,

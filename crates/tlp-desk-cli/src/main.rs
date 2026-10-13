@@ -313,6 +313,8 @@ async fn serve(dir: &Path, port: u16, cfg: HostConfig, auto_accept: bool) -> Res
                     HostEvent::SessionEnded { peer, reason, .. } => {
                         println!("{}", text::viewer_left(&peer, &reason));
                     }
+                    // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
+                    HostEvent::Feature { .. } => {}
                 }
             }
         }

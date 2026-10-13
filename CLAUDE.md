@@ -62,7 +62,7 @@ docs/                # protocol.md, security.md, user-guide (Arabic + English)
 | Concern | Choice |
 |---|---|
 | Async runtime | `tokio` |
-| Transport | `quinn` (QUIC), UDP port **47400**; control on a bidi stream, video on its own uni stream |
+| Transport | `quinn` (QUIC), UDP port **47400**; control on a bidi stream, one uni stream per video frame, typed side streams (`StreamKind`: file data, tunnel, audio, clipboard) for feature data |
 | Discovery | `mdns-sd`, service type `_tlpdesk._udp.local.`; UDP broadcast fallback on **47401**; manual IP always allowed |
 | Serialization | `serde` + `postcard`, length-prefixed frames |
 | Identity / TLS | `rcgen` self-signed cert per install, `rustls` custom verifier |
