@@ -5,8 +5,8 @@ written down. This page is for users who want to understand what is protected, a
 The wire-level details are in the [wire protocol](protocol.md); the reasoning behind each choice is
 in the [decision records](adr/index.md).
 
-> To report a vulnerability, please do not open a public issue; follow the repository's security
-> policy (`SECURITY.md`) once it is published, or contact the maintainer privately.
+> To report a vulnerability, please do not open a public issue; report it privately through
+> [GitHub Security Advisories](https://github.com/Tamer-Mansour/TLP-Desk/security/advisories/new).
 
 ## What TLP-Desk promises
 
