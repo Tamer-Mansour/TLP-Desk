@@ -122,6 +122,35 @@ pub enum Message {
         sample_rate: u32,
         channels: u8,
     },
+
+    // --- session / system (M3) ---
+    /// Viewer -> host: press Ctrl+Alt+Del (`SendSAS`, needs the service). Needs `SYSTEM`. (v4)
+    SendCtrlAltDel,
+    /// Viewer -> host: restart the host PC. With `reconnect` the host first sends a
+    /// [`Message::ReconnectTicket`]. Needs `RESTART`. (v4)
+    RestartRemote {
+        reconnect: bool,
+    },
+    /// Host -> viewer: a single-use ticket that lets this viewer (bound to its TLS fingerprint
+    /// on the host) re-authorize with `AuthRequest::ReconnectTicket` until `expires_unix_ms`,
+    /// without a new prompt, e.g. after the host rebooted. (v4)
+    ReconnectTicket {
+        token: Vec<u8>,
+        expires_unix_ms: u64,
+    },
+    /// Viewer -> host: blank the host's physical screen and block local input (or undo).
+    /// Host -> viewer: the actual state. Needs `PRIVACY_MODE`. (v4)
+    PrivacyMode {
+        enabled: bool,
+    },
+    /// Host -> viewer: the host shows the secure desktop (UAC, login or Ctrl+Alt+Del screen)
+    /// and/or is locked. Sent on change. (v4)
+    DesktopState {
+        secure_desktop: bool,
+        locked: bool,
+    },
+    /// Viewer -> host: lock the host workstation. Needs `SYSTEM`. (v4)
+    LockWorkstation,
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -159,6 +188,10 @@ impl Message {
             M::ClipboardFiles { .. } => Permissions::CLIPBOARD.union(Permissions::FILES),
             M::ChatMessage { .. } => Permissions::CHAT,
             M::AudioControl { .. } => Permissions::AUDIO,
+            M::ReconnectTicket { .. } | M::DesktopState { .. } => Permissions::NONE,
+            M::SendCtrlAltDel | M::LockWorkstation => Permissions::SYSTEM,
+            M::RestartRemote { .. } => Permissions::RESTART,
+            M::PrivacyMode { .. } => Permissions::PRIVACY_MODE,
             // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }

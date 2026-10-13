@@ -382,6 +382,19 @@ fn v4_samples() -> Vec<Message> {
             sample_rate: 0,
             channels: 0,
         },
+        // --- session / system ---
+        Message::SendCtrlAltDel,
+        Message::RestartRemote { reconnect: true },
+        Message::ReconnectTicket {
+            token: vec![0x5A; 32],
+            expires_unix_ms: 1_760_000_600_000,
+        },
+        Message::PrivacyMode { enabled: true },
+        Message::DesktopState {
+            secure_desktop: true,
+            locked: false,
+        },
+        Message::LockWorkstation,
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -441,6 +454,8 @@ fn v4_variants_are_appended_in_order() {
             },
             25,
         ),
+        (Message::SendCtrlAltDel, 26),
+        (Message::LockWorkstation, 31),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];
     for (m, i) in expected {
