@@ -158,6 +158,10 @@ fn session(app: &mut App, lang: Lang) {
 fn monitors(app: &mut App, lang: Lang) {
     home(app, lang);
     start_session(app, lang, 1);
+    if lang == Lang::Ar {
+        // Screen buttons ١ / ٢ as described in the Arabic user guide.
+        use_digits(app, DigitStyle::ArabicIndic);
+    }
 }
 
 fn settings(app: &mut App, lang: Lang) {

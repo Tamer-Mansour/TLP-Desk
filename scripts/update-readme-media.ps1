@@ -38,6 +38,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $media = Join-Path $root 'docs\media'
+# `-File` passes "a,b" as one string: accept comma-separated names too.
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Only.Count -gt 0) { $SkipVideo = $true }
 
 if ([IO.Path]::GetFullPath($RawDir).StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
