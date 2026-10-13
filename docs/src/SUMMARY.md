@@ -32,6 +32,7 @@
     - [Ctrl+Alt+Del and lock](user-guide/en/coming-soon/ctrl-alt-del.md)
     - [Privacy mode](user-guide/en/coming-soon/privacy-mode.md)
     - [Wake-on-LAN](user-guide/en/coming-soon/wake-on-lan.md)
+    - [Session recording](user-guide/en/coming-soon/recording.md)
 
 # Security
 
