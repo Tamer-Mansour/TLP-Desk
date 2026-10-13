@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "tlp-desk-audio"
 description = "System audio loopback and Opus"
 version.workspace = true
@@ -11,3 +11,6 @@ workspace = true
 
 [dependencies]
 thiserror.workspace = true
+# Safe bindings to libopus (BSD-3-Clause). `opusic-sys` builds the bundled libopus 1.6 with
+# CMake; the copy that ships with Visual Studio's C++ tools is enough on Windows.
+opus = "0.4"
