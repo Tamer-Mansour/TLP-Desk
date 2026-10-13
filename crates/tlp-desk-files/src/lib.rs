@@ -13,7 +13,8 @@ pub mod clipboard;
 mod error;
 
 pub use clipboard::{
-    ClipContent, ClipImage, ClipKind, ClipboardBackend, ClipboardConfig, ClipboardEvent, Direction,
-    MemoryClipboard, RefusedReason,
+    ClipContent, ClipImage, ClipKind, ClipboardBackend, ClipboardConfig, ClipboardEvent,
+    ClipboardFeature, Direction, LocalFilesHook, MemoryClipboard, RefusedReason, FEATURE_NAME,
+    INLINE_MAX,
 };
 pub use error::FilesError;

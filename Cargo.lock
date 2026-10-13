@@ -3922,6 +3922,7 @@ dependencies = [
 name = "tlp-desk-files"
 version = "0.1.0"
 dependencies = [
+ "png",
  "thiserror 2.0.21",
  "tlp-desk-crypto",
  "tlp-desk-net",
