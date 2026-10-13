@@ -229,6 +229,58 @@ strings! {
     // --- perf ---
 
     // --- power ---
+
+    // --- unattended ---
+    UnattendedTitle => "Unattended access", "الوصول دون مرافقة";
+    UnattendedHint => "With a permanent password you can connect to this device when nobody is there to accept.", "بكلمة مرور دائمة يمكنك الاتصال بهذا الجهاز حتى لو لم يكن أحد بجانبه ليوافق.";
+    PasswordIsSet => "A permanent password is set.", "تم تعيين كلمة مرور دائمة.";
+    PasswordNotSet => "No permanent password is set.", "لم تُعيَّن كلمة مرور دائمة.";
+    CurrentPassword => "Current password", "كلمة المرور الحالية";
+    NewPassword => "New password", "كلمة المرور الجديدة";
+    RepeatPassword => "Repeat the new password", "أعد كتابة كلمة المرور الجديدة";
+    SetPassword => "Set password", "تعيين كلمة المرور";
+    ChangePassword => "Change password", "تغيير كلمة المرور";
+    RemovePassword => "Remove password", "إزالة كلمة المرور";
+    ShowPassword => "Show password", "إظهار كلمة المرور";
+    HidePassword => "Hide password", "إخفاء كلمة المرور";
+    PasswordStrength => "Strength: {level}", "القوة: {level}";
+    StrengthTooShort => "too short (at least {n} characters)", "قصيرة جداً (\u{2066}{n}\u{2069} أحرف على الأقل)";
+    StrengthWeak => "weak", "ضعيفة";
+    StrengthFair => "fair", "مقبولة";
+    StrengthStrong => "strong", "قوية";
+    PasswordsDiffer => "The two new passwords are not the same.", "كلمتا المرور الجديدتان غير متطابقتين.";
+    PasswordSaved => "The permanent password was saved.", "حُفظت كلمة المرور الدائمة.";
+    PasswordRemoved => "The permanent password was removed. Password sign-in is off.", "أُزيلت كلمة المرور الدائمة. تسجيل الدخول بكلمة المرور متوقف.";
+    ErrCurrentPassword => "The current password is wrong.", "كلمة المرور الحالية غير صحيحة.";
+    ErrPasswordSave => "The password could not be saved: {detail}", "تعذّر حفظ كلمة المرور: {detail}";
+    ErrPasswordUnavailable => "This device cannot accept connections, so no password can be set.", "لا يستطيع هذا الجهاز استقبال اتصالات، لذا لا يمكن تعيين كلمة مرور.";
+    PasswordAdminNote => "TLP-Desk runs as administrator: the current password is not needed.", "يعمل TLP-Desk بصلاحيات المسؤول: لا حاجة إلى كلمة المرور الحالية.";
+    PasswordUserScope => "Saved for your Windows account only, because TLP-Desk is not running as administrator. To connect before anyone signs in, install the TLP-Desk service.", "حُفظت لحساب Windows الخاص بك فقط لأن TLP-Desk لا يعمل بصلاحيات المسؤول. للاتصال قبل أن يسجّل أحد الدخول، ثبّت خدمة TLP-Desk.";
+    SignInWith => "Sign in with", "تسجيل الدخول بواسطة";
+    SignInCode => "One-time code", "رمز لمرة واحدة";
+    SignInPassword => "Password", "كلمة المرور";
+    PasswordFieldHint => "The other device's permanent password", "كلمة المرور الدائمة للجهاز الآخر";
+    PasswordFieldNote => "The password is never sent: both sides only prove they know it.", "لا تُرسل كلمة المرور أبداً: يثبت الطرفان فقط أنهما يعرفانها.";
+    ErrPasswordEmpty => "Enter the password.", "أدخل كلمة المرور.";
+    ErrLockedOut => "Too many wrong attempts. You are locked out for {minutes} minutes.", "محاولات خاطئة كثيرة. تم إيقافك لمدة \u{2066}{minutes}\u{2069} دقائق.";
+    SystemMenu => "System", "النظام";
+    RestartRemote => "Restart remote PC", "إعادة تشغيل الجهاز البعيد";
+    LockRemote => "Lock remote PC", "قفل الجهاز البعيد";
+    SendCtrlAltDel => "Send Ctrl+Alt+Del", "إرسال Ctrl+Alt+Del";
+    CtrlAltDelHint => "Needs the TLP-Desk service on the remote PC.", "يتطلب خدمة TLP-Desk على الجهاز البعيد.";
+    SystemNotAllowed => "The other device does not allow this.", "الجهاز الآخر لا يسمح بذلك.";
+    RestartConfirmTitle => "Restart the remote PC?", "إعادة تشغيل الجهاز البعيد؟";
+    RestartConfirmBody => "All programs on {name} will be closed and unsaved work will be lost. TLP-Desk reconnects automatically when the PC is back.", "ستُغلق كل البرامج على {name} وسيضيع العمل غير المحفوظ. يعيد TLP-Desk الاتصال تلقائياً عند عودة الجهاز.";
+    RestartConfirm => "Restart", "إعادة التشغيل";
+    LockConfirmTitle => "Lock the remote PC?", "قفل الجهاز البعيد؟";
+    LockConfirmBody => "{name} will be locked. Whoever uses it must sign in again.", "سيُقفل {name}. على من يستخدمه تسجيل الدخول من جديد.";
+    LockConfirm => "Lock", "قفل";
+    RestartRequested => "Restart requested. Waiting for the remote PC to go down…", "طُلبت إعادة التشغيل. بانتظار توقف الجهاز البعيد…";
+    Restarting => "Restarting… waiting for the remote PC", "جارٍ إعادة التشغيل… بانتظار الجهاز البعيد";
+    RestartingAttempt => "Reconnect attempt {n}", "محاولة إعادة الاتصال {n}";
+    RestartingNote => "Before anyone signs in, this works only if the TLP-Desk service is installed on the remote PC.", "قبل أن يسجّل أحد الدخول، لا يعمل هذا إلا إذا كانت خدمة TLP-Desk مثبتة على الجهاز البعيد.";
+    StopWaiting => "Stop waiting", "إيقاف الانتظار";
+    ReconnectFailedText => "The remote PC did not come back: {detail}", "لم يعد الجهاز البعيد: {detail}";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.
