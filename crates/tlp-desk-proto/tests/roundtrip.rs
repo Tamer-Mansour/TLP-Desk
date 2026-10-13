@@ -351,6 +351,20 @@ fn v4_samples() -> Vec<Message> {
             item: None,
             error: FsError::NoSpace,
         },
+        // --- clipboard ---
+        Message::ClipboardFiles {
+            transfer_id: 77,
+            items: vec![TransferItem {
+                rel_path: "صورة.png".into(),
+                size: 10,
+                modified_unix_ms: 0,
+                is_dir: false,
+            }],
+        },
+        Message::ClipboardHtml {
+            html: "<b>\u{202B}مرحبا\u{202C}</b> \u{200D}\u{200C}".into(),
+            alt_text: "مرحبا".into(),
+        },
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -386,6 +400,13 @@ fn v4_variants_are_appended_in_order() {
                 error: FsError::Cancelled,
             },
             21,
+        ),
+        (
+            Message::ClipboardHtml {
+                html: String::new(),
+                alt_text: String::new(),
+            },
+            23,
         ),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];

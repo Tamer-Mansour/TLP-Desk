@@ -89,6 +89,21 @@ pub enum Message {
         item: Option<u32>,
         error: FsError,
     },
+
+    // --- clipboard (CLIPBOARD; files also need FILES) ---
+    /// Either direction: files were copied (e.g. Ctrl+C in Explorer). The list is announced
+    /// under `transfer_id`; when the user pastes on the other side, the bytes are pulled with a
+    /// [`TransferOffer`] carrying the same id (direction from the viewer's point of view). (v4)
+    ClipboardFiles {
+        transfer_id: u64,
+        items: Vec<TransferItem>,
+    },
+    /// Either direction: HTML clipboard content (the `CF_HTML` fragment, UTF-8) plus its
+    /// plain-text alternative. (v4)
+    ClipboardHtml {
+        html: String,
+        alt_text: String,
+    },
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -122,6 +137,9 @@ impl Message {
             | M::TransferCancel { .. }
             | M::TransferDone { .. }
             | M::TransferError { .. } => Permissions::FILES,
+            M::ClipboardHtml { .. } => Permissions::CLIPBOARD,
+            M::ClipboardFiles { .. } => Permissions::CLIPBOARD.union(Permissions::FILES),
+            // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }
 }
