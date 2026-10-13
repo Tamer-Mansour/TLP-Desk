@@ -10,6 +10,8 @@
 //!   `tiny-skia`, identical on host and viewer.
 //! * [`Editor`]: the viewer's document (pen, highlighter, arrow, rectangle, eraser,
 //!   undo/redo, fading strokes) producing the ops to send.
+//! * [`WhiteboardOverlay`] / [`start_whiteboard_overlay`]: the host's topmost, click-through
+//!   layered window over the streamed monitor, with a small "clear" badge for the host user.
 //!
 //! The overlay window is excluded from screen capture: the viewer renders the same strokes
 //! locally on top of the video, so they appear without waiting for a captured, encoded and
@@ -17,13 +19,21 @@
 
 mod draw;
 mod editor;
+mod overlay;
 mod render;
 mod simplify;
 mod stroke;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows;
 
 pub use draw::{arrow_points, rect_points, StrokeStreamer, FLUSH_POINTS};
 pub use editor::{
     Editor, Style, Tool, FLUSH_INTERVAL, HIGHLIGHTER_ALPHA, HIGHLIGHTER_WIDTH_FACTOR,
+};
+pub use overlay::{
+    clear_button_image, clear_button_size, lock_board, overlay_size_ok, start_whiteboard_overlay,
+    ClearRequestFn, SharedBoard, WhiteboardOverlay, MAX_OVERLAY_PIXELS,
 };
 pub use render::{
     blit, damage_region, norm_to_px, render_full, render_region, width_px, ChannelOrder, PxRect,

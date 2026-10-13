@@ -17,6 +17,11 @@
 //! [`RemotePointerMarker`] shows a green arrow at the pointer on the host screen while the
 //! remote viewer is moving it; it is excluded from screen capture.
 //!
+//! # Whiteboard
+//! [`whiteboard`] holds the draw-on-screen model shared by both sides (strokes, simplification,
+//! the viewer's [`whiteboard::Editor`], `tiny-skia` rendering) and the host's overlay window
+//! ([`whiteboard::start_whiteboard_overlay`]), which is excluded from capture like the marker.
+//!
 //! # Viewer
 //! [`ViewRect`] maps a pointer position inside the displayed (scaled, letterboxed) video to
 //! the normalized wire coordinates. [`KeyboardGrab`] captures system keys (Win, Alt+Tab,
