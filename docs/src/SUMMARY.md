@@ -6,6 +6,7 @@
 
 - [Crates]()
   - [tlp-desk-proto](dev/crates/proto.md)
+  - [tlp-desk-crypto](dev/crates/crypto.md)
 
 # Reference
 
