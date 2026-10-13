@@ -9,12 +9,17 @@
 #![forbid(unsafe_code)]
 
 mod codec;
+pub mod device;
 pub mod dsp;
 mod error;
 pub mod format;
 mod jitter;
 
 pub use codec::{OpusDecoder, OpusEncoder, DEFAULT_BITRATE};
+pub use device::{
+    AudioCapture, AudioPlayback, DeviceHandle, PcmChunk, PcmSink, PcmSource, SystemCapture,
+    SystemPlayback,
+};
 pub use dsp::Resampler;
 pub use error::AudioError;
 pub use jitter::{JitterBuffer, JitterConfig, JitterStats, Playout};
