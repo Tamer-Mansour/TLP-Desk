@@ -32,11 +32,17 @@ Paths travel as UTF-8 strings in the receiver's native form. On Windows that mea
 and from UTF-16 at the OS boundary — Arabic file and folder names must survive the round trip
 (there are already Arabic-path samples in the proto round-trip tests).
 
-## Things not defined yet
+- **File transfer control** (v4): `TransferOffer { id, direction, source_dir, dest_dir, items,
+  total_bytes, resume }`, `TransferAccept { id, resume }`, `TransferReject`, `TransferProgress`
+  (at most ~4 per second), `TransferCancel`, `TransferDone { id, item, blake3 }` (the receiver
+  verifies a BLAKE3 hash of each file) and `TransferError`. Item paths are relative,
+  `/`-separated and must not contain `..`. File bytes never travel on the control stream.
+- **Clipboard extensions** (v4): `ClipboardHtml { html, alt_text }` and `ClipboardFiles {
+  transfer_id, items }` — files copied on one side are only transferred when the user pastes on
+  the other.
 
-Doc comments in `tlp-desk-proto/src/stream.rs` refer to `TransferOffer` and `ClipboardHtml`, and
-`FsError::HashMismatch` mentions `blake3`; none of these exist yet. Adding them is a protocol
-change (bump `PROTOCOL_VERSION`, update `docs/protocol.md`).
+The full flow is specified in the [wire protocol](../../protocol.md), section *Features (v4)*.
+The BLAKE3 hash implies a new dependency for this crate (check it against `deny.toml`).
 
 ## Arabic checklist for this lane
 
