@@ -10,12 +10,14 @@
 //! before buffers fill instead of after packets are lost.
 //!
 //! * **Congestion level** per tick: *severe* when the host had to drop frames, the viewer lost
-//!   several, QUIC reported a congestion event or the RTT rose more than 40 ms over its
-//!   10-second minimum; *mild* when two or more frames are in flight, the viewer lost a frame or
-//!   the RTT rose more than 12 ms (+ half the base RTT, for Wi-Fi jitter). Isolated packet loss
-//!   alone is not congestion (Wi-Fi loses packets without being full; QUIC retransmits).
-//! * **Bitrate, AIMD**: mild x0.85, severe x0.6 (and never above 85 % of what QUIC actually
-//!   sent during the congested tick), at most once per 400 ms. After 1.5 s without congestion
+//!   several or the RTT rose more than 40 ms over its 10-second minimum; *mild* when two or
+//!   more frames are in flight, the viewer lost a frame, the RTT rose more than 12 ms (+ half
+//!   the base RTT, for Wi-Fi jitter), or QUIC reduced its congestion window while video was
+//!   waiting. Isolated packet loss alone is not congestion (Wi-Fi loses packets without being
+//!   full, QUIC retransmits, and the loss-driven window reductions it causes are ignored while
+//!   no video frame is waiting).
+//! * **Bitrate, AIMD**: mild x0.85, severe x0.6 (and, when frames were dropped, never above
+//!   85 % of what QUIC actually sent during that tick), at most once per 400 ms. After 1.5 s without congestion
 //!   the target grows additively (6 % of the ceiling + 10 % of the current target per second).
 //! * **Frame rate**: halved (60 -> 30 -> 15) when the bitrate sits at its floor and the link is
 //!   still congested for 2 s, or when the viewer's decoder needs more than 85 % of the frame
@@ -258,9 +260,10 @@ impl Controller {
             .map_or(Duration::ZERO, |b| rtt.saturating_sub(b));
         let mild_queue = QUEUE_MILD + self.base_rtt().unwrap_or_default() / 2;
         let dropped = s.viewer.map_or(0, |v| v.frames_dropped);
-        if s.send_drops > 0 || dropped > 2 || s.congestion_events > 0 || queue > QUEUE_SEVERE {
+        let window_cut = s.congestion_events > 0 && (s.in_flight >= 1 || queue > mild_queue / 2);
+        if s.send_drops > 0 || dropped > 2 || queue > QUEUE_SEVERE {
             Congestion::Severe
-        } else if s.in_flight >= 2 || dropped > 0 || queue > mild_queue {
+        } else if s.in_flight >= 2 || dropped > 0 || queue > mild_queue || window_cut {
             Congestion::Mild
         } else {
             Congestion::Clear
@@ -311,8 +314,9 @@ impl Controller {
                         MILD_DECREASE
                     };
                     let mut next = u64::from(self.target) * factor / 1000;
-                    if level == Congestion::Severe {
-                        // What actually got through is the best capacity estimate.
+                    if s.send_drops > 0 {
+                        // Video did not fit: what actually got through is the best capacity
+                        // estimate (on a mostly static screen the sent rate says nothing).
                         if let Some(sent) = s.sent_kbps.filter(|&k| k > min) {
                             next = next.min(u64::from(sent) * 85 / 100);
                         }
@@ -521,6 +525,32 @@ mod tests {
             ..Signals::default()
         });
         assert_eq!(ctl.last_congestion(), Congestion::Severe);
+    }
+
+    #[test]
+    fn window_cuts_count_only_while_video_waits() {
+        let mut ctl = Controller::new(ControllerConfig::adaptive(10_000, 60));
+        // Random Wi-Fi loss made QUIC cut its window, but no frame is waiting: ignored.
+        let d = ctl.tick(&Signals {
+            at: at(0),
+            rtt: at(2),
+            congestion_events: 1,
+            sent_kbps: Some(500),
+            ..Signals::default()
+        });
+        assert_eq!(ctl.last_congestion(), Congestion::Clear);
+        assert_eq!(d.bitrate_kbps, 10_000);
+        // A frame is waiting: mild, and no sent-rate cap without drops.
+        let d = ctl.tick(&Signals {
+            at: at(250),
+            rtt: at(2),
+            in_flight: 1,
+            congestion_events: 1,
+            sent_kbps: Some(1_000),
+            ..Signals::default()
+        });
+        assert_eq!(ctl.last_congestion(), Congestion::Mild);
+        assert_eq!(d.bitrate_kbps, 8_500);
     }
 
     #[test]
