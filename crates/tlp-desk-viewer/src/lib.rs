@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 mod frame;
+pub mod recording;
 mod session;
 
 use std::net::{IpAddr, SocketAddr};
