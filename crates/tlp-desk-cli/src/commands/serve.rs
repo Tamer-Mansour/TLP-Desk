@@ -7,7 +7,10 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
-use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
+use tlp_desk_host::{
+    DeviceInfoFeature, Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS,
+    DEVICE_INFO_FEATURE,
+};
 use tlp_desk_net::{Endpoint, EndpointConfig, FeatureSet};
 use tlp_desk_proto::Permissions;
 
@@ -79,7 +82,7 @@ impl ServeArgs {
 /// The session features the CLI host serves.
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
 fn host_features() -> FeatureSet {
-    FeatureSet::new()
+    FeatureSet::new().with(Arc::new(DeviceInfoFeature::system()))
 }
 
 /// Runs `serve` until Ctrl+C.
@@ -187,6 +190,10 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
+                    HostEvent::Feature { id, event } if event.feature == DEVICE_INFO_FEATURE => out.event(
+                        text::device_info_served(id.0),
+                        &json!({ "type": "device_info_served", "session": id.0 }),
+                    ),
                     HostEvent::Feature { .. } => {}
                 }
             }

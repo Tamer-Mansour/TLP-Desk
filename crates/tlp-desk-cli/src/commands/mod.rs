@@ -7,6 +7,7 @@
 pub mod common;
 pub mod connect;
 pub mod id;
+pub mod info;
 pub mod list;
 pub mod serve;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
@@ -60,6 +61,8 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// Viewer: show a host's OS, CPU, RAM, disks, uptime and name (needs VIEW).
+    Info(info::InfoArgs),
     // FEATURE HOOK: one variant per new subcommand.
 }
 
@@ -87,6 +90,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::Info(a) => info::run(&ctx, a).await,
         // FEATURE HOOK: one arm per new subcommand.
     }
 }
@@ -197,6 +201,28 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("Exit codes:"));
         assert!(help.contains("TLP_DESK_PASSWORD"));
+    }
+
+    #[test]
+    fn info_parses_target_auth_and_timeout() {
+        let Cmd::Info(i) = parse(&[
+            "--json",
+            "info",
+            "مكتب-المحاسبة",
+            "--code",
+            "654321",
+            "--timeout",
+            "3",
+        ])
+        .unwrap()
+        .cmd
+        else {
+            panic!("not info")
+        };
+        assert_eq!(i.dial.target, "مكتب-المحاسبة");
+        assert_eq!(i.dial.auth.code.as_deref(), Some("654321"));
+        assert_eq!(i.timeout, 3);
+        assert!(parse(&["info"]).is_err());
     }
 
     #[test]
