@@ -425,6 +425,44 @@ impl ViewerSession {
     }
 
     fn stats_overlay(&self, ui: &egui::Ui, tx: Tx, area: Rect) {
+        let font = egui::FontId::proportional(13.5);
+        let galleys: Vec<_> = self
+            .stat_lines(tx)
+            .into_iter()
+            .map(|text| {
+                ui.painter()
+                    .layout_no_wrap(text, font.clone(), Color32::from_gray(235))
+            })
+            .collect();
+        let pad = 10.0;
+        let w = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max) + pad * 2.0;
+        let h = galleys.iter().map(|g| g.size().y + 2.0).sum::<f32>() + pad * 2.0;
+        let margin = 12.0;
+        let min = if tx.rtl() {
+            egui::pos2(area.min.x + margin, area.min.y + margin)
+        } else {
+            egui::pos2(area.max.x - margin - w, area.min.y + margin)
+        };
+        let rect = Rect::from_min_size(min, egui::vec2(w, h));
+        let painter = ui.painter();
+        painter.rect_filled(rect, 10.0, Color32::from_black_alpha(185));
+        let mut y = rect.min.y + pad;
+        for g in galleys {
+            let x = if tx.rtl() {
+                rect.max.x - pad - g.size().x
+            } else {
+                rect.min.x + pad
+            };
+            let gh = g.size().y;
+            painter.galley(egui::pos2(x, y), g, Color32::WHITE);
+            y += gh + 2.0;
+        }
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(500));
+    }
+
+    /// The overlay's lines, display-ready ("label: value" in the UI direction).
+    fn stat_lines(&self, tx: Tx) -> Vec<String> {
         let d = tx.digits;
         let mut lines: Vec<(S, String)> = Vec::new();
         if let Some(s) = self.stats {
@@ -457,41 +495,10 @@ impl ViewerSession {
                 d,
             )),
         ));
-
-        let font = egui::FontId::proportional(13.5);
-        let galleys: Vec<_> = lines
+        lines
             .iter()
-            .map(|(k, v)| {
-                let text = tx.p(&format!("{}: {}", tx.raw(*k), v));
-                ui.painter()
-                    .layout_no_wrap(text, font.clone(), Color32::from_gray(235))
-            })
-            .collect();
-        let pad = 10.0;
-        let w = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max) + pad * 2.0;
-        let h = galleys.iter().map(|g| g.size().y + 2.0).sum::<f32>() + pad * 2.0;
-        let margin = 12.0;
-        let min = if tx.rtl() {
-            egui::pos2(area.min.x + margin, area.min.y + margin)
-        } else {
-            egui::pos2(area.max.x - margin - w, area.min.y + margin)
-        };
-        let rect = Rect::from_min_size(min, egui::vec2(w, h));
-        let painter = ui.painter();
-        painter.rect_filled(rect, 10.0, Color32::from_black_alpha(185));
-        let mut y = rect.min.y + pad;
-        for g in galleys {
-            let x = if tx.rtl() {
-                rect.max.x - pad - g.size().x
-            } else {
-                rect.min.x + pad
-            };
-            let gh = g.size().y;
-            painter.galley(egui::pos2(x, y), g, Color32::WHITE);
-            y += gh + 2.0;
-        }
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(500));
+            .map(|(k, v)| tx.p(&format!("{}: {}", tx.raw(*k), v)))
+            .collect()
     }
 
     fn handle_input(
@@ -911,6 +918,38 @@ mod tests {
             out.textures_delta.clear(); // headless: no renderer consumes the uploads
         }
         assert!(backend.1.lock().unwrap().is_empty());
+    }
+
+    /// The resolution value keeps its W×H order inside the Arabic overlay line: it is displayed
+    /// exactly like the standalone number `tx.n("1024×768")` (Arabic-Indic digit runs are
+    /// pre-reversed for egui, which draws Arabic-font runs right to left).
+    #[test]
+    fn arabic_overlay_keeps_resolution_order() {
+        let frames = FrameSlot::new();
+        let peer = PeerInfo {
+            device_id: DeviceId(2),
+            name: "حاسوب-المكتب".into(),
+            address: "192.168.1.2".parse().unwrap(),
+        };
+        let mut session = ViewerSession::new(SessionId(1), peer, Permissions::ALL, frames);
+        session.frame_size = [1024, 768];
+        for digits in [DigitStyle::Western, DigitStyle::ArabicIndic] {
+            for lang in [Lang::Ar, Lang::En] {
+                let tx = Tx::new(lang, digits);
+                let want = tx.n("1024×768");
+                let lines = session.stat_lines(tx);
+                assert!(
+                    lines[0].contains(&want),
+                    "{lang:?} {digits:?}: {:?}",
+                    lines[0]
+                );
+            }
+        }
+        // And the standalone form is W first for Western digits.
+        assert_eq!(
+            Tx::new(Lang::Ar, DigitStyle::Western).n("1024×768"),
+            "1024×768"
+        );
     }
 
     #[test]
