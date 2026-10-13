@@ -16,12 +16,13 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use crate::output::Output;
 use crate::text;
 use common::Ctx;
 
 /// The whole command line.
 #[derive(Debug, Parser)]
-#[command(name = "TLP-Desk-cli", version, about = text::ABOUT)]
+#[command(name = "TLP-Desk-cli", version, about = text::ABOUT, after_help = crate::exit::HELP_TABLE)]
 pub struct Cli {
     /// Directory holding the identity key and known hosts (default: the app's data dir).
     #[arg(long, global = true)]
@@ -38,6 +39,12 @@ pub struct Cli {
         default_value = "en"
     )]
     pub lang: text::Lang,
+    /// Machine-readable output: one JSON object per line on stdout, each with a "type" field.
+    #[arg(long, global = true)]
+    pub json: bool,
+    /// Only print results and errors, no progress lines.
+    #[arg(short, long, global = true)]
+    pub quiet: bool,
     #[command(subcommand)]
     pub cmd: Cmd,
 }
@@ -56,6 +63,16 @@ pub enum Cmd {
     // FEATURE HOOK: one variant per new subcommand.
 }
 
+impl Cli {
+    /// The output settings these flags select.
+    pub fn output(&self) -> Output {
+        Output {
+            json: self.json,
+            quiet: self.quiet,
+        }
+    }
+}
+
 /// Runs the selected subcommand.
 pub async fn run(cli: &Cli) -> Result<()> {
     let ctx = Ctx {
@@ -63,6 +80,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
             .data_dir
             .clone()
             .unwrap_or_else(tlp_desk_crypto::default_dir),
+        out: cli.output(),
     };
     match &cli.cmd {
         Cmd::Id(a) => id::run(&ctx, a),
@@ -159,6 +177,26 @@ mod tests {
         assert_eq!(parse(&["--lang", "ar", "id"]).unwrap().lang, text::Lang::Ar);
         assert_eq!(parse(&["id", "--lang", "en"]).unwrap().lang, text::Lang::En);
         assert!(parse(&["--lang", "fr", "id"]).is_err());
+    }
+
+    #[test]
+    fn json_and_quiet_are_global() {
+        let cli = parse(&["list", "--json", "-q"]).unwrap();
+        assert_eq!(
+            cli.output(),
+            Output {
+                json: true,
+                quiet: true
+            }
+        );
+        assert_eq!(parse(&["id"]).unwrap().output(), Output::default());
+    }
+
+    #[test]
+    fn help_documents_exit_codes() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("Exit codes:"));
+        assert!(help.contains("TLP_DESK_PASSWORD"));
     }
 
     #[test]

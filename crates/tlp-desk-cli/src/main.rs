@@ -5,6 +5,8 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod exit;
+mod output;
 mod text;
 
 use std::process::ExitCode;
@@ -32,9 +34,6 @@ fn main() -> ExitCode {
         .and_then(|rt| rt.block_on(commands::run(&cli)));
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("{}", text::error_line(&e));
-            ExitCode::FAILURE
-        }
+        Err(e) => ExitCode::from(cli.output().error(&e, &text::error_line(&e)).code()),
     }
 }

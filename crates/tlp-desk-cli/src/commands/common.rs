@@ -7,15 +7,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::Args;
-use tlp_desk_crypto::Identity;
-use tlp_desk_net::{Discovery, DiscoveryConfig, Endpoint, EndpointConfig, FeatureSet};
+use serde_json::{json, Value};
+use tlp_desk_crypto::{DeviceId, Identity};
+use tlp_desk_net::{Discovery, DiscoveryConfig, Endpoint, EndpointConfig, FeatureSet, PeerInfo};
 use tlp_desk_viewer::{
     AuthMethod, ConnectTarget, KnownHostsStore, PixelFormat, Viewer, ViewerConfig, ViewerError,
     ViewerEvents, ViewerSession,
 };
 
+use crate::exit::CliError;
+use crate::output::Output;
 use crate::text;
 
 /// Environment variable holding the unattended-access password. The password is never
@@ -27,6 +30,22 @@ pub const PASSWORD_ENV: &str = "TLP_DESK_PASSWORD";
 pub struct Ctx {
     /// Directory holding the identity key and known hosts.
     pub data_dir: PathBuf,
+    /// Where output goes (`--json`, `--quiet`).
+    pub out: Output,
+}
+
+/// A device ID in its compact machine form (9 ASCII digits, no spaces).
+pub fn id_str(id: DeviceId) -> String {
+    format!("{:09}", id.as_u32())
+}
+
+/// JSON description of a peer.
+pub fn peer_json(peer: &PeerInfo) -> Value {
+    json!({
+        "device_id": id_str(peer.device_id),
+        "name": peer.name,
+        "addr": peer.addr.to_string(),
+    })
 }
 
 /// How the viewer authenticates (shared by every command that dials a host).
@@ -135,9 +154,9 @@ pub async fn dial(ctx: &Ctx, args: &DialArgs, features: FeatureSet) -> Result<Di
             ..ViewerConfig::default()
         },
     )?;
-    println!("{}", text::connecting(&target.to_string()));
+    ctx.out.progress(text::connecting(&target.to_string()));
     if auth == AuthMethod::AcceptPrompt {
-        println!("{}", text::waiting_for_accept());
+        ctx.out.progress(text::waiting_for_accept());
     }
     let forget_key = args.forget_key;
     let attempt = async {
@@ -157,7 +176,7 @@ pub async fn dial(ctx: &Ctx, args: &DialArgs, features: FeatureSet) -> Result<Di
     };
     let (session, events) = tokio::select! {
         r = attempt => r?,
-        _ = tokio::signal::ctrl_c() => bail!("cancelled"),
+        _ = tokio::signal::ctrl_c() => return Err(CliError::Interrupted.into()),
     };
     Ok(Dialed {
         session,
