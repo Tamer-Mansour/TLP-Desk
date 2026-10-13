@@ -9,6 +9,7 @@
   - [tlp-desk-crypto](dev/crates/crypto.md)
   - [tlp-desk-net](dev/crates/net.md)
   - [tlp-desk-capture](dev/crates/capture.md)
+  - [tlp-desk-codec](dev/crates/codec.md)
 
 # Reference
 
