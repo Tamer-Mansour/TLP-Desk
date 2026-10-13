@@ -800,14 +800,20 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
     let (select_tx, select_rx) = watch::channel(inner.cfg.monitor);
     let (active_tx, mut active_rx) = watch::channel(inner.cfg.monitor);
+    // Quality presets, viewer feedback and latency probes (see `adapt`).
+    let (perf, quality_rx) = adapt::PerfControl::new(adapt::QualityTarget::host_default(
+        inner.cfg.max_capture_size,
+        inner.cfg.fps,
+    ));
     let ctx = pipeline::PipelineCtx {
         capturer_factory: inner.cfg.capturer_factory.clone(),
         encoder_factory: inner.cfg.encoder_factory.clone(),
+        monitor_lister: inner.cfg.monitor_lister.clone(),
         monitor: inner.cfg.monitor,
         select: select_rx,
         active: active_tx,
-        fps: inner.cfg.fps,
-        max_size: inner.cfg.max_capture_size,
+        quality: quality_rx,
+        adapt: perf.shared.clone(),
         session: session.clone(),
         keyframe: keyframe.clone(),
         stop: stop.clone(),
@@ -919,7 +925,11 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                     }
                 }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
-                Ok(other) => route_to_feature(&features, current, id, other),
+                Ok(other) => match perf.handle(&session, current, other).await {
+                    Ok(None) => {}
+                    Ok(Some(other)) => route_to_feature(&features, current, id, other),
+                    Err(e) => break EndReason::ConnectionLost(e.to_string()),
+                },
                 Err(NetError::Closed) => break EndReason::ConnectionLost("control stream closed".into()),
                 Err(e) => break EndReason::ConnectionLost(e.to_string()),
             }

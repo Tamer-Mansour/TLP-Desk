@@ -198,7 +198,9 @@ impl Controller {
         if !cfg.adaptive {
             self.scale_idx = 0;
         }
-        if !self.cfg.adaptive && cfg.adaptive {
+        // Coming from a fixed bitrate, or running unconstrained at the ceiling: follow the new
+        // ceiling. A target lowered by congestion stays where it is.
+        if (!self.cfg.adaptive && cfg.adaptive) || self.target >= self.cfg.max_kbps {
             self.target = cfg.max_kbps;
         }
         self.cfg = cfg;
@@ -578,8 +580,18 @@ mod tests {
         let mut ctl = Controller::new(ControllerConfig::adaptive(20_000, 60));
         ctl.reconfigure(ControllerConfig::adaptive(5_000, 60));
         assert_eq!(ctl.decision().bitrate_kbps, 5_000);
+        // Unconstrained at the ceiling: follows a higher ceiling.
+        ctl.reconfigure(ControllerConfig::adaptive(6_000, 60));
+        assert_eq!(ctl.decision().bitrate_kbps, 6_000);
+        // Lowered by congestion: stays put when the ceiling rises.
+        ctl.tick(&Signals {
+            at: at(0),
+            send_drops: 1,
+            ..Signals::default()
+        });
+        assert_eq!(ctl.decision().bitrate_kbps, 3_600);
         ctl.reconfigure(ControllerConfig::adaptive(8_000, 30));
-        assert_eq!(ctl.decision().bitrate_kbps, 5_000);
+        assert_eq!(ctl.decision().bitrate_kbps, 3_600);
         assert_eq!(ctl.decision().fps, 30);
         ctl.reconfigure(ControllerConfig::fixed(2_000, 24));
         assert_eq!(ctl.decision().bitrate_kbps, 2_000);

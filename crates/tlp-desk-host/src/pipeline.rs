@@ -1,30 +1,34 @@
 //! Video pipeline: a capture thread and an encode thread joined by a one-slot mailbox.
 //!
 //! * The **capture thread** owns the capturer: it waits for new desktop frames, polls the
-//!   cursor, handles live monitor switching and capture-surface loss, and publishes the newest
-//!   frame into the mailbox. A frame that the encoder has not taken yet is *replaced* (and its
-//!   buffer recycled), never queued, so a slow encoder drops frames instead of adding latency.
-//! * The **encode thread** owns the encoder: paced at the target fps, it takes the newest
-//!   frame, draws the cursor (scaled to the frame, saved/restored in place: no full-frame copy),
-//!   encodes and hands the packet to `send_video`. Used buffers go back to the capture thread
-//!   for reuse.
+//!   cursor, handles live monitor switching, capture-surface loss and size-cap changes (quality
+//!   preset, adaptive resolution step), and publishes the newest frame into the mailbox. A
+//!   frame that the encoder has not taken yet is *replaced* (and its buffer recycled), never
+//!   queued, so a slow encoder drops frames instead of adding latency.
+//! * The **encode thread** owns the encoder: paced at the adaptive frame rate, it takes the
+//!   newest frame, draws the cursor (scaled to the frame, saved/restored in place: no
+//!   full-frame copy), encodes and hands the packet to `send_video`. Used buffers go back to
+//!   the capture thread for reuse. About four times per second it ticks the adaptive
+//!   controller (`adapt::EncodeAdapter`), which retunes the bitrate and picks the frame rate
+//!   and resolution step.
 //!
 //! Each capturer (re)open bumps a generation number carried with every frame, so the encoder
 //! knows to rebuild (new size) or emit a keyframe (same size, new content source).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use tlp_desk_capture::{BgraFrame, CaptureError, CaptureOptions, MonitorInfo, ScreenCapturer};
-use tlp_desk_codec::{CodecError, EncoderConfig, VideoEncoder};
+use tlp_desk_capture::{BgraFrame, CaptureError, MonitorInfo};
+use tlp_desk_codec::{CodecError, VideoEncoder};
 use tlp_desk_input::MonitorRect;
 use tlp_desk_net::{Session, VideoSendStatus};
 use tlp_desk_proto::{Codec, VideoFrame};
 use tokio::sync::{mpsc, watch};
 
+use crate::adapt::{open_source, wanted_cap, AdaptShared, EncodeAdapter, QualityTarget, Source};
 use crate::cursor::{CursorOverlay, CursorPatch};
-use crate::{CapturerFactory, EncoderFactory};
+use crate::{CapturerFactory, EncoderFactory, MonitorLister};
 
 /// Consecutive non-fatal capture errors tolerated before the session is ended.
 const MAX_CAPTURE_ERRORS: u32 = 100;
@@ -34,15 +38,17 @@ const INITIAL_OPEN_ATTEMPTS: u32 = 10;
 pub(crate) struct PipelineCtx {
     pub capturer_factory: CapturerFactory,
     pub encoder_factory: EncoderFactory,
+    pub monitor_lister: MonitorLister,
     /// Initial monitor index.
     pub monitor: u32,
-    /// Monitor the viewer asked for (validated by the control loop).
+    /// Monitor the viewer asked for (validated by the control loop; `ALL_MONITORS` = all).
     pub select: watch::Receiver<u32>,
     /// Monitor index actually being captured.
     pub active: watch::Sender<u32>,
-    pub fps: u32,
-    /// Capture size cap.
-    pub max_size: (u32, u32),
+    /// Quality target (preset) set by the viewer.
+    pub quality: watch::Receiver<QualityTarget>,
+    /// Viewer feedback and the session clock.
+    pub adapt: Arc<AdaptShared>,
     pub session: Arc<Session>,
     /// Set by the control loop on `Message::RequestKeyframe`.
     pub keyframe: Arc<AtomicBool>,
@@ -76,10 +82,21 @@ struct Slot {
     closed: bool,
 }
 
-#[derive(Default)]
 struct Mailbox {
     slot: Mutex<Slot>,
     cv: Condvar,
+    /// Adaptive resolution step (per mille of the quality cap), set by the encode thread.
+    scale: Arc<AtomicU32>,
+}
+
+impl Default for Mailbox {
+    fn default() -> Self {
+        Self {
+            slot: Mutex::default(),
+            cv: Condvar::new(),
+            scale: Arc::new(AtomicU32::new(1000)),
+        }
+    }
 }
 
 impl Mailbox {
@@ -157,10 +174,6 @@ fn rect_of(m: &MonitorInfo) -> MonitorRect {
     MonitorRect::new(m.x, m.y, m.width, m.height)
 }
 
-fn capture_options(ctx: &PipelineCtx) -> CaptureOptions {
-    CaptureOptions::max_size(ctx.max_size.0, ctx.max_size.1)
-}
-
 fn stopped(ctx: &PipelineCtx) -> bool {
     ctx.stop.load(Ordering::Acquire)
 }
@@ -169,31 +182,20 @@ fn frame_interval(fps: u32) -> Duration {
     Duration::from_secs_f64(1.0 / f64::from(fps.max(1)))
 }
 
-/// Opens the capturer; `attempts == None` retries until the session stops.
+/// Opens the capture source; `attempts == None` retries until the session stops.
 fn open(
     ctx: &PipelineCtx,
     mailbox: &Mailbox,
     index: u32,
     attempts: Option<u32>,
-) -> Result<Option<Box<dyn ScreenCapturer>>, String> {
+) -> Result<Option<Source>, String> {
     let mut n = 0u32;
     loop {
         if stopped(ctx) || mailbox.is_closed() {
             return Ok(None);
         }
-        match (ctx.capturer_factory)(index, capture_options(ctx)) {
-            Ok(c) => {
-                let m = c.monitor();
-                tracing::info!(
-                    monitor = index,
-                    width = m.width,
-                    height = m.height,
-                    frame = ?c.frame_size(),
-                    backend = ?c.backend(),
-                    "capturer opened"
-                );
-                return Ok(Some(c));
-            }
+        match open_now(ctx, mailbox, index) {
+            Ok(s) => return Ok(Some(s)),
             Err(e) => {
                 n += 1;
                 if attempts.is_some_and(|max| n >= max) {
@@ -208,88 +210,123 @@ fn open(
     }
 }
 
+/// One attempt to open `index` with the current quality cap and resolution step.
+fn open_now(ctx: &PipelineCtx, mailbox: &Mailbox, index: u32) -> Result<Source, CaptureError> {
+    let quality_cap = ctx.quality.borrow().max_size;
+    let scale = mailbox.scale.load(Ordering::Acquire);
+    let s = open_source(
+        &ctx.capturer_factory,
+        &ctx.monitor_lister,
+        index,
+        quality_cap,
+        scale,
+    )?;
+    let m = s.cap.monitor();
+    tracing::info!(
+        monitor = index,
+        width = m.width,
+        height = m.height,
+        cap = ?s.max_size,
+        frame = ?s.cap.frame_size(),
+        backend = ?s.cap.backend(),
+        "capturer opened"
+    );
+    Ok(s)
+}
+
+/// What the capture thread is reading from.
+struct CaptureState {
+    src: Source,
+    index: u32,
+    gen: u64,
+    cursor: CursorOverlay,
+    /// A cap we failed to reopen with; not retried until the wanted cap changes again.
+    failed_cap: Option<(u32, u32)>,
+}
+
+impl CaptureState {
+    /// Switches to a freshly opened source: new generation, stale frame and cursor dropped.
+    fn replace(&mut self, ctx: &PipelineCtx, mailbox: &Mailbox, src: Source, index: u32) {
+        self.src = src;
+        self.index = index;
+        self.gen += 1;
+        self.failed_cap = None;
+        // A frame of the old source must not be encoded any more.
+        drop(mailbox.lock().frame.take());
+        self.cursor = CursorOverlay::new();
+        mailbox.put_cursor(self.cursor.clone(), false);
+        ctx.rect.send_replace(Some(rect_of(self.src.cap.monitor())));
+        ctx.active.send_replace(index);
+    }
+}
+
 fn capture_loop(
     ctx: &PipelineCtx,
     mailbox: &Mailbox,
     recycle: &std_mpsc::Receiver<BgraFrame>,
 ) -> Result<(), String> {
-    let mut index = ctx.monitor;
     let mut select = ctx.select.clone();
     select.mark_unchanged();
-    let Some(mut cap) = open(ctx, mailbox, index, Some(INITIAL_OPEN_ATTEMPTS))? else {
+    let Some(src) = open(ctx, mailbox, ctx.monitor, Some(INITIAL_OPEN_ATTEMPTS))? else {
         return Ok(());
     };
-    let mut gen = 0u64;
-    ctx.rect.send_replace(Some(rect_of(cap.monitor())));
-    ctx.active.send_replace(index);
-    let mut cursor = CursorOverlay::new();
-    let interval = frame_interval(ctx.fps);
+    ctx.rect.send_replace(Some(rect_of(src.cap.monitor())));
+    ctx.active.send_replace(ctx.monitor);
+    let mut st = CaptureState {
+        src,
+        index: ctx.monitor,
+        gen: 0,
+        cursor: CursorOverlay::new(),
+        failed_cap: None,
+    };
     let mut capture_errors = 0u32;
 
     while !stopped(ctx) && !mailbox.is_closed() {
         if select.has_changed().unwrap_or(false) {
             let want = *select.borrow_and_update();
-            if want != index {
+            if want != st.index {
                 // Switch live: one attempt; on failure keep streaming the current monitor.
-                match (ctx.capturer_factory)(want, capture_options(ctx)) {
-                    Ok(c) => {
-                        tracing::info!(
-                            from = index,
-                            to = want,
-                            width = c.monitor().width,
-                            height = c.monitor().height,
-                            frame = ?c.frame_size(),
-                            "switched captured monitor"
-                        );
-                        drop(cap);
-                        cap = c;
-                        index = want;
-                        gen += 1;
-                        // A frame of the old monitor must not be encoded any more.
-                        drop(mailbox.lock().frame.take());
-                        cursor = CursorOverlay::new();
-                        mailbox.put_cursor(cursor.clone(), false);
-                        ctx.rect.send_replace(Some(rect_of(cap.monitor())));
-                        ctx.active.send_replace(index);
+                match open_now(ctx, mailbox, want) {
+                    Ok(s) => {
+                        tracing::info!(from = st.index, to = want, "switched captured monitor");
+                        st.replace(ctx, mailbox, s, want);
                     }
                     Err(e) => {
                         tracing::warn!(%e, monitor = want, "cannot switch to monitor; keeping the current one");
-                        ctx.active.send_replace(index);
+                        ctx.active.send_replace(st.index);
                     }
                 }
             }
         }
+        reopen_if_cap_changed(ctx, mailbox, &mut st);
         while let Ok(buf) = recycle.try_recv() {
-            cap.recycle(buf);
+            st.src.cap.recycle(buf);
         }
 
-        match cap.next_frame(interval) {
+        let interval = frame_interval(ctx.quality.borrow().fps);
+        match st.src.cap.next_frame(interval) {
             Ok(Some(frame)) => {
                 capture_errors = 0;
-                let m = cap.monitor();
+                let m = st.src.cap.monitor();
                 let replaced = mailbox.put_frame(Captured {
                     frame,
-                    gen,
+                    gen: st.gen,
                     monitor: (m.width, m.height),
                     at: Instant::now(),
                 });
                 if let Some(old) = replaced {
-                    cap.recycle(old);
+                    st.src.cap.recycle(old);
                 }
             }
             Ok(None) => {}
             Err(CaptureError::SurfaceLost) => {
                 tracing::info!("capture surface lost (desktop switch or mode change); reopening");
-                drop(cap);
                 drop(mailbox.lock().frame.take());
-                let Some(c) = open(ctx, mailbox, index, None)? else {
+                let Some(s) = open(ctx, mailbox, st.index, None)? else {
                     return Ok(());
                 };
-                cap = c;
-                gen += 1;
-                cursor = CursorOverlay::new();
-                mailbox.put_cursor(cursor.clone(), false);
-                ctx.rect.send_replace(Some(rect_of(cap.monitor())));
+                let index = st.index;
+                st.replace(ctx, mailbox, s, index);
                 continue;
             }
             Err(e) => {
@@ -303,10 +340,10 @@ fn capture_loop(
             }
         }
 
-        match cap.cursor() {
+        match st.src.cap.cursor() {
             Ok(state) => {
-                if cursor.update(state) {
-                    mailbox.put_cursor(cursor.clone(), true);
+                if st.cursor.update(state) {
+                    mailbox.put_cursor(st.cursor.clone(), true);
                 }
             }
             Err(e) => tracing::trace!(%e, "cursor poll failed"),
@@ -315,8 +352,35 @@ fn capture_loop(
     Ok(())
 }
 
-fn new_encoder(ctx: &PipelineCtx, w: u32, h: u32) -> Result<Box<dyn VideoEncoder>, String> {
-    let cfg = EncoderConfig::for_screen(w, h, ctx.fps);
+/// Reopens the current source when the quality preset or the adaptive resolution step asks
+/// for another size cap. One attempt per wanted cap; on failure the current source stays.
+fn reopen_if_cap_changed(ctx: &PipelineCtx, mailbox: &Mailbox, st: &mut CaptureState) {
+    let quality_cap = ctx.quality.borrow().max_size;
+    let scale = mailbox.scale.load(Ordering::Acquire);
+    let want = wanted_cap(st.src.cap.monitor(), quality_cap, scale);
+    if want == st.src.max_size || st.failed_cap == Some(want) {
+        return;
+    }
+    tracing::info!(from = ?st.src.max_size, to = ?want, scale, "capture size cap changed; reopening");
+    match open_now(ctx, mailbox, st.index) {
+        Ok(s) => {
+            let index = st.index;
+            st.replace(ctx, mailbox, s, index);
+        }
+        Err(e) => {
+            tracing::warn!(%e, cap = ?want, "cannot reopen capture with the new size cap; keeping the current one");
+            st.failed_cap = Some(want);
+        }
+    }
+}
+
+fn new_encoder(
+    ctx: &PipelineCtx,
+    adapter: &mut EncodeAdapter,
+    w: u32,
+    h: u32,
+) -> Result<Box<dyn VideoEncoder>, String> {
+    let cfg = adapter.encoder_config((w, h));
     tracing::info!(
         width = w,
         height = h,
@@ -343,13 +407,30 @@ struct EncodeState {
     pending_since: Option<Instant>,
 }
 
+/// Why the encode thread woke up.
+enum Wake {
+    /// Something to encode and the frame interval elapsed.
+    Encode,
+    /// The adaptive controller is due.
+    Tick,
+}
+
+/// Microseconds from the session clock to `t`.
+fn clock_us(ctx: &PipelineCtx, t: Instant) -> u64 {
+    u64::try_from(t.saturating_duration_since(ctx.adapt.clock).as_micros()).unwrap_or(u64::MAX)
+}
+
 fn encode_loop(
     ctx: &PipelineCtx,
     mailbox: &Mailbox,
     recycle: &std_mpsc::Sender<BgraFrame>,
 ) -> Result<(), String> {
-    let interval = frame_interval(ctx.fps);
-    let start = Instant::now();
+    let mut adapter = EncodeAdapter::new(
+        ctx.quality.clone(),
+        Arc::clone(&mailbox.scale),
+        &ctx.session,
+    );
+    let mut interval = frame_interval(adapter.fps());
     let mut seq = 0u64;
     let mut next_encode = Instant::now();
     let mut st = EncodeState {
@@ -363,54 +444,23 @@ fn encode_loop(
     };
 
     loop {
-        // Wait (without holding the lock while encoding) until there is something to send and
-        // the frame interval has elapsed.
-        {
-            let mut slot = mailbox.lock();
-            loop {
-                if slot.closed || stopped(ctx) {
-                    return Ok(());
-                }
-                if let Some(c) = slot.frame.take() {
-                    st.pending_since.get_or_insert(c.at);
-                    if st.gen != Some(c.gen) {
-                        // New capturer: the old frame is stale and the stream must restart
-                        // with a keyframe (the encoder is rebuilt below if the size changed).
-                        st.gen = Some(c.gen);
-                        if let Some(enc) = st.enc.as_mut() {
-                            enc.request_keyframe();
-                        }
-                    }
-                    if let Some((old, _)) = st.last.replace((c.frame, c.monitor)) {
-                        let _ = recycle.send(old);
-                    }
-                }
-                if let Some((overlay, at)) = slot.cursor.take() {
-                    st.cursor = overlay;
-                    if let Some(at) = at {
-                        st.pending_since.get_or_insert(at);
-                    }
-                }
-                if ctx.keyframe.swap(false, Ordering::AcqRel) {
-                    tracing::debug!("viewer requested a keyframe");
-                    if let Some(enc) = st.enc.as_mut() {
-                        enc.request_keyframe();
-                    }
-                    st.pending_since.get_or_insert_with(Instant::now);
-                }
-                let now = Instant::now();
-                let wait = match st.pending_since {
-                    Some(_) if st.last.is_some() && now >= next_encode => break,
-                    Some(_) if st.last.is_some() => next_encode - now,
-                    // Nothing to send: wake up now and then for keyframe requests / stop.
-                    _ => interval,
-                };
-                slot = mailbox
-                    .cv
-                    .wait_timeout(slot, wait)
-                    .unwrap_or_else(|e| e.into_inner())
-                    .0;
-            }
+        let wake = wait_for_work(
+            ctx,
+            mailbox,
+            recycle,
+            &mut st,
+            &adapter,
+            next_encode,
+            interval,
+        );
+        let wake = match wake {
+            Some(w) => w,
+            None => return Ok(()),
+        };
+        if let Wake::Tick = wake {
+            adapter.tick(&ctx.session, &ctx.adapt, st.enc.as_deref_mut());
+            interval = frame_interval(adapter.fps());
+            continue;
         }
 
         let now = Instant::now();
@@ -429,7 +479,7 @@ fn encode_loop(
             if st.enc.is_some() {
                 tracing::info!(old = ?st.size, new = ?frame_size, "frame size changed; recreating encoder");
             }
-            st.enc = Some(new_encoder(ctx, frame_size.0, frame_size.1)?);
+            st.enc = Some(new_encoder(ctx, &mut adapter, frame_size.0, frame_size.1)?);
             st.size = frame_size;
         }
         let Some(enc) = st.enc.as_mut() else {
@@ -438,14 +488,15 @@ fn encode_loop(
 
         // The encoder uses the input timestamp for rate control: keep it monotonic even when
         // the same captured frame is re-encoded for a cursor move.
-        frame.timestamp_us = now.saturating_duration_since(start).as_micros() as u64;
+        frame.timestamp_us = clock_us(ctx, now);
         let drawn = st.cursor.draw_scaled(frame, *monitor, &mut st.patch);
         let encoded = enc.encode(frame);
         if drawn {
             st.patch.restore(frame);
         }
-        // On the wire: when the oldest change in this frame happened (for latency estimates).
-        let timestamp_us = since.saturating_duration_since(start).as_micros() as u64;
+        // On the wire: when the oldest change in this frame happened, on the session clock
+        // (also used by `LatencyEcho`), for the viewer's latency estimate.
+        let timestamp_us = clock_us(ctx, since);
         match encoded {
             Ok(Some(ef)) => {
                 let vf = VideoFrame {
@@ -463,6 +514,7 @@ fn encode_loop(
                     Ok(VideoSendStatus::Dropped) => {
                         // The viewer is behind: the next frame must be a keyframe, and send it
                         // even if the screen stays static.
+                        adapter.frame_dropped();
                         enc.request_keyframe();
                         st.pending_since.get_or_insert(now);
                     }
@@ -471,11 +523,73 @@ fn encode_loop(
             }
             Ok(None) => {}
             Err(CodecError::SizeMismatch { .. }) => {
-                st.enc = Some(new_encoder(ctx, frame_size.0, frame_size.1)?);
+                st.enc = Some(new_encoder(ctx, &mut adapter, frame_size.0, frame_size.1)?);
                 st.size = frame_size;
                 st.pending_since.get_or_insert(now);
             }
             Err(e) => return Err(format!("encoder failed: {e}")),
         }
+    }
+}
+
+/// Waits (without holding the lock while encoding) until there is something to send and the
+/// frame interval has elapsed, or the controller tick is due. `None` = stop.
+fn wait_for_work(
+    ctx: &PipelineCtx,
+    mailbox: &Mailbox,
+    recycle: &std_mpsc::Sender<BgraFrame>,
+    st: &mut EncodeState,
+    adapter: &EncodeAdapter,
+    next_encode: Instant,
+    interval: Duration,
+) -> Option<Wake> {
+    let mut slot = mailbox.lock();
+    loop {
+        if slot.closed || stopped(ctx) {
+            return None;
+        }
+        if let Some(c) = slot.frame.take() {
+            st.pending_since.get_or_insert(c.at);
+            if st.gen != Some(c.gen) {
+                // New capturer: the old frame is stale and the stream must restart with a
+                // keyframe (the encoder is rebuilt if the size changed).
+                st.gen = Some(c.gen);
+                if let Some(enc) = st.enc.as_mut() {
+                    enc.request_keyframe();
+                }
+            }
+            if let Some((old, _)) = st.last.replace((c.frame, c.monitor)) {
+                let _ = recycle.send(old);
+            }
+        }
+        if let Some((overlay, at)) = slot.cursor.take() {
+            st.cursor = overlay;
+            if let Some(at) = at {
+                st.pending_since.get_or_insert(at);
+            }
+        }
+        if ctx.keyframe.swap(false, Ordering::AcqRel) {
+            tracing::debug!("viewer requested a keyframe");
+            if let Some(enc) = st.enc.as_mut() {
+                enc.request_keyframe();
+            }
+            st.pending_since.get_or_insert_with(Instant::now);
+        }
+        let now = Instant::now();
+        if now >= adapter.next_tick() {
+            return Some(Wake::Tick);
+        }
+        let wait = match st.pending_since {
+            Some(_) if st.last.is_some() && now >= next_encode => return Some(Wake::Encode),
+            Some(_) if st.last.is_some() => next_encode - now,
+            // Nothing to send: wake up now and then for keyframe requests / stop.
+            _ => interval,
+        };
+        let wait = wait.min(adapter.next_tick().saturating_duration_since(now));
+        slot = mailbox
+            .cv
+            .wait_timeout(slot, wait)
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
     }
 }
