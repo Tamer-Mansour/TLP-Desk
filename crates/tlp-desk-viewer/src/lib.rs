@@ -22,6 +22,7 @@
 
 mod frame;
 mod session;
+mod tunnel;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -39,6 +40,10 @@ pub use tlp_desk_net::{
     AuthMethod, AwaitingAcceptFn, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo,
 };
 pub use tlp_desk_proto::MonitorDesc;
+pub use tunnel::{
+    ForwardSpec, TunnelCloseReason, TunnelEvent, TunnelId, TunnelStatus, TunnelViewerConfig,
+    ViewerTunnels, TUNNEL_FEATURE,
+};
 
 /// Callback invoked (from any thread) when a new frame or event is available, e.g. to wake
 /// the GUI for a repaint.
@@ -195,6 +200,30 @@ pub enum ViewerError {
     KnownHosts(#[from] CryptoError),
     #[error(transparent)]
     Net(NetError),
+
+    // --- tunnels: port forwarding (TLP-tunnel) ---
+    /// The host has not granted `TUNNEL` in this session.
+    #[error("the host has not allowed port forwarding in this session")]
+    TunnelNotAllowed,
+    /// The host refused the tunnel (bad or non-LAN target, limits...).
+    #[error("the host refused port forwarding: {0}")]
+    TunnelRefused(TunnelCloseReason),
+    /// The local listening socket could not be opened (port in use, no rights...).
+    #[error("cannot listen on {addr}: {reason}")]
+    TunnelBind { addr: SocketAddr, reason: String },
+    /// Listening on a non-loopback address exposes the remote service to the whole network;
+    /// the caller must confirm it with `ForwardSpec::allow_lan_bind`.
+    #[error("{0} is reachable from other devices; LAN binding must be confirmed")]
+    TunnelLanBind(SocketAddr),
+    /// A forwarding rule could not be parsed.
+    #[error("invalid forwarding rule {0:?}: use LOCAL_PORT:REMOTE_HOST:REMOTE_PORT")]
+    TunnelSpec(String),
+    /// The maximum number of forwarding rules for this session is reached.
+    #[error("too many port forwarding rules")]
+    TunnelLimit,
+    /// The session is over (or unknown to the tunnel feature).
+    #[error("the session has ended")]
+    SessionEnded,
 }
 
 impl ViewerError {

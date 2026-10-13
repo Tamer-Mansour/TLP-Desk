@@ -16,7 +16,7 @@ tlp-desk-net.workspace = true
 tlp-desk-capture.workspace = true
 tlp-desk-codec.workspace = true
 thiserror.workspace = true
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net"] }
 tracing = "0.1"
 
 [dev-dependencies]
