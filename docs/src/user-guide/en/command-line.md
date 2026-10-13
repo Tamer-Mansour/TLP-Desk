@@ -30,13 +30,20 @@ TLP-Desk-cli id                     # this PC's device ID and key fingerprint
 TLP-Desk-cli list                   # devices on the network (5 seconds)
 TLP-Desk-cli serve --code           # be a host; print a one-time code
 TLP-Desk-cli connect 123456789 --code 042917 --seconds 10 --snapshot shot.png
+TLP-Desk-cli info 123456789 --code 042917   # the other PC's system, CPU, memory, disks, uptime
+TLP-Desk-cli wol 01:23:45:67:89:ab          # wake a sleeping PC (Wake-on-LAN)
+TLP-Desk-cli list --json                    # machine-readable output for scripts
 ```
 
 When `serve` receives a request without a code, it asks on the console: **Accept? [y/N]**.
 
 Notes:
 
-- The command-line tool's messages are in English only for now.
+- Add `--lang ar` (or set `TLP_DESK_LANG=ar`) for Arabic messages; Windows Terminal shows Arabic best.
+- `--json` prints one JSON object per line; `-q` hides progress lines. The exit code tells scripts
+  what went wrong (table at the end of `TLP-Desk-cli --help`).
+- For a password, set `TLP_DESK_PASSWORD` and pass `--password`; the password is never typed on the
+  command line itself.
 - Only one program can listen on port 47400 at a time; if TLP-Desk is open, run `serve` with
   `--port 47410`, for example.
 - Full reference for developers: [tlp-desk-cli](../../dev/crates/cli.md).
