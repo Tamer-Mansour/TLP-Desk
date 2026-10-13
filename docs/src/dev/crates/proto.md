@@ -102,10 +102,9 @@ From protocol v4 on, every QUIC stream other than the control stream is meant to
 
 Unknown kinds decode to `ProtoError::UnknownStreamKind`.
 
-> **Status:** the header types exist and are tested, but `tlp-desk-net` does not write or read
-> them yet — video streams on the wire still carry a bare framed `VideoFrame`. When the transport
-> adopts the header, video and side streams will both start with it, as `docs/protocol.md`
-> specifies.
+`tlp-desk-net` writes the header on every video stream and on side streams opened with
+`Session::open_uni` / `open_bi`, and routes incoming streams by kind — see
+[tlp-desk-net](net.md#side-streams-v4).
 
 ### Errors
 

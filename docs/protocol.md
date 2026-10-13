@@ -17,9 +17,8 @@ Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-pro
 - Appended only; all v1-v3 variants keep their indices.
 
 **Implementation status (v4).** The v4 wire format is specified ahead of the features so lanes can
-work in parallel. Today the host and viewer act only on the v1-v3 messages; the transport does not
-yet write or read stream headers (video streams still carry a bare framed `VideoFrame`), and the
-host answers `AuthRequest::ReconnectTicket` with `Rejected(NotAllowed)`. The host does not call
+work in parallel. The transport implements stream headers and typed side streams; the host and
+viewer act only on the v1-v3 messages so far, and the host answers `AuthRequest::ReconnectTicket` with `Rejected(NotAllowed)`. The host does not call
 `required_permissions()` yet; it gates the messages it handles itself (mouse events need `CONTROL`,
 keys need `KEYBOARD`) and ignores the rest. Each feature section below
 describes the intended behaviour; check the roadmap for what has landed.
