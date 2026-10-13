@@ -109,3 +109,29 @@ docs/                # protocol.md, security.md, user-guide (Arabic + English)
 - Branches: every branch is named `TLP-<topic>` (e.g. `TLP-files`); the main branch is `TLP-Desk`.
 - Build output may live outside the repo: set `CARGO_TARGET_DIR` (e.g. `C:\tlp-build\<lane>`);
   `scripts\check.ps1` and the installer scripts honour it. Never commit `target/` or `dist/`.
+
+## Code style
+
+Full guide: `docs/CODE_STYLE.md` (read it before your first change). The ten rules that matter most:
+
+1. **Never crash.** No `unwrap`/`expect`/`panic!`/`todo!`/`unreachable!` in non-test code on anything
+   input can reach; return the crate's error with `?`. Every crash fix ships a regression test.
+2. **Every byte from a peer is hostile.** `get()` not `[i]`, checked/saturating arithmetic, no
+   truncating `as` casts, cap allocations and queues *before* allocating, bound loops and recursion.
+3. **Errors:** one `thiserror` enum per library crate (lowercase messages that say what was wrong),
+   `anyhow` + `.context()` only in `tlp-desk-app` / `tlp-desk-cli`.
+4. **`unsafe` only in platform modules** (`#[allow(unsafe_code)]` on that module), each block with a
+   `// SAFETY:` comment directly above it; pure crates keep `#![forbid(unsafe_code)]`.
+5. **Workspace inheritance:** every crate uses `*.workspace = true` for package fields and shared
+   deps, and `[lints] workspace = true`. New deps: permissive licence, crates.io, `cargo deny check`.
+6. **Docs:** `//!` crate doc with entry points and boundaries; `///` on every public item; comments
+   say *why*. Never log secrets (passwords, codes, keys, clipboard or file contents).
+7. **Small modules, small surface:** new feature = new module; files past ~800 lines get split;
+   `pub use` the API from the crate root, everything else `pub(crate)`. Newtypes for ids and units.
+8. **Tests at the right scale** (unit, proptest, `tests/` integration, host e2e); a bug-fix test must
+   be seen failing before the fix; Arabic input in every text-handling test; loopback and temp dirs only.
+9. **Gate before every commit:** `cargo fmt --all -- --check`,
+   `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`
+   (`-p <crate>` while iterating). Never `--no-verify`.
+10. **Commits:** `TLP-<area>: what changed`, one green concern per commit, stage exact paths (never
+    `git add -A`), check `git diff --staged` first, rebase on `TLP-Desk` the day it moves.

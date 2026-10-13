@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -5,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use tlp_desk_crypto::{DeviceId, Fingerprint};
 use tlp_desk_proto::{
-    encode_frame, Bye, ByeReason, FrameDecoder, Message, Permissions, Role, VideoFrame,
-    MAX_FRAME_LEN,
+    encode_frame, Bye, ByeReason, FrameDecoder, Message, Permissions, Role, StreamHeader,
+    StreamKind, VideoFrame, MAX_FRAME_LEN, STREAM_HEADER_LEN,
 };
 use tokio::sync::{mpsc, Mutex};
 
@@ -16,6 +17,13 @@ use crate::NetError;
 pub(crate) const CLOSE_OK: u32 = 0;
 pub(crate) const CLOSE_REJECTED: u32 = 1;
 pub(crate) const CLOSE_PROTOCOL: u32 = 2;
+
+/// Stream error code (`STOP_SENDING`) for a stream the receiver will not read: unknown or
+/// unexpected kind, malformed header, or nobody accepting that kind.
+pub const STREAM_REFUSED: u32 = 1;
+
+/// How long a peer has to send the stream header after opening a stream.
+const STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Default number of video frames that may be unacknowledged at once before non-key frames
 /// are dropped (see [`Session::send_video`]).
@@ -97,6 +105,37 @@ struct VideoRx {
     last_kf_request: std::sync::Mutex<Option<Instant>>,
 }
 
+/// Incoming side streams of one kind wait here until a feature accepts them; beyond this the
+/// peer's streams are refused (`STREAM_REFUSED`) instead of piling up.
+const SIDE_QUEUE: usize = 64;
+
+/// An incoming typed side stream (see [`Session::accept_side_stream`]).
+#[derive(Debug)]
+pub struct SideStream {
+    pub kind: StreamKind,
+    /// The id from the stream header (transfer id, tunnel id, ...).
+    pub id: u64,
+    /// `Some` for a bidirectional stream (the reply direction).
+    pub send: Option<quinn::SendStream>,
+    /// Positioned after the stream header.
+    pub recv: quinn::RecvStream,
+}
+
+/// QUIC send priority per stream kind; higher is sent first. Control (10) > audio > video >
+/// clipboard > tunnels > bulk file data, so a multi-GB copy never delays input or video.
+pub fn stream_priority(kind: StreamKind) -> i32 {
+    match kind {
+        StreamKind::Audio => 6,
+        StreamKind::Video => 5,
+        StreamKind::Clipboard => 2,
+        StreamKind::Tunnel => 1,
+        StreamKind::FileData => -10,
+    }
+}
+
+/// Priority of the control stream (above every side stream).
+const CONTROL_PRIORITY: i32 = 10;
+
 /// An authenticated, authorized session.
 ///
 /// * **Control**: one bidirectional QUIC stream (opened by the viewer) carrying framed
@@ -105,6 +144,10 @@ struct VideoRx {
 ///   ([`Session::send_video`] / [`Session::recv_video`]). A late frame never blocks newer ones
 ///   (no head-of-line blocking) and the host drops frames instead of queueing when more than
 ///   `max_in_flight` are unacknowledged.
+/// * **Side streams**: typed extra streams for feature data (file bytes, tunnels, audio, large
+///   clipboard payloads), opened by either side with [`Session::open_uni`] /
+///   [`Session::open_bi`] and received per kind with [`Session::accept_side_stream`]. Each
+///   starts with a [`StreamHeader`]; see [`stream_priority`] for scheduling.
 ///
 /// All methods take `&self`; wrap the session in an `Arc` to use it from several tasks.
 ///
@@ -120,6 +163,7 @@ pub struct Session {
     ctrl_rx: Mutex<FramedRecv>,
     video_tx: Option<VideoTx>,
     video_rx: Option<VideoRx>,
+    side_rx: HashMap<StreamKind, Mutex<mpsc::Receiver<SideStream>>>,
     rt: tokio::runtime::Handle,
 }
 
@@ -142,8 +186,18 @@ impl Session {
         ctrl_tx: quinn::SendStream,
         ctrl_rx: FramedRecv,
     ) -> Self {
-        let _ = ctrl_tx.set_priority(10);
+        let _ = ctrl_tx.set_priority(CONTROL_PRIORITY);
         let rt = tokio::runtime::Handle::current();
+        let mut router = StreamRouter {
+            video: None,
+            side: HashMap::new(),
+        };
+        let mut side_rx = HashMap::new();
+        for kind in StreamKind::SIDE {
+            let (tx, rx) = mpsc::channel(SIDE_QUEUE);
+            router.side.insert(kind, tx);
+            side_rx.insert(kind, Mutex::new(rx));
+        }
         let (video_tx, video_rx) = match role {
             Role::Host => (
                 Some(VideoTx {
@@ -156,7 +210,7 @@ impl Session {
             Role::Viewer => {
                 let (tx, rx) = mpsc::channel(VIEWER_VIDEO_QUEUE);
                 let gap = Arc::new(AtomicBool::new(false));
-                rt.spawn(video_reader(conn.clone(), tx, gap.clone()));
+                router.video = Some((tx, gap.clone()));
                 (
                     None,
                     Some(VideoRx {
@@ -170,6 +224,11 @@ impl Session {
                 )
             }
         };
+        // The router (with every sender) lives only in the acceptor tasks: when the connection
+        // ends they exit and every receiver sees the end of its queue.
+        let router = Arc::new(router);
+        rt.spawn(accept_uni_loop(conn.clone(), router.clone()));
+        rt.spawn(accept_bi_loop(conn.clone(), router));
         Self {
             conn,
             role,
@@ -179,8 +238,58 @@ impl Session {
             ctrl_rx: Mutex::new(ctrl_rx),
             video_tx,
             video_rx,
+            side_rx,
             rt,
         }
+    }
+
+    /// Opens a unidirectional side stream to the peer and writes its [`StreamHeader`]; the
+    /// peer receives it from [`Session::accept_side_stream`] with the same `kind` and `id`.
+    /// Write the payload, then `finish()` it (or `reset()` to abort).
+    pub async fn open_uni(&self, kind: StreamKind, id: u64) -> Result<quinn::SendStream, NetError> {
+        check_side_kind(kind)?;
+        let mut send = self.conn.open_uni().await?;
+        let _ = send.set_priority(stream_priority(kind));
+        send.write_all(&StreamHeader::new(kind, id).encode())
+            .await?;
+        Ok(send)
+    }
+
+    /// Opens a bidirectional side stream (e.g. one tunnelled TCP connection) and writes its
+    /// [`StreamHeader`].
+    pub async fn open_bi(
+        &self,
+        kind: StreamKind,
+        id: u64,
+    ) -> Result<(quinn::SendStream, quinn::RecvStream), NetError> {
+        check_side_kind(kind)?;
+        let (mut send, recv) = self.conn.open_bi().await?;
+        let _ = send.set_priority(stream_priority(kind));
+        send.write_all(&StreamHeader::new(kind, id).encode())
+            .await?;
+        Ok((send, recv))
+    }
+
+    /// Waits for the next side stream of `kind` opened by the peer (uni or bidi; check
+    /// [`SideStream::send`]). Each kind has its own queue, so the file, tunnel, audio and
+    /// clipboard features can each await their own streams concurrently. Only one task
+    /// should accept a given kind. `Err(NetError::Closed)` once the connection is gone.
+    ///
+    /// The caller is responsible for permission checks (e.g. refuse `FileData` without
+    /// `FILES`: `recv.stop(STREAM_REFUSED.into())`).
+    pub async fn accept_side_stream(&self, kind: StreamKind) -> Result<SideStream, NetError> {
+        check_side_kind(kind)?;
+        let rx = self
+            .side_rx
+            .get(&kind)
+            .ok_or_else(|| NetError::Unexpected(format!("no queue for {kind:?}")))?;
+        rx.lock().await.recv().await.ok_or(NetError::Closed)
+    }
+
+    /// Test/fuzzing aid: opens a raw uni stream without writing a header.
+    #[doc(hidden)]
+    pub async fn open_raw_uni(&self) -> Result<quinn::SendStream, NetError> {
+        Ok(self.conn.open_uni().await?)
     }
 
     /// Our role in this session.
@@ -239,7 +348,8 @@ impl Session {
             return Ok(VideoSendStatus::Dropped);
         }
         let seq = frame.seq;
-        let bytes = encode_frame(&Message::VideoFrame(frame))?;
+        let mut bytes = StreamHeader::new(StreamKind::Video, seq).encode().to_vec();
+        bytes.extend_from_slice(&encode_frame(&Message::VideoFrame(frame))?);
         if v.need_keyframe.swap(false, Ordering::AcqRel) {
             tracing::debug!(seq, "keyframe resumes video after drops");
         }
@@ -249,7 +359,7 @@ impl Session {
         self.rt.spawn(async move {
             let res: Result<(), NetError> = async {
                 let mut s = conn.open_uni().await?;
-                let _ = s.set_priority(0);
+                let _ = s.set_priority(stream_priority(StreamKind::Video));
                 s.write_all(&bytes).await?;
                 let _ = s.finish();
                 // Count the frame as in flight until the viewer acknowledged all of it.
@@ -346,34 +456,137 @@ impl Session {
     }
 }
 
-async fn video_reader(conn: quinn::Connection, tx: mpsc::Sender<VideoFrame>, gap: Arc<AtomicBool>) {
-    loop {
-        let mut stream = match conn.accept_uni().await {
-            Ok(s) => s,
-            Err(_) => return,
+impl Drop for Session {
+    /// The acceptor tasks hold connection handles too, so close explicitly: dropping the last
+    /// `Session` handle ends the connection (as documented above).
+    fn drop(&mut self) {
+        self.conn.close(CLOSE_OK.into(), b"session dropped");
+    }
+}
+
+/// Destinations of incoming non-control streams, by [`StreamKind`].
+struct StreamRouter {
+    /// Viewer only: decoded-frame queue and the "a frame was lost" flag.
+    video: Option<(mpsc::Sender<VideoFrame>, Arc<AtomicBool>)>,
+    /// One bounded queue per side-stream kind.
+    side: HashMap<StreamKind, mpsc::Sender<SideStream>>,
+}
+
+impl StreamRouter {
+    /// Queues a side stream for its feature, or refuses it if the queue is full.
+    fn route_side(&self, mut s: SideStream) {
+        let Some(tx) = self.side.get(&s.kind) else {
+            return refuse(&mut s.recv, "unexpected side stream kind");
         };
-        let tx = tx.clone();
-        let gap = gap.clone();
+        if let Err(e) = tx.try_send(s) {
+            let mut s = e.into_inner();
+            tracing::warn!(kind = ?s.kind, id = s.id, "side stream queue full; refusing stream");
+            refuse(&mut s.recv, "side stream queue full");
+        }
+    }
+}
+
+/// Side streams carry feature data; video has its own API.
+fn check_side_kind(kind: StreamKind) -> Result<(), NetError> {
+    if kind == StreamKind::Video {
+        return Err(NetError::Unexpected(
+            "video uses send_video/recv_video, not side streams".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Reads the [`StreamHeader`] that starts every non-control stream.
+async fn read_stream_header(recv: &mut quinn::RecvStream) -> Result<StreamHeader, NetError> {
+    let mut b = [0u8; STREAM_HEADER_LEN];
+    match tokio::time::timeout(STREAM_HEADER_TIMEOUT, recv.read_exact(&mut b)).await {
+        Err(_) => Err(NetError::Timeout),
+        Ok(Err(e)) => Err(NetError::Unexpected(format!("stream header: {e}"))),
+        Ok(Ok(())) => Ok(StreamHeader::decode(&b)?),
+    }
+}
+
+fn refuse(recv: &mut quinn::RecvStream, why: &str) {
+    tracing::debug!(why, "refusing incoming stream");
+    let _ = recv.stop(STREAM_REFUSED.into());
+}
+
+async fn accept_uni_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
+    while let Ok(mut recv) = conn.accept_uni().await {
+        let router = router.clone();
         tokio::spawn(async move {
-            let bytes = match stream.read_to_end(MAX_FRAME_LEN + 4).await {
-                Ok(b) => b,
+            let header = match read_stream_header(&mut recv).await {
+                Ok(h) => h,
                 Err(e) => {
-                    tracing::debug!(%e, "video stream read failed");
-                    gap.store(true, Ordering::Release);
-                    return;
-                }
-            };
-            let mut dec = FrameDecoder::new();
-            dec.push(&bytes);
-            match dec.next_message() {
-                Ok(Some(Message::VideoFrame(f))) => {
-                    if tx.try_send(f).is_err() {
-                        // Decoder is behind: drop rather than queue.
+                    if let Some((_, gap)) = &router.video {
+                        // Possibly a video frame we could not read.
                         gap.store(true, Ordering::Release);
                     }
+                    return refuse(&mut recv, &e.to_string());
                 }
-                other => tracing::debug!(?other, "unexpected data on video stream"),
+            };
+            match header.kind {
+                StreamKind::Video => match &router.video {
+                    Some((tx, gap)) => read_video_frame(recv, tx, gap).await,
+                    None => refuse(&mut recv, "video stream to a host"),
+                },
+                kind => router.route_side(SideStream {
+                    kind,
+                    id: header.id,
+                    send: None,
+                    recv,
+                }),
             }
         });
+    }
+}
+
+async fn accept_bi_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
+    // The control stream was accepted during the handshake; any later bidi stream is a side
+    // stream.
+    while let Ok((send, mut recv)) = conn.accept_bi().await {
+        let router = router.clone();
+        tokio::spawn(async move {
+            match read_stream_header(&mut recv).await {
+                Ok(h) if h.kind == StreamKind::Video => refuse(&mut recv, "video on a bidi stream"),
+                Ok(h) => {
+                    let _ = send.set_priority(stream_priority(h.kind));
+                    router.route_side(SideStream {
+                        kind: h.kind,
+                        id: h.id,
+                        send: Some(send),
+                        recv,
+                    });
+                }
+                Err(e) => refuse(&mut recv, &e.to_string()),
+            }
+        });
+    }
+}
+
+/// One video frame per stream: read it whole and queue it for the decoder.
+async fn read_video_frame(
+    mut stream: quinn::RecvStream,
+    tx: &mpsc::Sender<VideoFrame>,
+    gap: &AtomicBool,
+) {
+    let bytes = match stream.read_to_end(MAX_FRAME_LEN + 4).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::debug!(%e, "video stream read failed");
+            gap.store(true, Ordering::Release);
+            return;
+        }
+    };
+    let mut dec = FrameDecoder::new();
+    dec.push(&bytes);
+    match dec.next_message() {
+        Ok(Some(Message::VideoFrame(f))) => {
+            if tx.try_send(f).is_err() {
+                // Decoder is behind: drop rather than queue.
+                gap.store(true, Ordering::Release);
+            }
+        }
+        other => tracing::debug!(?other, "unexpected data on video stream"),
     }
 }
