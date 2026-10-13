@@ -23,6 +23,7 @@
   - [tlp-desk-cli](dev/crates/cli.md)
 - [Building on Windows](dev/building.md)
 - [Testing](dev/testing.md)
+- [Coding conventions](dev/conventions.md)
 
 # Reference
 
