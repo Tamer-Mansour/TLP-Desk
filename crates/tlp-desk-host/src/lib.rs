@@ -32,13 +32,21 @@
 //! * **Monitors**: the viewer gets `Message::MonitorList` (after accept, on hot-plug and on
 //!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`.
 //!
+//! * **Unattended access** (Windows service, session agent, secure desktop, Ctrl+Alt+Del):
+//!   see [`service`].
+//!
 //! All methods except [`Host::start`] are non-blocking and may be called from any thread.
-#![forbid(unsafe_code)]
+//!
+//! `unsafe` is denied crate-wide and allowed only in the Windows platform module
+//! `service::windows` (SCM, WTS sessions, named pipes, desktops, `SendSAS`), where every block
+//! carries a `// SAFETY:` comment.
+#![deny(unsafe_code)]
 
 mod cursor;
 mod input;
 mod pipeline;
 mod priority;
+pub mod service;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
@@ -285,10 +293,42 @@ pub enum HostEvent {
 /// Receiving end of the host event stream.
 pub type HostEvents = mpsc::UnboundedReceiver<HostEvent>;
 
+/// Errors of the host crate (sessions and the unattended-access [`service`]).
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
     #[error(transparent)]
     Net(#[from] NetError),
+    /// Local IPC (pipe) I/O failed.
+    #[error("ipc i/o failed: {0}")]
+    Io(#[from] std::io::Error),
+    /// The other end of an IPC connection closed it between two messages.
+    #[error("ipc connection closed")]
+    IpcClosed,
+    /// An IPC header or payload is larger than allowed (refused before allocating).
+    #[error("ipc message of {len} bytes exceeds the {max}-byte limit")]
+    IpcTooLarge { len: usize, max: usize },
+    #[error("cannot encode ipc message: {0}")]
+    IpcEncode(#[source] postcard::Error),
+    #[error("malformed ipc message: {0}")]
+    IpcDecode(#[source] postcard::Error),
+    /// The peer process speaks another IPC version (a half-finished upgrade).
+    #[error("ipc version mismatch: expected {expected}, got {got}")]
+    IpcVersion { expected: u32, got: u32 },
+    /// The other process refused the connection or a request.
+    #[error("ipc peer refused: {0}")]
+    IpcRefused(String),
+    /// The pipe server is not the process we expect (possible pipe squatting: do not use it).
+    #[error("pipe server is process {actual}, expected {expected}")]
+    PipeImpostor { expected: u32, actual: u32 },
+    /// No session agent is running (no console session, or it is restarting).
+    #[error("no session agent is running")]
+    NoAgent,
+    /// A Windows API call failed (`code` is the Win32 error or HRESULT).
+    #[error("{call} failed with os error {code:#x}")]
+    Os { call: &'static str, code: i32 },
+    /// The operation needs Windows (service, agent, SendSAS, ...).
+    #[error("not supported on this platform")]
+    Unsupported,
 }
 
 enum Decision {
