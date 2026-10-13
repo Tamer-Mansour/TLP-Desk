@@ -10,6 +10,7 @@ pub mod id;
 pub mod info;
 pub mod list;
 pub mod serve;
+pub mod wol;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
 
 use std::path::PathBuf;
@@ -63,6 +64,9 @@ pub enum Cmd {
     Connect(connect::ConnectArgs),
     /// Viewer: show a host's OS, CPU, RAM, disks, uptime and name (needs VIEW).
     Info(info::InfoArgs),
+    /// Wake a sleeping PC on the LAN (Wake-on-LAN) by MAC address or alias.
+    #[command(visible_alias = "exec-wol")]
+    Wol(wol::WolArgs),
     // FEATURE HOOK: one variant per new subcommand.
 }
 
@@ -91,6 +95,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
         Cmd::Info(a) => info::run(&ctx, a).await,
+        Cmd::Wol(a) => wol::run(&ctx, a),
         // FEATURE HOOK: one arm per new subcommand.
     }
 }
@@ -223,6 +228,20 @@ mod tests {
         assert_eq!(i.dial.auth.code.as_deref(), Some("654321"));
         assert_eq!(i.timeout, 3);
         assert!(parse(&["info"]).is_err());
+    }
+
+    #[test]
+    fn wol_and_its_alias_parse() {
+        for name in ["wol", "exec-wol"] {
+            let Cmd::Wol(w) = parse(&[name, "01:23:45:67:89:ab", "--to", "192.168.1.255"])
+                .unwrap()
+                .cmd
+            else {
+                panic!("not wol")
+            };
+            assert_eq!(w.target, "01:23:45:67:89:ab");
+            assert_eq!(w.to.as_deref(), Some("192.168.1.255"));
+        }
     }
 
     #[test]

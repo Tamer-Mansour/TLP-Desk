@@ -146,6 +146,8 @@ pub enum CliError {
     PermissionDenied(&'static str),
     /// The session ended before the command finished (reason, for logs).
     SessionEnded(String),
+    /// A name / alias could not be resolved.
+    NotFound(String),
 }
 
 impl CliError {
@@ -156,6 +158,7 @@ impl CliError {
             CliError::Timeout(_) => Exit::Timeout,
             CliError::PermissionDenied(_) => Exit::PermissionDenied,
             CliError::SessionEnded(_) => Exit::Failure,
+            CliError::NotFound(_) => Exit::NotFound,
         }
     }
 }
@@ -167,6 +170,7 @@ impl std::fmt::Display for CliError {
             CliError::Timeout(s) => write!(f, "no answer within {s} s"),
             CliError::PermissionDenied(p) => write!(f, "the session lacks the {p} permission"),
             CliError::SessionEnded(r) => write!(f, "the session ended: {r}"),
+            CliError::NotFound(n) => write!(f, "{n} was not found"),
         }
     }
 }

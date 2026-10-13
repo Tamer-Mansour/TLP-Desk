@@ -113,6 +113,7 @@ pub fn error_line(err: &anyhow::Error) -> String {
             format!("the session ended: {r}"),
             format!("انتهت الجلسة: {r}"),
         ),
+        Some(CliError::NotFound(n)) => t(format!("{n} was not found"), format!("لم يُعثر على {n}")),
         None => format!("{err:#}"),
     };
     t(format!("error: {detail}"), format!("خطأ: {detail}"))
@@ -434,6 +435,13 @@ pub fn selecting_monitor(index: u32) -> String {
     t(
         format!("Switching to monitor {index}..."),
         format!("جارٍ التبديل إلى الشاشة {index}..."),
+    )
+}
+
+pub fn wol_sent(mac: &str, to: &str) -> String {
+    t(
+        format!("Wake-on-LAN packet for {mac} sent ({to})."),
+        format!("أُرسلت حزمة التشغيل عن بُعد إلى {mac} ({to})."),
     )
 }
 
