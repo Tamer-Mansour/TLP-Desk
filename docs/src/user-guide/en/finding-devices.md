@@ -1,5 +1,7 @@
 # Finding devices on your network
 
+![Devices found on the network](../../media/devices-en-light.png)
+
 The **Devices on this network** card lists every PC on your local network that is running
 TLP-Desk. Nothing needs to be configured: devices announce themselves and find each other
 automatically.

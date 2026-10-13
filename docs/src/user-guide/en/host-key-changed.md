@@ -1,5 +1,7 @@
 # When the host key has changed
 
+![Warning that the host key has changed](../../media/key-changed-en-light.png)
+
 Sometimes, when you connect to a PC you have connected to before, TLP-Desk stops and shows:
 
 ```text

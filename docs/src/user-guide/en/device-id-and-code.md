@@ -1,5 +1,7 @@
 # Your device ID and one-time code
 
+![The home screen with the device ID and one-time code](../../media/home-en-light.png)
+
 The **This device** card on the home screen shows what someone else needs in order to connect to
 your PC.
 
