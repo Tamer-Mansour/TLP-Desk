@@ -25,6 +25,9 @@ windows = { version = "0.62", features = [
     "Win32_System_Com",
     "Win32_UI_Shell",
 ] }
+# CF_HDROP (files copied in Explorer) for clipboard file sharing. No default features: we only
+# read file lists, never images.
+arboard = { version = "3.6", default-features = false }
 
 [dev-dependencies]
 tlp-desk-crypto.workspace = true
