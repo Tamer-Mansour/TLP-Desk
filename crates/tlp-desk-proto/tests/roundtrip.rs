@@ -439,6 +439,14 @@ fn v4_samples() -> Vec<Message> {
             id: 3,
             error: Some("رفض الاتصال connection refused".into()),
         },
+        // --- whiteboard ---
+        Message::WhiteboardStroke {
+            id: 1,
+            points: vec![(0, 0), (32_768, 100), (u16::MAX, u16::MAX)],
+            color_rgba: 0xFF00_00FF,
+            width: 30,
+        },
+        Message::WhiteboardClear,
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -502,6 +510,7 @@ fn v4_variants_are_appended_in_order() {
         (Message::LockWorkstation, 31),
         (Message::SelectAllMonitors, 36),
         (Message::TunnelOpened { id: 0 }, 38),
+        (Message::WhiteboardClear, 41),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];
     for (m, i) in expected {

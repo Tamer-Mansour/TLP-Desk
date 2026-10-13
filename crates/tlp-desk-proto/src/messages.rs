@@ -200,6 +200,20 @@ pub enum Message {
         id: u64,
         error: Option<String>,
     },
+
+    // --- whiteboard ---
+    /// Either direction: one whiteboard stroke over the streamed monitor. Points are normalized
+    /// to `0..=65535` like `InputEvent::MouseMove`. Needs `WHITEBOARD`. (v4)
+    WhiteboardStroke {
+        id: u64,
+        points: Vec<(u16, u16)>,
+        /// `0xRRGGBBAA`.
+        color_rgba: u32,
+        /// Line width in 1/10000 of the monitor height.
+        width: u16,
+    },
+    /// Either direction: erase every stroke. Needs `WHITEBOARD`. (v4)
+    WhiteboardClear,
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -248,6 +262,7 @@ impl Message {
             | M::SelectAllMonitors => Permissions::VIEW,
             M::TunnelOpened { .. } => Permissions::NONE,
             M::TunnelOpen { .. } | M::TunnelClose { .. } => Permissions::TUNNEL,
+            M::WhiteboardStroke { .. } | M::WhiteboardClear => Permissions::WHITEBOARD,
             // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }
