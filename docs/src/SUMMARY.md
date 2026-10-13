@@ -32,6 +32,7 @@
 - [Decision records](adr/index.md)
   - [Template](adr/template.md)
   - [0001 One QUIC stream per video frame](adr/0001-quic-stream-per-video-frame.md)
+  - [0002 SPAKE2 with channel binding](adr/0002-spake2-with-channel-binding.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
