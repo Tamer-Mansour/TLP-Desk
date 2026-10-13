@@ -3883,6 +3883,7 @@ dependencies = [
  "clap",
  "png",
  "tlp-desk-crypto",
+ "tlp-desk-files",
  "tlp-desk-host",
  "tlp-desk-net",
  "tlp-desk-proto",

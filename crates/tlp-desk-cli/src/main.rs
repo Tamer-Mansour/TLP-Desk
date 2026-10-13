@@ -2,6 +2,7 @@
 //! session (real capture/encode/input), or connect as a viewer and report statistics.
 #![forbid(unsafe_code)]
 
+mod clip;
 mod text;
 
 use std::io::{BufRead, Write};
@@ -76,6 +77,9 @@ enum Cmd {
         /// Do not show the green marker at the pointer while a viewer moves it.
         #[arg(long)]
         no_pointer_marker: bool,
+        /// Sync this PC's clipboard with viewers (grants the clipboard permission).
+        #[arg(long)]
+        clipboard: bool,
     },
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect {
@@ -106,6 +110,26 @@ enum Cmd {
         /// whole session (needs mouse permission).
         #[arg(long)]
         move_pointer: bool,
+    },
+    /// Viewer: put text on the host's clipboard (Arabic and every other character kept
+    /// exactly). This PC's own clipboard is not touched.
+    ClipSend {
+        /// 9-digit device ID, IP[:port], ID@IP[:port], or a device name on the LAN.
+        target: String,
+        /// The text to send.
+        text: Option<String>,
+        /// Send the contents of this UTF-8 text file instead.
+        #[arg(long, conflicts_with = "text")]
+        file: Option<PathBuf>,
+        /// The host's one-time code (otherwise the host user is asked to accept).
+        #[arg(long)]
+        code: Option<String>,
+        /// Use the unattended password from the TLP_DESK_PASSWORD environment variable.
+        #[arg(long)]
+        password: bool,
+        /// Local UDP port (0 = any).
+        #[arg(long, default_value_t = 0)]
+        port: u16,
     },
 }
 
@@ -168,8 +192,9 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             name,
             local_grace_ms,
             no_pointer_marker,
+            clipboard,
         } => {
-            let cfg = HostConfig {
+            let mut cfg = HostConfig {
                 local_input_grace: Duration::from_millis(local_grace_ms),
                 remote_pointer_marker: !no_pointer_marker,
                 monitor,
@@ -184,7 +209,26 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
                 device_name: name.unwrap_or_else(tlp_desk_net::default_device_name),
                 ..HostConfig::default()
             };
+            if clipboard {
+                cfg.default_permissions = cfg.default_permissions.union(Permissions::CLIPBOARD);
+                cfg.features.push(tlp_desk_files::ClipboardFeature::new(
+                    Arc::new(tlp_desk_files::SystemClipboard::new()),
+                    tlp_desk_files::ClipboardConfig::default(),
+                ));
+            }
             serve(&dir, port, cfg, auto_accept).await
+        }
+        Cmd::ClipSend {
+            target,
+            text,
+            file,
+            code,
+            password,
+            port,
+        } => {
+            let text = clip::load_text(text, file.as_deref())?;
+            let auth = auth_method(code, password)?;
+            clip::clip_send(&dir, &target, auth, text, port).await
         }
         Cmd::Connect {
             target,
@@ -197,14 +241,7 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             monitor,
             move_pointer,
         } => {
-            let auth = match (code, password) {
-                (Some(c), _) => AuthMethod::OneTimeCode(c),
-                (None, true) => AuthMethod::Password(
-                    std::env::var("TLP_DESK_PASSWORD")
-                        .context("--password needs the TLP_DESK_PASSWORD environment variable")?,
-                ),
-                (None, false) => AuthMethod::AcceptPrompt,
-            };
+            let auth = auth_method(code, password)?;
             let opts = ConnectOpts {
                 seconds,
                 snapshot,
@@ -216,6 +253,18 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             connect(&dir, &target, auth, opts).await
         }
     }
+}
+
+/// `--code` / `--password` (from `TLP_DESK_PASSWORD`) / accept prompt.
+fn auth_method(code: Option<String>, password: bool) -> Result<AuthMethod> {
+    Ok(match (code, password) {
+        (Some(c), _) => AuthMethod::OneTimeCode(c),
+        (None, true) => AuthMethod::Password(
+            std::env::var("TLP_DESK_PASSWORD")
+                .context("--password needs the TLP_DESK_PASSWORD environment variable")?,
+        ),
+        (None, false) => AuthMethod::AcceptPrompt,
+    })
 }
 
 async fn list(seconds: u64) -> Result<()> {
@@ -314,7 +363,11 @@ async fn serve(dir: &Path, port: u16, cfg: HostConfig, auto_accept: bool) -> Res
                         println!("{}", text::viewer_left(&peer, &reason));
                     }
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { .. } => {}
+                    HostEvent::Feature { event, .. } => {
+                        if let Some(line) = clip::event_line(&event) {
+                            println!("{line}");
+                        }
+                    }
                 }
             }
         }
