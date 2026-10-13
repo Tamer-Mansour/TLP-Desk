@@ -57,10 +57,10 @@ variants is part of the protocol. The full table, field by field, is in the
 `AuthRequest` also gained `ReconnectTicket { token }` (index 4) in v4.
 
 > **Defined is not implemented.** Protocol v4 reserves the wire format for most of the roadmap
-> (M2–M4) up front so feature lanes can work in parallel without bumping the version again. As of
-> this writing only the v1–v3 messages are acted on by the host and viewer; the endpoint answers
-> `AuthRequest::ReconnectTicket` with `Rejected(NotAllowed)` (test
-> `reconnect_ticket_is_refused_for_now`), and the other v4 messages have no handler yet.
+> (M2–M4) up front so feature lanes can work in parallel without bumping the version again. A v4
+> message is served only once a feature that handles it is registered; until then the host
+> ignores it. The endpoint answers `AuthRequest::ReconnectTicket` with `Rejected(NotAllowed)`
+> (test `reconnect_ticket_is_refused_for_now`).
 
 `Message::required_permissions()` returns the permission the host requires before it acts on an
 incoming message from the viewer — for example `VIEW` for `RequestKeyframe` / `SelectMonitor`,
@@ -68,9 +68,9 @@ incoming message from the viewer — for example `VIEW` for `RequestKeyframe` / 
 for `ClipboardData`, `FILES` for `FsRequest` and the transfer messages, `CLIPBOARD | FILES` for
 `ClipboardFiles`, `CHAT`, `AUDIO`, `SYSTEM`, `RESTART`, `PRIVACY_MODE`, `TUNNEL` and
 `WHITEBOARD` for their features. The authoritative mapping is the `match` in `messages.rs` and the
-test `v4_permissions_gate_feature_messages`. The host does not call it yet — it currently gates
-the v1–v3 messages it handles by hand — so a feature lane that adds a handler should route through
-`required_permissions()` rather than add another hand-written check.
+test `v4_permissions_gate_feature_messages`. The host checks it before routing a message to a
+session feature (see [tlp-desk-net, Features](net.md#features-featurers)); the core's own input
+handling additionally checks `CONTROL` / `KEYBOARD` per event.
 
 ### Permissions
 
