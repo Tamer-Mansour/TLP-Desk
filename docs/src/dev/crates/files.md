@@ -42,7 +42,7 @@ and from UTF-16 at the OS boundary — Arabic file and folder names must survive
   the other.
 
 The full flow is specified in the [wire protocol](../../protocol.md), section *Features (v4)*.
-The BLAKE3 hash implies a new dependency for this crate (check it against `deny.toml`).
+The BLAKE3 hash implies a new dependency for this crate (check it against `.cargo/deny.toml`).
 
 ## Arabic checklist for this lane
 

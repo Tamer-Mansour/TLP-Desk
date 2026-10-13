@@ -20,8 +20,8 @@ It runs, stopping at the first failure:
 Run it before every push. Additional repository checks:
 
 ```powershell
-cargo deny check   # licences (permissive only), advisories, sources — see deny.toml
-typos              # spelling — see typos.toml
+cargo deny check   # licences (permissive only), advisories, sources — see .cargo/deny.toml
+typos              # spelling — see .typos.toml
 ```
 
 ## Kinds of tests
@@ -83,4 +83,4 @@ usual names).
 - Use `#[tokio::test(flavor = "multi_thread")]` for anything using `quinn`.
 - A hardware test gets `#[ignore = "<reason>"]` with a reason that says what it needs, and the
   command to run it in the file's doc comment.
-- Tests may `unwrap`, `expect` and index freely (`clippy.toml` allows it in tests).
+- Tests may `unwrap`, `expect` and index freely (`.clippy.toml` allows it in tests).
