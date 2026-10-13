@@ -356,7 +356,11 @@ impl App {
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
                 // whiteboard (TLP-whiteboard)
-                BackendEvent::WhiteboardRemote { .. } => {}
+                BackendEvent::WhiteboardRemote { session, op } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.whiteboard.remote(&op, std::time::Instant::now());
+                    }
+                }
             }
         }
     }
