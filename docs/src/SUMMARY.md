@@ -25,6 +25,7 @@
   - [Coming soon](user-guide/en/coming-soon/index.md)
     - [File transfer and file browser](user-guide/en/coming-soon/file-transfer.md)
     - [Clipboard sharing](user-guide/en/coming-soon/clipboard.md)
+    - [Chat](user-guide/en/coming-soon/chat.md)
 
 # Security
 
