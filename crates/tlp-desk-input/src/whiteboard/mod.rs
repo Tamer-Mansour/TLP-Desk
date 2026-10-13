@@ -8,17 +8,23 @@
 //!   the pointer moves, so the host shows them live.
 //! * [`render_region`], [`damage_region`], [`blit`]: incremental anti-aliased rendering with
 //!   `tiny-skia`, identical on host and viewer.
+//! * [`Editor`]: the viewer's document (pen, highlighter, arrow, rectangle, eraser,
+//!   undo/redo, fading strokes) producing the ops to send.
 //!
 //! The overlay window is excluded from screen capture: the viewer renders the same strokes
 //! locally on top of the video, so they appear without waiting for a captured, encoded and
 //! decoded frame (which would double the latency and blur thin lines).
 
 mod draw;
+mod editor;
 mod render;
 mod simplify;
 mod stroke;
 
 pub use draw::{arrow_points, rect_points, StrokeStreamer, FLUSH_POINTS};
+pub use editor::{
+    Editor, Style, Tool, FLUSH_INTERVAL, HIGHLIGHTER_ALPHA, HIGHLIGHTER_WIDTH_FACTOR,
+};
 pub use render::{
     blit, damage_region, norm_to_px, render_full, render_region, width_px, ChannelOrder, PxRect,
 };
