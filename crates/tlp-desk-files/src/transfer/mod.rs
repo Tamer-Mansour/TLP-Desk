@@ -608,6 +608,12 @@ impl Feature for FileTransfer {
     }
 }
 
+/// Benchmark aid: the piece-parallel BLAKE3 of a file as the engine computes it from disk.
+#[doc(hidden)]
+pub fn hash_file_for_bench(file: &std::fs::File, size: u64) -> [u8; 32] {
+    hash::hash_file(file, size).unwrap_or_default()
+}
+
 /// `true` if `perms` allow file transfers.
 pub fn files_permitted(perms: Permissions) -> bool {
     perms.contains(Permissions::FILES)
