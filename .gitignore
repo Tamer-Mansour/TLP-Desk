@@ -16,3 +16,5 @@ snap*.png
 # This is the only place product screenshots and videos are tracked.
 !docs/media/
 !docs/media/**
+# Build-time copy of docs/media for the mdBook (see .github/workflows/docs.yml).
+/docs/src/media/

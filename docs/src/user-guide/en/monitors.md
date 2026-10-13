@@ -1,5 +1,7 @@
 # Switching monitors
 
+![Monitor buttons in the session toolbar](../../media/monitors-en-light.png)
+
 If the remote PC has **two or more monitors**, the toolbar shows a small monitor icon (its tooltip
 says **Screen**) followed by one button per monitor: **1**, **2**, … They are numbered by position, left to right (then top to bottom), the
 way the monitors are arranged in the remote PC's display settings.

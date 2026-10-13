@@ -1,5 +1,7 @@
 # Settings: language, digits and name
 
+![The settings screen](../../media/settings-en-light.png)
+
 Open **Settings** from the top bar of the home screen. Click **Back** to return. Changes apply
 immediately and are remembered.
 
