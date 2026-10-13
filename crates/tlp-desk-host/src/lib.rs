@@ -62,7 +62,10 @@ use tlp_desk_proto::{ByeReason, Message, MonitorDesc, Permissions, RejectReason}
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 
-pub use adapt::{capture_cap, BitrateMode, QualityTarget};
+pub use adapt::{
+    capture_cap, AdaptDecision, BitrateMode, Congestion, Controller, ControllerConfig,
+    QualityTarget, Signals, ViewerReport,
+};
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 
