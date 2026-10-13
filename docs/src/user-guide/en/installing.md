@@ -9,7 +9,8 @@ TLP-Desk comes in two forms. Install it the same way on **every** PC you want to
 | Windows Firewall | Configured automatically | Windows asks the first time |
 | Start-menu entry | Yes | No |
 
-Both need Windows 10 or 11, 64-bit.
+Both need Windows 10 or 11, 64-bit. On Windows 10, use version 2004 or newer: older versions
+install and run, but the green remote-pointer marker may then show up in the viewer's picture.
 
 ## Check the download (optional)
 
