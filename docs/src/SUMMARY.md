@@ -13,6 +13,7 @@
   - [tlp-desk-input](dev/crates/input.md)
   - [tlp-desk-audio](dev/crates/audio.md)
   - [tlp-desk-files](dev/crates/files.md)
+  - [tlp-desk-host](dev/crates/host.md)
 
 # Reference
 
