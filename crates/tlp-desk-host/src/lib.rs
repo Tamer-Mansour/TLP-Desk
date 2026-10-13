@@ -39,6 +39,7 @@ mod cursor;
 mod input;
 mod pipeline;
 mod priority;
+mod tunnel;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
@@ -63,6 +64,7 @@ use tokio::task::JoinHandle;
 
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
+pub use tunnel::{HostTunnelEvent, HostTunnelInfo, HostTunnels, TunnelHostConfig, TUNNEL_FEATURE};
 
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
 pub type CapturerFactory =
