@@ -11,6 +11,7 @@
   - [Finding devices on your network](user-guide/en/finding-devices.md)
   - [Connecting](user-guide/en/connecting.md)
   - [The Accept prompt and the banner](user-guide/en/accept-prompt.md)
+  - [Controlling the remote PC](user-guide/en/controlling.md)
 
 # Security
 
