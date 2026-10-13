@@ -82,6 +82,11 @@ pub trait VideoEncoder: Send {
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError>;
 
     fn config(&self) -> EncoderConfig;
+
+    /// Short human-readable name of the implementation in use (logs, stats overlay).
+    fn backend_label(&self) -> String {
+        "H.264".into()
+    }
 }
 
 pub trait VideoDecoder: Send {
