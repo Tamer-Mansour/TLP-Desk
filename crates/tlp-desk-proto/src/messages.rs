@@ -281,7 +281,7 @@ impl Message {
 // ------------------------------------------------------------------------------------------
 
 /// A file-system operation. Paths are UTF-8 `String`s in the receiver's native form (e.g.
-/// `C:\Users\مستخدم\Desktop`); Windows converts them to UTF-16 losslessly, so Arabic names
+/// `C:\Users\Ù…Ø³ØªØ®Ø¯Ù…\Desktop`); Windows converts them to UTF-16 losslessly, so Arabic names
 /// survive exactly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FsOp {
@@ -514,6 +514,14 @@ pub enum ClipboardData {
         width: u32,
         height: u32,
         rgba: Vec<u8>,
+    },
+    /// A PNG-compressed image (v5). width/height must match the PNG header; receivers cap
+    /// the decoded size (width * height * 4) before allocating. Preferred over [Self::Image]
+    /// for anything but tiny images.
+    Png {
+        width: u32,
+        height: u32,
+        png: Vec<u8>,
     },
 }
 
