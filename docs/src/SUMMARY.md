@@ -10,6 +10,7 @@
   - [tlp-desk-net](dev/crates/net.md)
   - [tlp-desk-capture](dev/crates/capture.md)
   - [tlp-desk-codec](dev/crates/codec.md)
+  - [tlp-desk-input](dev/crates/input.md)
 
 # Reference
 
