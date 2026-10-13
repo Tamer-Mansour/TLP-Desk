@@ -154,27 +154,35 @@ impl Store {
     ///
     /// Any I/O or serialization error; the existing file is left untouched in that case.
     pub fn save(&self, book: &AddressBook) -> anyhow::Result<()> {
-        if let Some(dir) = self.path.parent() {
-            fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        }
-        let json = to_json(book)?;
-        let tmp = self.sibling(".tmp");
-        {
-            let mut f =
-                fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
-            f.write_all(json.as_bytes())?;
-            f.sync_all()?;
-        }
-        // Keep the last good file; only a file that still parses is worth keeping.
-        if matches!(read_book(&self.path), Ok(Some(_))) {
-            if let Err(e) = fs::copy(&self.path, self.backup_path()) {
+        write_atomic(&self.path, &to_json(book)?, Some(&self.backup_path()))
+    }
+}
+
+/// Write `text` to `path` through `<path>.tmp` + fsync + rename, so a crash or full disk
+/// never leaves a half-written file. With `backup`, the previous file is copied there first
+/// if it still parses as an address book.
+fn write_atomic(path: &Path, text: &str, backup: Option<&Path>) -> anyhow::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    {
+        let mut f =
+            fs::File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    if let Some(backup) = backup {
+        if matches!(read_book(path), Ok(Some(_))) {
+            if let Err(e) = fs::copy(path, backup) {
                 tracing::warn!("cannot update the address book backup: {e}");
             }
         }
-        fs::rename(&tmp, &self.path)
-            .with_context(|| format!("replacing {}", self.path.display()))?;
-        Ok(())
     }
+    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
+    Ok(())
 }
 
 /// The book as pretty JSON in the current schema (also the export format).
@@ -260,13 +268,13 @@ pub fn import_file(path: &Path) -> anyhow::Result<AddressBook> {
         .ok_or_else(|| anyhow::anyhow!("{} does not exist", path.display()))
 }
 
-/// Write `book` to `path` as an export (atomic, like saving).
+/// Write `book` to `path` as an export (atomic like saving, but no `.bak` next to it).
 ///
 /// # Errors
 ///
 /// Any I/O error.
 pub fn export_file(book: &AddressBook, path: &Path) -> anyhow::Result<()> {
-    Store::at(path).save(book)
+    write_atomic(path, &to_json(book)?, None)
 }
 
 #[cfg(test)]
@@ -408,7 +416,10 @@ mod tests {
         let path = dir.path().join("نسخة دفتر العناوين.json");
         let book = sample();
         export_file(&book, &path).unwrap();
+        export_file(&book, &path).unwrap();
         assert_eq!(import_file(&path).unwrap(), book);
+        // Exports leave nothing else behind in the user's folder.
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
         assert!(import_file(&dir.path().join("missing.json")).is_err());
     }
 
