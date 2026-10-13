@@ -161,7 +161,8 @@ Contributions are welcome. In short:
   desktop products.
 - Any feature that shows or moves text must work in Arabic.
 
-The full rules for humans and coding agents are in [CLAUDE.md](CLAUDE.md) and
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). The full rules for humans and coding agents are in
+[CLAUDE.md](CLAUDE.md) and
 [docs/CODE_STYLE.md](docs/CODE_STYLE.md).
 
 ---
@@ -169,7 +170,7 @@ The full rules for humans and coding agents are in [CLAUDE.md](CLAUDE.md) and
 ## Security
 
 TLP-Desk is designed for trusted local networks. Please report vulnerabilities privately through
-GitHub Security Advisories rather than public issues.
+GitHub Security Advisories rather than public issues; see [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -201,8 +202,8 @@ GitHub Security Advisories rather than public issues.
 
 Dual-licensed under either of
 
-- MIT license
-- Apache License, Version 2.0
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 
 at your option. Bundled fonts and icons keep their own licenses (SIL OFL, MIT, ISC); see the
-license files shipped with the installer.
+license files shipped with the installer and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

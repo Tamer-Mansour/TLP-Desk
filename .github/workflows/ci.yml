@@ -1,6 +1,7 @@
 # Quality gate for every lane branch and every pull request into TLP-Desk.
 # Same steps as scripts/check.ps1: fmt, clippy -D warnings, tests, release build.
-# Tests that need a real desktop, camera of the screen or LAN multicast are #[ignore] and stay so.
+# Tests that need a real desktop (screen capture, input injection) or LAN multicast are #[ignore]
+# and stay ignored here.
 name: CI
 
 on:
@@ -29,7 +30,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Versions come from rust-toolchain.toml (stable + clippy + rustfmt).
       - uses: dtolnay/rust-toolchain@stable
@@ -60,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: taiki-e/install-action@v2
         with:
