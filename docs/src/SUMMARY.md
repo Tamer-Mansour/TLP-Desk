@@ -26,6 +26,7 @@
     - [File transfer and file browser](user-guide/en/coming-soon/file-transfer.md)
     - [Clipboard sharing](user-guide/en/coming-soon/clipboard.md)
     - [Chat](user-guide/en/coming-soon/chat.md)
+    - [Sound from the remote PC](user-guide/en/coming-soon/audio.md)
 
 # Security
 
