@@ -28,6 +28,7 @@
     - [Chat](user-guide/en/coming-soon/chat.md)
     - [Sound from the remote PC](user-guide/en/coming-soon/audio.md)
     - [Address book](user-guide/en/coming-soon/address-book.md)
+    - [Unattended access](user-guide/en/coming-soon/unattended-access.md)
 
 # Security
 
