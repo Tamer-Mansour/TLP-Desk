@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -104,6 +105,37 @@ struct VideoRx {
     last_kf_request: std::sync::Mutex<Option<Instant>>,
 }
 
+/// Incoming side streams of one kind wait here until a feature accepts them; beyond this the
+/// peer's streams are refused (`STREAM_REFUSED`) instead of piling up.
+const SIDE_QUEUE: usize = 64;
+
+/// An incoming typed side stream (see [`Session::accept_side_stream`]).
+#[derive(Debug)]
+pub struct SideStream {
+    pub kind: StreamKind,
+    /// The id from the stream header (transfer id, tunnel id, ...).
+    pub id: u64,
+    /// `Some` for a bidirectional stream (the reply direction).
+    pub send: Option<quinn::SendStream>,
+    /// Positioned after the stream header.
+    pub recv: quinn::RecvStream,
+}
+
+/// QUIC send priority per stream kind; higher is sent first. Control (10) > audio > video >
+/// clipboard > tunnels > bulk file data, so a multi-GB copy never delays input or video.
+pub fn stream_priority(kind: StreamKind) -> i32 {
+    match kind {
+        StreamKind::Audio => 6,
+        StreamKind::Video => 5,
+        StreamKind::Clipboard => 2,
+        StreamKind::Tunnel => 1,
+        StreamKind::FileData => -10,
+    }
+}
+
+/// Priority of the control stream (above every side stream).
+const CONTROL_PRIORITY: i32 = 10;
+
 /// An authenticated, authorized session.
 ///
 /// * **Control**: one bidirectional QUIC stream (opened by the viewer) carrying framed
@@ -112,6 +144,10 @@ struct VideoRx {
 ///   ([`Session::send_video`] / [`Session::recv_video`]). A late frame never blocks newer ones
 ///   (no head-of-line blocking) and the host drops frames instead of queueing when more than
 ///   `max_in_flight` are unacknowledged.
+/// * **Side streams**: typed extra streams for feature data (file bytes, tunnels, audio, large
+///   clipboard payloads), opened by either side with [`Session::open_uni`] /
+///   [`Session::open_bi`] and received per kind with [`Session::accept_side_stream`]. Each
+///   starts with a [`StreamHeader`]; see [`stream_priority`] for scheduling.
 ///
 /// All methods take `&self`; wrap the session in an `Arc` to use it from several tasks.
 ///
@@ -127,6 +163,7 @@ pub struct Session {
     ctrl_rx: Mutex<FramedRecv>,
     video_tx: Option<VideoTx>,
     video_rx: Option<VideoRx>,
+    side_rx: HashMap<StreamKind, Mutex<mpsc::Receiver<SideStream>>>,
     rt: tokio::runtime::Handle,
 }
 
@@ -149,9 +186,18 @@ impl Session {
         ctrl_tx: quinn::SendStream,
         ctrl_rx: FramedRecv,
     ) -> Self {
-        let _ = ctrl_tx.set_priority(10);
+        let _ = ctrl_tx.set_priority(CONTROL_PRIORITY);
         let rt = tokio::runtime::Handle::current();
-        let mut router = StreamRouter { video: None };
+        let mut router = StreamRouter {
+            video: None,
+            side: HashMap::new(),
+        };
+        let mut side_rx = HashMap::new();
+        for kind in StreamKind::SIDE {
+            let (tx, rx) = mpsc::channel(SIDE_QUEUE);
+            router.side.insert(kind, tx);
+            side_rx.insert(kind, Mutex::new(rx));
+        }
         let (video_tx, video_rx) = match role {
             Role::Host => (
                 Some(VideoTx {
@@ -192,8 +238,58 @@ impl Session {
             ctrl_rx: Mutex::new(ctrl_rx),
             video_tx,
             video_rx,
+            side_rx,
             rt,
         }
+    }
+
+    /// Opens a unidirectional side stream to the peer and writes its [`StreamHeader`]; the
+    /// peer receives it from [`Session::accept_side_stream`] with the same `kind` and `id`.
+    /// Write the payload, then `finish()` it (or `reset()` to abort).
+    pub async fn open_uni(&self, kind: StreamKind, id: u64) -> Result<quinn::SendStream, NetError> {
+        check_side_kind(kind)?;
+        let mut send = self.conn.open_uni().await?;
+        let _ = send.set_priority(stream_priority(kind));
+        send.write_all(&StreamHeader::new(kind, id).encode())
+            .await?;
+        Ok(send)
+    }
+
+    /// Opens a bidirectional side stream (e.g. one tunnelled TCP connection) and writes its
+    /// [`StreamHeader`].
+    pub async fn open_bi(
+        &self,
+        kind: StreamKind,
+        id: u64,
+    ) -> Result<(quinn::SendStream, quinn::RecvStream), NetError> {
+        check_side_kind(kind)?;
+        let (mut send, recv) = self.conn.open_bi().await?;
+        let _ = send.set_priority(stream_priority(kind));
+        send.write_all(&StreamHeader::new(kind, id).encode())
+            .await?;
+        Ok((send, recv))
+    }
+
+    /// Waits for the next side stream of `kind` opened by the peer (uni or bidi; check
+    /// [`SideStream::send`]). Each kind has its own queue, so the file, tunnel, audio and
+    /// clipboard features can each await their own streams concurrently. Only one task
+    /// should accept a given kind. `Err(NetError::Closed)` once the connection is gone.
+    ///
+    /// The caller is responsible for permission checks (e.g. refuse `FileData` without
+    /// `FILES`: `recv.stop(STREAM_REFUSED.into())`).
+    pub async fn accept_side_stream(&self, kind: StreamKind) -> Result<SideStream, NetError> {
+        check_side_kind(kind)?;
+        let rx = self
+            .side_rx
+            .get(&kind)
+            .ok_or_else(|| NetError::Unexpected(format!("no queue for {kind:?}")))?;
+        rx.lock().await.recv().await.ok_or(NetError::Closed)
+    }
+
+    /// Test/fuzzing aid: opens a raw uni stream without writing a header.
+    #[doc(hidden)]
+    pub async fn open_raw_uni(&self) -> Result<quinn::SendStream, NetError> {
+        Ok(self.conn.open_uni().await?)
     }
 
     /// Our role in this session.
@@ -263,7 +359,7 @@ impl Session {
         self.rt.spawn(async move {
             let res: Result<(), NetError> = async {
                 let mut s = conn.open_uni().await?;
-                let _ = s.set_priority(0);
+                let _ = s.set_priority(stream_priority(StreamKind::Video));
                 s.write_all(&bytes).await?;
                 let _ = s.finish();
                 // Count the frame as in flight until the viewer acknowledged all of it.
@@ -372,6 +468,32 @@ impl Drop for Session {
 struct StreamRouter {
     /// Viewer only: decoded-frame queue and the "a frame was lost" flag.
     video: Option<(mpsc::Sender<VideoFrame>, Arc<AtomicBool>)>,
+    /// One bounded queue per side-stream kind.
+    side: HashMap<StreamKind, mpsc::Sender<SideStream>>,
+}
+
+impl StreamRouter {
+    /// Queues a side stream for its feature, or refuses it if the queue is full.
+    fn route_side(&self, mut s: SideStream) {
+        let Some(tx) = self.side.get(&s.kind) else {
+            return refuse(&mut s.recv, "unexpected side stream kind");
+        };
+        if let Err(e) = tx.try_send(s) {
+            let mut s = e.into_inner();
+            tracing::warn!(kind = ?s.kind, id = s.id, "side stream queue full; refusing stream");
+            refuse(&mut s.recv, "side stream queue full");
+        }
+    }
+}
+
+/// Side streams carry feature data; video has its own API.
+fn check_side_kind(kind: StreamKind) -> Result<(), NetError> {
+    if kind == StreamKind::Video {
+        return Err(NetError::Unexpected(
+            "video uses send_video/recv_video, not side streams".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Reads the [`StreamHeader`] that starts every non-control stream.
@@ -408,8 +530,12 @@ async fn accept_uni_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
                     Some((tx, gap)) => read_video_frame(recv, tx, gap).await,
                     None => refuse(&mut recv, "video stream to a host"),
                 },
-                // FEATURE HOOK: side streams are routed in the next step.
-                _ => refuse(&mut recv, "no handler for this stream kind"),
+                kind => router.route_side(SideStream {
+                    kind,
+                    id: header.id,
+                    send: None,
+                    recv,
+                }),
             }
         });
     }
@@ -418,11 +544,20 @@ async fn accept_uni_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
 async fn accept_bi_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
     // The control stream was accepted during the handshake; any later bidi stream is a side
     // stream.
-    while let Ok((_send, mut recv)) = conn.accept_bi().await {
-        let _router = router.clone();
+    while let Ok((send, mut recv)) = conn.accept_bi().await {
+        let router = router.clone();
         tokio::spawn(async move {
             match read_stream_header(&mut recv).await {
-                Ok(h) => refuse(&mut recv, &format!("no handler for bidi {:?}", h.kind)),
+                Ok(h) if h.kind == StreamKind::Video => refuse(&mut recv, "video on a bidi stream"),
+                Ok(h) => {
+                    let _ = send.set_priority(stream_priority(h.kind));
+                    router.route_side(SideStream {
+                        kind: h.kind,
+                        id: h.id,
+                        send: Some(send),
+                        recv,
+                    });
+                }
                 Err(e) => refuse(&mut recv, &e.to_string()),
             }
         });

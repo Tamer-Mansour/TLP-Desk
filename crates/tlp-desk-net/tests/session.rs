@@ -9,7 +9,7 @@ use tlp_desk_crypto::{
 };
 use tlp_desk_net::{
     AllowList, AuthKind, AuthMethod, Endpoint, EndpointConfig, NetError, Pin, Session,
-    VideoSendStatus,
+    StreamHeader, StreamKind, VideoSendStatus, STREAM_REFUSED,
 };
 use tlp_desk_proto::{
     ByeReason, ClipboardData, Codec, InputEvent, Message, Permissions, RejectReason, Role,
@@ -549,5 +549,103 @@ async fn second_endpoint_on_a_taken_port_fails_with_addr_in_use() {
     assert!(
         matches!(&err, NetError::Io(e) if e.kind() == std::io::ErrorKind::AddrInUse),
         "two endpoints must not share a port: {err:?}"
+    );
+}
+
+/// Writes `payload` on a new side stream of every kind, uni and bidi, in both directions, and
+/// checks the peer receives kind, id and bytes (Arabic text included).
+#[tokio::test(flavor = "multi_thread")]
+async fn side_streams_of_every_kind_work_both_ways() {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let (h, v) = (Arc::new(h), Arc::new(v));
+    let payload = "ملف تجريبي — side stream payload".as_bytes().to_vec();
+    for (from, to, dir) in [(&v, &h, "viewer->host"), (&h, &v, "host->viewer")] {
+        for (n, kind) in StreamKind::SIDE.into_iter().enumerate() {
+            let id = 1000 + n as u64;
+            // uni
+            let mut send = from.open_uni(kind, id).await.unwrap();
+            send.write_all(&payload).await.unwrap();
+            send.finish().unwrap();
+            let got = timeout(T, to.accept_side_stream(kind))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!((got.kind, got.id), (kind, id), "{dir} uni");
+            assert!(got.send.is_none());
+            let mut recv = got.recv;
+            assert_eq!(recv.read_to_end(1 << 20).await.unwrap(), payload);
+            // bidi: echo back
+            let (mut send, mut recv) = from.open_bi(kind, id + 1).await.unwrap();
+            send.write_all(&payload).await.unwrap();
+            send.finish().unwrap();
+            let got = timeout(T, to.accept_side_stream(kind))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!((got.kind, got.id), (kind, id + 1), "{dir} bidi");
+            let mut back = got.send.expect("bidi stream has a send half");
+            let mut peer_recv = got.recv;
+            let data = peer_recv.read_to_end(1 << 20).await.unwrap();
+            back.write_all(&data).await.unwrap();
+            back.finish().unwrap();
+            assert_eq!(recv.read_to_end(1 << 20).await.unwrap(), payload);
+        }
+    }
+    // Video is not a side stream.
+    assert!(v.open_uni(StreamKind::Video, 1).await.is_err());
+    assert!(h.accept_side_stream(StreamKind::Video).await.is_err());
+}
+
+/// Streams of different kinds land in their own queues, so features never steal each other's
+/// streams, and the control stream keeps working alongside.
+#[tokio::test(flavor = "multi_thread")]
+async fn side_stream_kinds_have_separate_queues() {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let mut a = v.open_uni(StreamKind::Audio, 7).await.unwrap();
+    a.finish().unwrap();
+    let mut f = v.open_uni(StreamKind::FileData, 8).await.unwrap();
+    f.finish().unwrap();
+    v.send(&Message::RequestKeyframe).await.unwrap();
+    let file = timeout(T, h.accept_side_stream(StreamKind::FileData))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(file.id, 8);
+    let audio = timeout(T, h.accept_side_stream(StreamKind::Audio))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(audio.id, 7);
+    assert_eq!(
+        timeout(T, h.recv()).await.unwrap().unwrap(),
+        Message::RequestKeyframe
+    );
+}
+
+/// A stream whose header names an unknown kind is refused with `STREAM_REFUSED`.
+#[tokio::test(flavor = "multi_thread")]
+async fn unknown_stream_kind_is_refused() {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let mut raw = v.open_raw_uni().await.unwrap();
+    let mut header = StreamHeader::new(StreamKind::FileData, 1).encode();
+    header[0] = 0xEE;
+    raw.write_all(&header).await.unwrap();
+    raw.write_all(b"junk").await.unwrap();
+    let stopped = timeout(T, raw.stopped()).await.unwrap().unwrap();
+    assert_eq!(stopped, Some(STREAM_REFUSED.into()));
+    // Nothing reached any queue, and the session is still fine.
+    assert!(timeout(
+        Duration::from_millis(200),
+        h.accept_side_stream(StreamKind::FileData)
+    )
+    .await
+    .is_err());
+    v.send(&Message::RequestKeyframe).await.unwrap();
+    assert_eq!(
+        timeout(T, h.recv()).await.unwrap().unwrap(),
+        Message::RequestKeyframe
     );
 }
