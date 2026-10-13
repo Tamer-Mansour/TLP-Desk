@@ -251,6 +251,66 @@ several streams in parallel.
    `TransferError`.
 
 Directories (`is_dir`) are created by the receiver; modification times are restored.
+### Clipboard
+
+- `ClipboardData::Text / Image` (v1) keep working; text is sent byte-exact (Arabic, RTL marks,
+  ZWJ/ZWNJ preserved). Payloads larger than about 1 MiB should go on a `StreamKind::Clipboard` uni
+  stream (body = one framed `Message`) instead of the control stream.
+- `ClipboardHtml { html, alt_text }`: the `CF_HTML` fragment as UTF-8 plus a plain-text fallback.
+- `ClipboardFiles { transfer_id, items }`: files were copied on one side. Nothing is sent until the
+  user pastes on the other side; then the viewer starts a `TransferOffer` with the same id
+  (`Upload` if the files are on the viewer, `Download` if they are on the host). Needs `CLIPBOARD`
+  and `FILES`.
+
+### Chat
+
+`ChatMessage { id, text, sent_unix_ms }` in either direction (`CHAT`). `id` is unique per sender
+and session; `text` is UTF-8 and displayed with full Arabic shaping/bidi.
+
+### Audio
+
+The viewer sends `AudioControl { enabled: true, sample_rate, channels }` (`AUDIO`); the host
+answers with the `AudioControl` it actually uses and opens a `StreamKind::Audio` uni stream whose
+body is a sequence of `u16` LE length + one Opus packet. `enabled: false` stops it.
+
+### Session and system control (M3)
+
+| Message | Permission | Notes |
+|---|---|---|
+| `SendCtrlAltDel` | `SYSTEM` | Via `SendSAS` in the service |
+| `LockWorkstation` | `SYSTEM` | |
+| `RestartRemote { reconnect }` | `RESTART` | With `reconnect` the host first sends `ReconnectTicket` |
+| `PrivacyMode { enabled }` | `PRIVACY_MODE` | Host echoes the actual state |
+| `DesktopState { secure_desktop, locked }` | - | Host → viewer on change (UAC, login screen, lock) |
+
+`ReconnectTicket { token, expires_unix_ms }` is single-use and bound on the host to the viewer's
+TLS fingerprint. After the host restarts, the viewer reconnects and sends
+`AuthRequest::ReconnectTicket { token }` instead of a prompt/code; a ticket presented by another
+key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited like passwords).
+
+### Quality and latency
+
+- `SetQuality(QualitySettings { preset: Speed | Balanced | Quality | Custom, max_width, max_height,
+  fps, bitrate_kbps: Option<u32> })`: zero fields mean "host default", `None` bitrate = adaptive.
+- `ViewerFeedback { decode_us, frames_dropped, rtt_us }` about once per second drives adaptive
+  bitrate on the host.
+- `LatencyProbe { t_viewer_us }` → `LatencyEcho { t_viewer_us, t_host_capture_us }` lets the viewer
+  measure round trip plus the capture age for the latency overlay.
+- `SelectAllMonitors`: stream the whole virtual desktop; `MonitorList.active` is `u32::MAX` while
+  it is shown, `SelectMonitor` goes back to one monitor.
+
+### Power features (M4)
+
+- **Tunnels** (`TUNNEL`): `TunnelOpen { id, target_port, target_host }` asks the host to allow
+  forwarding to `target_host:target_port` (`None` = the host itself). The host answers
+  `TunnelOpened { id }` or `TunnelClose { id, error }`. Each local TCP connection accepted by the
+  viewer becomes one `StreamKind::Tunnel` bidi stream (stream id = tunnel id), opened by the viewer;
+  the host connects to the target for each stream and copies bytes both ways.
+- **Whiteboard** (`WHITEBOARD`): `WhiteboardStroke { id, points, color_rgba, width }` with points
+  normalized to `0..=65535` over the streamed monitor, `color_rgba = 0xRRGGBBAA`, width in 1/10000
+  of the monitor height; `WhiteboardClear` erases all.
+- **Device info**: `DeviceInfoRequest` → `DeviceInfo { os, version, cpu, cores, ram_bytes, disks:
+  Vec<DiskInfo { mount, label, total_bytes, free_bytes }>, uptime_s, hostname }`.
 ## Session flow
 
 ```
