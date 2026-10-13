@@ -419,6 +419,26 @@ impl Endpoint {
         ))
     }
 
+    /// Test/fuzzing aid: dials `addr` and completes only the mutually authenticated TLS
+    /// handshake (with `pin`), returning the raw QUIC connection before any `Hello`. Lets
+    /// tests play a peer that speaks the protocol wrong.
+    #[doc(hidden)]
+    pub async fn dial_raw(
+        &self,
+        addr: SocketAddr,
+        pin: Pin,
+    ) -> Result<quinn::Connection, NetError> {
+        let (cfg, _) = tls::client_config(&self.shared.identity, pin)?;
+        Ok(self.ep.connect_with(cfg, addr, "tlp-desk")?.await?)
+    }
+
+    /// Test aid: QUIC connections currently open on this endpoint (handshaking, pending,
+    /// in a session, or draining). Leak tests check it returns to zero.
+    #[doc(hidden)]
+    pub fn open_connections(&self) -> usize {
+        self.ep.open_connections()
+    }
+
     /// Stops accepting and closes all connections.
     pub fn close(&self) {
         self.ep.close(0u32.into(), b"shutdown");

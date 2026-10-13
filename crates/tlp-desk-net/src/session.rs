@@ -293,6 +293,12 @@ impl Session {
         Ok(self.conn.open_uni().await?)
     }
 
+    /// Test/fuzzing aid: opens a raw bidirectional stream without writing a header.
+    #[doc(hidden)]
+    pub async fn open_raw_bi(&self) -> Result<(quinn::SendStream, quinn::RecvStream), NetError> {
+        Ok(self.conn.open_bi().await?)
+    }
+
     /// Our role in this session.
     pub fn role(&self) -> Role {
         self.role
