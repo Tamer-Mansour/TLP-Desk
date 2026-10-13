@@ -326,6 +326,9 @@ pub enum HostError {
     /// A Windows API call failed (`code` is the Win32 error or HRESULT).
     #[error("{call} failed with os error {code:#x}")]
     Os { call: &'static str, code: i32 },
+    /// The service could not load or create the device identity.
+    #[error("identity: {0}")]
+    Identity(#[from] tlp_desk_crypto::CryptoError),
     /// The operation needs Windows (service, agent, SendSAS, ...).
     #[error("not supported on this platform")]
     Unsupported,

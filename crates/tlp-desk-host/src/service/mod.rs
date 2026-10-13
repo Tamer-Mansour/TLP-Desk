@@ -41,6 +41,9 @@ mod supervisor;
 mod system;
 #[cfg(test)]
 mod testutil;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub mod windows;
 
 pub use agent::{
     serve_connection, AgentPlatform, DESKTOP_CHECK_EVERY, DESKTOP_POLL_EVERY, MAX_FRAME_WAIT,
