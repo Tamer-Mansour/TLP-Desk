@@ -31,10 +31,14 @@
 
 pub mod ipc;
 mod pipe_security;
+mod session;
 
 pub use pipe_security::{
     agent_pipe_name, is_agent_pipe_name, PipeSpec, AGENT_PIPE_SDDL, GUI_CLIENT_ACCESS,
     GUI_PIPE_NAME, GUI_PIPE_SDDL,
+};
+pub use session::{
+    console_session, SessionAction, SessionChange, SessionTracker, NO_CONSOLE_SESSION,
 };
 
 /// Service name in the Service Control Manager (`sc query TLP-Desk`).
