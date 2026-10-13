@@ -153,6 +153,8 @@ struct Rig {
     opened: Opened,
     enc: EncLog,
     rects: Arc<Mutex<Vec<MonitorRect>>>,
+    /// The host's monitor layout (edit it to simulate hot-plug).
+    layout: Arc<Mutex<Vec<MonitorInfo>>>,
 }
 
 struct Setup {
@@ -203,8 +205,8 @@ async fn rig(setup: Setup) -> Rig {
     let enc: EncLog = Arc::default();
     let rects: Arc<Mutex<Vec<MonitorRect>>> = Arc::default();
     let (o, e, r) = (opened.clone(), enc.clone(), rects.clone());
-    let list = setup.monitors.clone();
-    let list2 = setup.monitors.clone();
+    let layout = Arc::new(Mutex::new(setup.monitors.clone()));
+    let (list, list2) = (layout.clone(), layout.clone());
     let moving = setup.moving;
     let mut cfg = HostConfig {
         advertise: false,
@@ -214,10 +216,12 @@ async fn rig(setup: Setup) -> Rig {
             r.lock().unwrap().push(rect);
             Ok(Box::new(NoInput) as Box<dyn InputInjector>)
         }),
-        monitor_lister: Arc::new(move || Ok(list.clone())),
+        monitor_lister: Arc::new(move || Ok(list.lock().unwrap().clone())),
         capturer_factory: Arc::new(move |i, opts: CaptureOptions| {
             o.lock().unwrap().push((i, opts.max_size));
             let mon = list2
+                .lock()
+                .unwrap()
                 .iter()
                 .find(|m| m.index == i)
                 .cloned()
@@ -275,6 +279,7 @@ async fn rig(setup: Setup) -> Rig {
         opened,
         enc,
         rects,
+        layout,
     }
 }
 
@@ -405,6 +410,90 @@ async fn static_screen_is_not_reencoded() {
     );
     assert_eq!(enc_after, enc_before, "static frames were encoded");
     assert!(r.session.take_frame().is_none(), "static frames were sent");
+}
+
+/// RGBA pixel of a decoded frame.
+fn rgba(f: &DecodedFrame, x: u32, y: u32) -> [u8; 4] {
+    let i = (y as usize * f.width as usize + x as usize) * 4;
+    f.pixels[i..i + 4].try_into().unwrap()
+}
+
+/// "All monitors" with a secondary monitor left of and above the primary (negative origin):
+/// one composed picture of the virtual-desktop bounding box, input mapped across it, and
+/// back to one monitor with `SelectMonitor`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn all_monitors_compose_the_virtual_desktop_and_map_input() {
+    use tlp_desk_input::normalize_pixel;
+    use tlp_desk_viewer::ViewerEvent;
+
+    let mut r = rig(Setup {
+        monitors: vec![monitor(0, 0, 0, 640, 400), monitor(1, -480, -100, 480, 300)],
+        moving: false,
+        ..Setup::default()
+    })
+    .await;
+    frame_of_size(&r.session, 640, 400).await;
+    assert!(r.session.send_message(Message::SelectAllMonitors));
+    // Bounding box: x -480..640, y -100..400 -> 1120x500 (fits the default cap).
+    let f = frame_of_size(&r.session, 1120, 500).await;
+    let active = within("the monitor list", async {
+        loop {
+            match r.vevents.recv().await {
+                Some(ViewerEvent::MonitorsChanged { active, monitors }) if active == u32::MAX => {
+                    return (active, monitors.len());
+                }
+                Some(_) => {}
+                None => panic!("session ended"),
+            }
+        }
+    })
+    .await;
+    assert_eq!(active, (u32::MAX, 2));
+    // Each monitor sits at its place: the secondary at the top left (shade 90), the primary
+    // 100 px lower on the right (shade 0); below the secondary there is no screen (black).
+    // The fake paints blue = shade + (row % 64); allow for lossy H.264.
+    let near = |got: u8, want: u8| got.abs_diff(want) <= 24;
+    assert!(
+        near(rgba(&f, 100, 250)[2], 90 + (250 % 64) as u8),
+        "{:?}",
+        rgba(&f, 100, 250)
+    );
+    assert!(near(rgba(&f, 800, 150)[2], 50), "{:?}", rgba(&f, 800, 150));
+    let gap = rgba(&f, 100, 450);
+    assert!(gap[0] < 24 && gap[1] < 24 && gap[2] < 24, "{gap:?}");
+
+    // Input maps across the bounding box, negative origin included.
+    let rect = within("the all-monitors injector", async {
+        loop {
+            let last = r.rects.lock().unwrap().last().copied();
+            if let Some(rect) = last.filter(|r| r.width == 1120) {
+                return rect;
+            }
+            r.session.send_input(InputEvent::MouseMove { x: 0, y: 0 });
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert_eq!(rect, MonitorRect::new(-480, -100, 1120, 500));
+    assert_eq!(rect.normalized_to_pixel(0, 0), (-480, -100));
+    assert_eq!(rect.normalized_to_pixel(u16::MAX, u16::MAX), (639, 399));
+    // The pixel at (100, 250) of the picture is (-380, 150) on the desktop: on monitor 1.
+    let (nx, ny) = (normalize_pixel(100, 1120), normalize_pixel(250, 500));
+    let (px, py) = rect.normalized_to_pixel(nx, ny);
+    assert_eq!((px, py), (-380, 150));
+    assert!(MonitorRect::new(-480, -100, 480, 300).contains(px, py));
+    // And (800, 150) is (320, 50): on the primary.
+    let p = rect.normalized_to_pixel(normalize_pixel(800, 1120), normalize_pixel(150, 500));
+    assert_eq!(p, (320, 50));
+
+    // Hot-plug: a third monitor right of the primary widens the composed picture
+    // (x -480..1040 = 1520 wide).
+    r.layout.lock().unwrap().push(monitor(2, 640, 0, 400, 300));
+    frame_of_size(&r.session, 1520, 500).await;
+
+    // Back to one monitor.
+    assert!(r.session.select_monitor(0));
+    frame_of_size(&r.session, 640, 400).await;
 }
 
 /// Viewer feedback that reports lost frames makes the host lower the encoder bitrate.

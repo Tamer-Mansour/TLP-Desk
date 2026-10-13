@@ -13,6 +13,8 @@ use crate::{CapturerFactory, MonitorLister};
 pub(crate) struct Source {
     pub(crate) cap: Box<dyn ScreenCapturer>,
     pub(crate) max_size: (u32, u32),
+    /// For "all monitors": the monitor layout it was composed from (re-checked for hot-plug).
+    pub(crate) monitors: Option<Vec<MonitorInfo>>,
 }
 
 /// The cap a source showing `monitor` should have for this quality cap and resolution step.
@@ -42,6 +44,7 @@ pub(crate) fn open_source(
         return Ok(Source {
             cap: Box::new(cap),
             max_size,
+            monitors: Some(list),
         });
     }
     // Orient the cap like the monitor if we know its size; otherwise just scale it.
@@ -53,7 +56,11 @@ pub(crate) fn open_source(
         None => capture_cap(quality_cap, quality_cap, scale),
     };
     let cap = factory(index, CaptureOptions::max_size(max_size.0, max_size.1))?;
-    Ok(Source { cap, max_size })
+    Ok(Source {
+        cap,
+        max_size,
+        monitors: None,
+    })
 }
 
 #[cfg(test)]

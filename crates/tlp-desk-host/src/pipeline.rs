@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use tlp_desk_capture::{BgraFrame, CaptureError, DirtyTracker, MonitorInfo};
+use tlp_desk_capture::{BgraFrame, CaptureError, DirtyTracker, MonitorInfo, ALL_MONITORS};
 use tlp_desk_codec::{CodecError, VideoEncoder};
 use tlp_desk_input::MonitorRect;
 use tlp_desk_net::{Session, VideoSendStatus};
@@ -34,6 +34,8 @@ use crate::{CapturerFactory, EncoderFactory, MonitorLister};
 const MAX_CAPTURE_ERRORS: u32 = 100;
 /// Attempts to open the capturer when a session starts.
 const INITIAL_OPEN_ATTEMPTS: u32 = 10;
+/// How often the "all monitors" layout is compared with the monitor list (hot-plug).
+const LAYOUT_POLL: Duration = Duration::from_secs(2);
 
 pub(crate) struct PipelineCtx {
     pub capturer_factory: CapturerFactory,
@@ -246,6 +248,8 @@ struct CaptureState {
     dirty: DirtyTracker,
     /// Identical frames skipped (for the log).
     skipped: u64,
+    /// Last time the "all monitors" layout was compared with the monitor list.
+    layout_checked: Instant,
 }
 
 impl CaptureState {
@@ -285,6 +289,7 @@ fn capture_loop(
         failed_cap: None,
         dirty: DirtyTracker::default(),
         skipped: 0,
+        layout_checked: Instant::now(),
     };
     let mut capture_errors = 0u32;
 
@@ -306,6 +311,7 @@ fn capture_loop(
             }
         }
         reopen_if_cap_changed(ctx, mailbox, &mut st);
+        recompose_if_layout_changed(ctx, mailbox, &mut st);
         while let Ok(buf) = recycle.try_recv() {
             st.src.cap.recycle(buf);
         }
@@ -388,6 +394,34 @@ fn reopen_if_cap_changed(ctx: &PipelineCtx, mailbox: &Mailbox, st: &mut CaptureS
             tracing::warn!(%e, cap = ?want, "cannot reopen capture with the new size cap; keeping the current one");
             st.failed_cap = Some(want);
         }
+    }
+}
+
+/// While all monitors are shown, re-reads the monitor list now and then and recomposes when a
+/// monitor was added, removed, moved or resized.
+fn recompose_if_layout_changed(ctx: &PipelineCtx, mailbox: &Mailbox, st: &mut CaptureState) {
+    let Some(layout) = st.src.monitors.as_ref() else {
+        return;
+    };
+    if st.layout_checked.elapsed() < LAYOUT_POLL {
+        return;
+    }
+    st.layout_checked = Instant::now();
+    match (ctx.monitor_lister)() {
+        Ok(list) if !list.is_empty() && list != *layout => {
+            tracing::info!(
+                monitors = list.len(),
+                "monitor layout changed; recomposing all monitors"
+            );
+            match open_now(ctx, mailbox, ALL_MONITORS) {
+                Ok(s) => st.replace(ctx, mailbox, s, ALL_MONITORS),
+                Err(e) => {
+                    tracing::warn!(%e, "cannot recompose all monitors; keeping the old layout")
+                }
+            }
+        }
+        Ok(_) => {}
+        Err(e) => tracing::debug!(%e, "cannot list monitors"),
     }
 }
 

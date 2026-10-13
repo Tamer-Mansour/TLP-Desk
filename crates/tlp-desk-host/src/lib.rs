@@ -30,7 +30,13 @@
 //!   core does not handle go to the feature that claims them, after the permission check
 //!   `Message::required_permissions`. Features report to the UI with [`HostEvent::Feature`].
 //! * **Monitors**: the viewer gets `Message::MonitorList` (after accept, on hot-plug and on
-//!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`.
+//!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`,
+//!   or stream the whole virtual desktop as one picture with `Message::SelectAllMonitors`
+//!   (`MonitorList::active` is then `ALL_MONITORS`; input maps across the bounding box).
+//! * **Performance**: `SetQuality` presets apply live, `ViewerFeedback` and send-side QUIC
+//!   signals drive the adaptive bitrate / frame rate / resolution controller (see
+//!   [`Controller`]), frames identical to the previous one are not encoded, and
+//!   `LatencyProbe` is answered on the session clock of `VideoFrame::timestamp_us`.
 //!
 //! All methods except [`Host::start`] are non-blocking and may be called from any thread.
 #![forbid(unsafe_code)]
@@ -922,6 +928,16 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                         select_tx.send_replace(index);
                     } else {
                         tracing::warn!(session = id.0, index, "viewer selected an unknown monitor; ignoring");
+                    }
+                }
+                Ok(Message::SelectAllMonitors) => {
+                    // The whole virtual desktop in one picture; `MonitorList::active` becomes
+                    // `ALL_MONITORS` once the pipeline switched.
+                    if monitors.as_ref().is_some_and(|l| !l.is_empty()) {
+                        tracing::info!(session = id.0, "viewer selected all monitors");
+                        select_tx.send_replace(tlp_desk_capture::ALL_MONITORS);
+                    } else {
+                        tracing::warn!(session = id.0, "all monitors asked for, but the monitor list is unknown; ignoring");
                     }
                 }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
