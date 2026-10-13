@@ -70,6 +70,7 @@
     - [تسجيل الجلسة](user-guide/ar/coming-soon/recording.md)
     - [إعادة توجيه المنافذ (الأنفاق)](user-guide/ar/coming-soon/port-forwarding.md)
     - [اللوح الأبيض](user-guide/ar/coming-soon/whiteboard.md)
+    - [معلومات الجهاز البعيد](user-guide/ar/coming-soon/device-info.md)
 
 # Security
 
