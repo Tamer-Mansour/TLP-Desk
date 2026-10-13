@@ -209,13 +209,21 @@ pub(crate) fn transport_config() -> Arc<quinn::TransportConfig> {
     t.max_idle_timeout(Some(
         quinn::IdleTimeout::try_from(Duration::from_secs(15)).expect("15s fits"),
     ));
-    // Per-frame video streams: allow a few in flight, each up to one large keyframe.
-    t.max_concurrent_uni_streams(32u32.into());
-    t.max_concurrent_bidi_streams(4u32.into());
-    t.stream_receive_window((8u32 * 1024 * 1024).into());
-    t.receive_window((32u32 * 1024 * 1024).into());
-    // Bound how much unacknowledged data we buffer so latency cannot grow unboundedly.
-    t.send_window(8 * 1024 * 1024);
+    // Per-frame video streams plus parallel side streams (file ranges, tunnel connections).
+    t.max_concurrent_uni_streams(256u32.into());
+    t.max_concurrent_bidi_streams(256u32.into());
+    // Flow-control windows sized for bulk transfers at LAN speed: one stream may have 16 MiB
+    // in flight, the connection 64 MiB.
+    t.stream_receive_window((16u32 * 1024 * 1024).into());
+    t.receive_window((64u32 * 1024 * 1024).into());
+    // Unacknowledged data we buffer. Video latency does not depend on it: video frames are
+    // dropped by the in-flight limit and outrank bulk streams (`stream_priority`).
+    t.send_window(64 * 1024 * 1024);
+    // Let MTU discovery find jumbo frames on LANs that have them (normal Ethernet settles at
+    // ~1452 bytes; the initial MTU stays at the safe default).
+    let mut mtu = quinn::MtuDiscoveryConfig::default();
+    mtu.upper_bound(9000);
+    t.mtu_discovery_config(Some(mtu));
     Arc::new(t)
 }
 

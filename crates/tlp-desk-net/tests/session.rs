@@ -9,7 +9,7 @@ use tlp_desk_crypto::{
 };
 use tlp_desk_net::{
     AllowList, AuthKind, AuthMethod, Endpoint, EndpointConfig, NetError, Pin, Session,
-    VideoSendStatus,
+    StreamHeader, StreamKind, VideoSendStatus, STREAM_REFUSED,
 };
 use tlp_desk_proto::{
     ByeReason, ClipboardData, Codec, InputEvent, Message, Permissions, RejectReason, Role,
@@ -234,7 +234,11 @@ async fn frames_flow_on_control_and_video_streams() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+// Current-thread runtime on purpose: `send_video` is synchronous, so no frame can be sent and
+// acknowledged between the calls of the burst below. On a multi-thread runtime a fast machine
+// (or large flow-control windows) could ack each frame before the next is offered, and the
+// test would flake.
+#[tokio::test]
 async fn host_drops_video_instead_of_queueing() {
     let p = pair();
     let (h, _v) = connect_accept(&p).await;
@@ -550,4 +554,253 @@ async fn second_endpoint_on_a_taken_port_fails_with_addr_in_use() {
         matches!(&err, NetError::Io(e) if e.kind() == std::io::ErrorKind::AddrInUse),
         "two endpoints must not share a port: {err:?}"
     );
+}
+
+/// Writes `payload` on a new side stream of every kind, uni and bidi, in both directions, and
+/// checks the peer receives kind, id and bytes (Arabic text included).
+#[tokio::test(flavor = "multi_thread")]
+async fn side_streams_of_every_kind_work_both_ways() {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let (h, v) = (Arc::new(h), Arc::new(v));
+    let payload = "ملف تجريبي — side stream payload".as_bytes().to_vec();
+    for (from, to, dir) in [(&v, &h, "viewer->host"), (&h, &v, "host->viewer")] {
+        for (n, kind) in StreamKind::SIDE.into_iter().enumerate() {
+            let id = 1000 + n as u64;
+            // uni
+            let mut send = from.open_uni(kind, id).await.unwrap();
+            send.write_all(&payload).await.unwrap();
+            send.finish().unwrap();
+            let got = timeout(T, to.accept_side_stream(kind))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!((got.kind, got.id), (kind, id), "{dir} uni");
+            assert!(got.send.is_none());
+            let mut recv = got.recv;
+            assert_eq!(recv.read_to_end(1 << 20).await.unwrap(), payload);
+            // bidi: echo back
+            let (mut send, mut recv) = from.open_bi(kind, id + 1).await.unwrap();
+            send.write_all(&payload).await.unwrap();
+            send.finish().unwrap();
+            let got = timeout(T, to.accept_side_stream(kind))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!((got.kind, got.id), (kind, id + 1), "{dir} bidi");
+            let mut back = got.send.expect("bidi stream has a send half");
+            let mut peer_recv = got.recv;
+            let data = peer_recv.read_to_end(1 << 20).await.unwrap();
+            back.write_all(&data).await.unwrap();
+            back.finish().unwrap();
+            assert_eq!(recv.read_to_end(1 << 20).await.unwrap(), payload);
+        }
+    }
+    // Video is not a side stream.
+    assert!(v.open_uni(StreamKind::Video, 1).await.is_err());
+    assert!(h.accept_side_stream(StreamKind::Video).await.is_err());
+}
+
+/// Streams of different kinds land in their own queues, so features never steal each other's
+/// streams, and the control stream keeps working alongside.
+#[tokio::test(flavor = "multi_thread")]
+async fn side_stream_kinds_have_separate_queues() {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let mut a = v.open_uni(StreamKind::Audio, 7).await.unwrap();
+    a.finish().unwrap();
+    let mut f = v.open_uni(StreamKind::FileData, 8).await.unwrap();
+    f.finish().unwrap();
+    v.send(&Message::RequestKeyframe).await.unwrap();
+    let file = timeout(T, h.accept_side_stream(StreamKind::FileData))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(file.id, 8);
+    let audio = timeout(T, h.accept_side_stream(StreamKind::Audio))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(audio.id, 7);
+    assert_eq!(
+        timeout(T, h.recv()).await.unwrap().unwrap(),
+        Message::RequestKeyframe
+    );
+}
+
+/// A stream whose header names an unknown kind is refused with `STREAM_REFUSED`.
+#[tokio::test(flavor = "multi_thread")]
+async fn unknown_stream_kind_is_refused() {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let mut raw = v.open_raw_uni().await.unwrap();
+    let mut header = StreamHeader::new(StreamKind::FileData, 1).encode();
+    header[0] = 0xEE;
+    raw.write_all(&header).await.unwrap();
+    raw.write_all(b"junk").await.unwrap();
+    let stopped = timeout(T, raw.stopped()).await.unwrap().unwrap();
+    assert_eq!(stopped, Some(STREAM_REFUSED.into()));
+    // Nothing reached any queue, and the session is still fine.
+    assert!(timeout(
+        Duration::from_millis(200),
+        h.accept_side_stream(StreamKind::FileData)
+    )
+    .await
+    .is_err());
+    v.send(&Message::RequestKeyframe).await.unwrap();
+    assert_eq!(
+        timeout(T, h.recv()).await.unwrap().unwrap(),
+        Message::RequestKeyframe
+    );
+}
+
+/// Moves `total` bytes viewer -> host over `streams` parallel FileData side streams and
+/// returns MB/s (10^6 bytes per second).
+async fn bulk_throughput(total: usize, streams: usize) -> f64 {
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let (h, v) = (Arc::new(h), Arc::new(v));
+    let per = total / streams;
+    let start = std::time::Instant::now();
+    let readers = tokio::spawn({
+        let h = h.clone();
+        async move {
+            let mut tasks = Vec::new();
+            for _ in 0..streams {
+                let s = h.accept_side_stream(StreamKind::FileData).await.unwrap();
+                tasks.push(tokio::spawn(async move {
+                    let mut recv = s.recv;
+                    let mut buf = vec![0u8; 1 << 20];
+                    let mut n = 0usize;
+                    while let Some(k) = recv.read(&mut buf).await.unwrap() {
+                        n += k;
+                    }
+                    n
+                }));
+            }
+            let mut n = 0;
+            for t in tasks {
+                n += t.await.unwrap();
+            }
+            n
+        }
+    });
+    let chunk = vec![0x5Au8; 1 << 20];
+    let mut writers = Vec::new();
+    for i in 0..streams {
+        let v = v.clone();
+        let chunk = chunk.clone();
+        writers.push(tokio::spawn(async move {
+            let mut s = v.open_uni(StreamKind::FileData, i as u64).await.unwrap();
+            let mut left = per;
+            while left > 0 {
+                let k = left.min(chunk.len());
+                s.write_all(&chunk[..k]).await.unwrap();
+                left -= k;
+            }
+            s.finish().unwrap();
+            let _ = s.stopped().await;
+        }));
+    }
+    for w in writers {
+        w.await.unwrap();
+    }
+    let got = timeout(Duration::from_secs(300), readers)
+        .await
+        .unwrap()
+        .unwrap();
+    let secs = start.elapsed().as_secs_f64();
+    assert_eq!(got, per * streams);
+    got as f64 / secs / 1e6
+}
+
+/// Bulk throughput on loopback (run in release: `cargo test --release -p tlp-desk-net --test
+/// session -- --ignored --nocapture bulk_side_stream_throughput`). Target: >= 1 GB/s on one
+/// stream. Ignored because it moves several GB and its result depends on the machine.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "benchmark: moves several GB over loopback"]
+async fn bulk_side_stream_throughput() {
+    const TOTAL: usize = 4 << 30;
+    let one = bulk_throughput(TOTAL, 1).await;
+    println!("loopback FileData throughput, 1 stream: {one:.0} MB/s");
+    let four = bulk_throughput(TOTAL, 4).await;
+    println!("loopback FileData throughput, 4 streams: {four:.0} MB/s");
+}
+
+/// A tiny feature for the dispatch test: answers every chat message with an upper-cased
+/// echo (Arabic is left untouched by `to_uppercase`) and reports it to the UI.
+struct EchoChat;
+
+impl tlp_desk_net::Feature for EchoChat {
+    fn name(&self) -> &'static str {
+        "echo-chat"
+    }
+
+    fn handles(&self, msg: &Message) -> bool {
+        matches!(msg, Message::ChatMessage { .. })
+    }
+
+    fn start(
+        &self,
+        ctx: tlp_desk_net::FeatureCtx,
+        mut inbox: tokio::sync::mpsc::UnboundedReceiver<Message>,
+    ) {
+        tokio::spawn(async move {
+            while let Some(msg) = inbox.recv().await {
+                if let Message::ChatMessage { id, text, .. } = msg {
+                    let reply = Message::ChatMessage {
+                        id: id + 1,
+                        text: text.to_uppercase(),
+                        sent_unix_ms: 0,
+                    };
+                    ctx.emit("echo-chat", text);
+                    ctx.session.send(&reply).await.unwrap();
+                }
+            }
+            ctx.emit("echo-chat", String::from("stopped"));
+        });
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn feature_dispatch_routes_messages_and_stops_with_the_session() {
+    use tlp_desk_net::{FeatureDispatch, FeatureEvent, FeatureSet};
+    let p = pair();
+    let (h, v) = connect_accept(&p).await;
+    let h = Arc::new(h);
+    let (ev_tx, mut ev_rx) = tokio::sync::mpsc::unbounded_channel::<FeatureEvent>();
+    let sink: tlp_desk_net::FeatureEventSink = Arc::new(move |e| {
+        let _ = ev_tx.send(e);
+    });
+    let set = FeatureSet::new().with(Arc::new(EchoChat));
+    assert_eq!(set.names(), ["echo-chat"]);
+    let dispatch = FeatureDispatch::start(&set, h.clone(), 42, Permissions::VIEW, sink);
+
+    let chat = Message::ChatMessage {
+        id: 1,
+        text: "hi مرحبا".into(),
+        sent_unix_ms: 5,
+    };
+    assert_eq!(dispatch.dispatch(chat), Ok("echo-chat"));
+    // Unhandled messages come back to the caller.
+    assert_eq!(
+        dispatch.dispatch(Message::WhiteboardClear),
+        Err(Box::new(Message::WhiteboardClear))
+    );
+    let reply = timeout(T, v.recv()).await.unwrap().unwrap();
+    assert_eq!(
+        reply,
+        Message::ChatMessage {
+            id: 2,
+            text: "HI مرحبا".into(),
+            sent_unix_ms: 0
+        }
+    );
+    let ev = timeout(T, ev_rx.recv()).await.unwrap().unwrap();
+    assert_eq!((ev.feature, ev.session_key), ("echo-chat", 42));
+    assert_eq!(ev.payload::<String>().map(String::as_str), Some("hi مرحبا"));
+    // Dropping the dispatch (session over) ends the feature.
+    drop(dispatch);
+    let ev = timeout(T, ev_rx.recv()).await.unwrap().unwrap();
+    assert_eq!(ev.payload::<String>().map(String::as_str), Some("stopped"));
 }

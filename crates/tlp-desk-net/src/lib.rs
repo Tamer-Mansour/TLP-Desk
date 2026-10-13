@@ -6,6 +6,10 @@
 //! * Host flow: [`Endpoint::accept`] -> [`PendingSession`] -> `accept` / `reject` /
 //!   `verify_code` / `verify_password` -> [`Session`].
 //! * Viewer flow: [`Endpoint::connect`] (or [`Endpoint::connect_pinned`]) -> [`Session`].
+//! * Feature data: [`Session::open_uni`] / [`Session::open_bi`] /
+//!   [`Session::accept_side_stream`] carry typed side streams ([`StreamKind`]) next to the
+//!   control and video streams.
+//! * [`Feature`] / [`FeatureSet`] / [`FeatureDispatch`]: how feature lanes plug into sessions.
 //! * [`Discovery`]: mDNS `_tlpdesk._udp.local.` + broadcast fallback on UDP 47401.
 //! * [`send_wake_on_lan`].
 //!
@@ -16,6 +20,7 @@ mod allow;
 mod discovery;
 mod endpoint;
 mod error;
+mod feature;
 mod session;
 mod tls;
 mod wol;
@@ -30,9 +35,15 @@ pub use endpoint::{
     PendingSession,
 };
 pub use error::NetError;
-pub use session::{
-    PeerInfo, Session, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT, STREAM_REFUSED,
+pub use feature::{
+    Feature, FeatureCtx, FeatureDispatch, FeatureEvent, FeatureEventSink, FeatureSet,
 };
+pub use quinn::{RecvStream, SendStream};
+pub use session::{
+    stream_priority, PeerInfo, Session, SideStream, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT,
+    STREAM_REFUSED,
+};
+pub use tlp_desk_proto::{StreamHeader, StreamKind};
 pub use tls::{Pin, ALPN};
 pub use wol::{magic_packet, parse_mac, send_wake_on_lan, WOL_PORT};
 
