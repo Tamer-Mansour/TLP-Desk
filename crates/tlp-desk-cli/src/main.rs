@@ -443,6 +443,8 @@ async fn connect(dir: &Path, target: &str, auth: AuthMethod, opts: ConnectOpts) 
                 Some(ViewerEvent::PermissionsChanged(p)) => {
                     println!("{}", text::permissions(p));
                 }
+                // FEATURE HOOK: CLI commands print their feature events here.
+                Some(ViewerEvent::Feature(_)) => {}
                 Some(ViewerEvent::Ended(r)) => {
                     ended = Some(r);
                     break;

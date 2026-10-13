@@ -746,6 +746,15 @@ impl Inner {
                         active,
                     });
                 }
+                // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
+                // their own `backend/<feature>.rs`; match on `event.feature` here.
+                ViewerEvent::Feature(event) => {
+                    tracing::debug!(
+                        session = session.0,
+                        feature = event.feature,
+                        "feature event"
+                    );
+                }
                 ViewerEvent::Ended(r) => {
                     reason = map_viewer_end(r);
                     break;
