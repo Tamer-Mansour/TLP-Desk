@@ -217,39 +217,22 @@ impl Engine {
                 None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
             };
             match cmd {
-                Ok(Cmd::Play) => {
-                    if self.next >= self.index.samples.len() {
-                        self.seek_to(0);
+                Ok(first) => {
+                    // While the user drags the timeline many seeks queue up: only the newest
+                    // one matters, the others would just delay it.
+                    let mut cmds = vec![first];
+                    while let Ok(c) = rx.try_recv() {
+                        cmds.push(c);
                     }
-                    self.playing = true;
-                    self.reanchor();
-                }
-                Ok(Cmd::Pause) => self.playing = false,
-                Ok(Cmd::Seek(t)) => {
-                    let ticks = t
-                        .as_micros()
-                        .saturating_mul(u128::from(self.index.timescale))
-                        / 1_000_000;
-                    self.seek_to(u64::try_from(ticks).unwrap_or(u64::MAX));
-                    self.reanchor();
-                }
-                Ok(Cmd::Speed(s)) => {
-                    self.speed = if s.is_finite() {
-                        s.clamp(MIN_SPEED, MAX_SPEED)
-                    } else {
-                        1.0
-                    };
-                    self.reanchor();
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    let i = self.next;
-                    self.decode(i, true);
-                    self.next = i + 1;
-                    if self.next >= self.index.samples.len() {
-                        self.playing = false;
-                        lock(&self.status).ended = true;
+                    let last_seek = cmds.iter().rposition(|c| matches!(c, Cmd::Seek(_)));
+                    for (i, c) in cmds.into_iter().enumerate() {
+                        if matches!(c, Cmd::Seek(_)) && Some(i) != last_seek {
+                            continue;
+                        }
+                        self.apply(c);
                     }
                 }
+                Err(RecvTimeoutError::Timeout) => self.step(),
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             let mut st = lock(&self.status);
@@ -258,6 +241,46 @@ impl Engine {
             if self.playing {
                 st.ended = false;
             }
+        }
+    }
+
+    fn apply(&mut self, cmd: Cmd) {
+        match cmd {
+            Cmd::Play => {
+                if self.next >= self.index.samples.len() {
+                    self.seek_to(0);
+                }
+                self.playing = true;
+                self.reanchor();
+            }
+            Cmd::Pause => self.playing = false,
+            Cmd::Seek(t) => {
+                let ticks = t
+                    .as_micros()
+                    .saturating_mul(u128::from(self.index.timescale))
+                    / 1_000_000;
+                self.seek_to(u64::try_from(ticks).unwrap_or(u64::MAX));
+                self.reanchor();
+            }
+            Cmd::Speed(s) => {
+                self.speed = if s.is_finite() {
+                    s.clamp(MIN_SPEED, MAX_SPEED)
+                } else {
+                    1.0
+                };
+                self.reanchor();
+            }
+        }
+    }
+
+    /// Shows the next sample (it is due).
+    fn step(&mut self) {
+        let i = self.next;
+        self.decode(i, true);
+        self.next = i + 1;
+        if self.next >= self.index.samples.len() {
+            self.playing = false;
+            lock(&self.status).ended = true;
         }
     }
 

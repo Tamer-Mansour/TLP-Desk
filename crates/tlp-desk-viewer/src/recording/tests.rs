@@ -490,6 +490,22 @@ fn player_seeks_from_the_nearest_keyframe() {
 }
 
 #[test]
+fn player_lands_on_the_last_of_many_quick_seeks() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = record_file(dir.path(), 45, &[15, 30]);
+    let player = Player::open(&path, crate::PixelFormat::Rgba, None).unwrap();
+    // A timeline drag: many positions in a row, ending at frame 20.
+    for ms in (0..1400).step_by(25) {
+        player.seek(Duration::from_millis(ms));
+    }
+    player.seek(at(20));
+    wait_for("last seek", || player.status().position == at(20));
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(player.status().position, at(20), "no older seek wins");
+    assert!(!player.status().playing);
+}
+
+#[test]
 fn player_plays_to_the_end_at_high_speed() {
     let dir = tempfile::tempdir().unwrap();
     let path = record_file(dir.path(), 30, &[]);
