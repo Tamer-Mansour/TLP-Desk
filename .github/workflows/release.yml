@@ -1,0 +1,52 @@
+# Builds the Windows release artifacts for a version tag and attaches them to a GitHub Release:
+#   TLP-Desk-<version>-setup.exe, TLP-Desk-<version>-win-x64-portable.zip, SHA256SUMS.txt
+# Trigger: push a tag like v0.2.0 (the version itself comes from Cargo.toml).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  windows:
+    name: Windows installer and portable zip
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ilammy/setup-nasm@v1
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      # The packaging scripts build with --offline; fetch the registry first.
+      - name: Fetch dependencies
+        run: cargo fetch --locked
+
+      - name: Build setup.exe
+        shell: pwsh
+        run: ./installer/build-setup.ps1
+
+      - name: Build portable zip
+        shell: pwsh
+        run: ./installer/portable.ps1
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            dist/*-setup.exe
+            dist/*-portable.zip
+            dist/SHA256SUMS.txt
