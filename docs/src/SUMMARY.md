@@ -11,6 +11,7 @@
   - [tlp-desk-capture](dev/crates/capture.md)
   - [tlp-desk-codec](dev/crates/codec.md)
   - [tlp-desk-input](dev/crates/input.md)
+  - [tlp-desk-audio](dev/crates/audio.md)
 
 # Reference
 
