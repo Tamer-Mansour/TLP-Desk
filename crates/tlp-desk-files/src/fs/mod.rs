@@ -5,6 +5,7 @@
 //!   while the session holds the `FILES` permission (checked live, per request).
 //! * Viewer side: [`FsFeature::client`] hands out an [`FsClient`] per session that sends
 //!   requests with ids and waits for the answers with a timeout.
+//! * [`TransferStarter`]: the seam to the transfer engine for upload / download / paste.
 //! * [`execute`] runs one [`FsOp`](tlp_desk_proto::FsOp) on *this* device (the app's local
 //!   pane uses it too, so both panes behave the same).
 //!
@@ -17,6 +18,7 @@ mod feature;
 mod ops;
 pub mod path;
 mod roots;
+mod starter;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows;
@@ -27,6 +29,7 @@ pub use client::{FsClient, FsClientError, DEFAULT_TIMEOUT};
 pub use feature::{FsFeature, FEATURE_NAME};
 pub use ops::{entry_order, execute, map_io, sort_entries, unix_ms, MAX_LIST_ENTRIES};
 pub use roots::known_folder;
+pub use starter::{StartError, TransferStarter};
 
 /// Host-side settings of the remote file system.
 #[derive(Debug, Clone, Default)]
