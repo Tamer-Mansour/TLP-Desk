@@ -30,6 +30,11 @@ sys-locale = "0.3"
 # embedded raster images, so no font database (fontdb/system fonts) is pulled in.
 resvg = { version = "0.48", default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+# HKCU Run key for "start with Windows" (settings::autostart). Safe API: this crate stays
+# forbid(unsafe_code).
+windows-registry = "0.6"
+
 [dev-dependencies]
 tlp-desk-capture.workspace = true
 tempfile = "3"

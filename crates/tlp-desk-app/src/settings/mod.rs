@@ -10,6 +10,7 @@
 //! pushed out of range; [`Settings::migrate`] upgrades older schema versions.
 
 pub mod allow_list;
+pub mod autostart;
 pub mod host;
 
 use std::path::{Path, PathBuf};
