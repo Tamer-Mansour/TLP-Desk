@@ -30,6 +30,7 @@
 //! are confined to the platform module.
 
 mod agent;
+mod client;
 mod desktop;
 mod gui;
 pub mod ipc;
@@ -44,6 +45,7 @@ mod testutil;
 pub use agent::{
     serve_connection, AgentPlatform, DESKTOP_CHECK_EVERY, DESKTOP_POLL_EVERY, MAX_FRAME_WAIT,
 };
+pub use client::{gui_command_on, gui_subscribe_on, GuiSubscription};
 pub use gui::{
     route_prompt, serve_gui_connection, GuiCommands, GuiHub, PromptRoute, GUI_HEARTBEAT,
 };
