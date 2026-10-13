@@ -46,6 +46,7 @@
   - [العثور على الأجهزة](user-guide/ar/finding-devices.md)
   - [الاتصال](user-guide/ar/connecting.md)
   - [طلب القبول وشريط الاتصال](user-guide/ar/accept-prompt.md)
+  - [التحكم بالحاسوب البعيد](user-guide/ar/controlling.md)
 
 # Security
 
