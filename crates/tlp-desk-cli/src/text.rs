@@ -15,7 +15,26 @@ pub const PROMPT_HINT: &str = "Type y + Enter to accept, anything else to reject
 pub const STOPPING: &str = "Stopping.";
 pub const NO_DEVICES: &str = "No devices found.";
 pub const NO_FRAME: &str = "No frame was decoded; snapshot not written.";
+pub const PASSWORD_REMOVED: &str = "Permanent password removed: password sign-in is off.";
 
+pub fn password_set(path: &str) -> String {
+    format!("Permanent password set (only its Argon2id verifier is stored, in {path}).")
+}
+
+pub fn password_too_short() -> String {
+    format!(
+        "The password is too short: use at least {} characters.",
+        tlp_desk_crypto::MIN_PASSWORD_CHARS
+    )
+}
+
+pub fn password_access(on: bool) -> &'static str {
+    if on {
+        "Password access: on (permanent password set)."
+    } else {
+        "Password access: off (no permanent password; see set-password)."
+    }
+}
 pub fn identity(id: DeviceId, fp: &Fingerprint, dir: &str) -> String {
     format!(
         "Device ID:   {id}\nFingerprint: {}\nKey store:   {dir}",

@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use tlp_desk_crypto::Identity;
+use tlp_desk_crypto::{
+    password_strength, Identity, PasswordStore, PasswordStrength, PasswordVerifier,
+};
 use tlp_desk_host::{Host, HostConfig, HostEvent, DEFAULT_PERMISSIONS};
 use tlp_desk_net::{Discovery, DiscoveryConfig, Endpoint, EndpointConfig};
 use tlp_desk_proto::{InputEvent, Permissions};
@@ -106,6 +108,14 @@ enum Cmd {
         /// whole session (needs mouse permission).
         #[arg(long)]
         move_pointer: bool,
+    },
+    /// Host: set the permanent unattended-access password from the TLP_DESK_PASSWORD
+    /// environment variable, or remove it with --remove. Needs write access to the data dir
+    /// (administrator for %ProgramData%\TLP-Desk).
+    SetPassword {
+        /// Remove the password (password sign-in off).
+        #[arg(long)]
+        remove: bool,
     },
 }
 
@@ -215,7 +225,34 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             };
             connect(&dir, &target, auth, opts).await
         }
+        Cmd::SetPassword { remove } => set_password(&dir, remove),
     }
+}
+
+/// Stores (or removes) the Argon2id verifier of the permanent password. The password comes
+/// from the environment so it never shows in the process list or shell history.
+fn set_password(dir: &Path, remove: bool) -> Result<()> {
+    let store = PasswordStore::new(dir);
+    if remove {
+        store.clear().context("cannot remove the password")?;
+        println!("{}", text::PASSWORD_REMOVED);
+        return Ok(());
+    }
+    let password = std::env::var("TLP_DESK_PASSWORD")
+        .context("set-password needs the TLP_DESK_PASSWORD environment variable")?;
+    if password_strength(&password) == PasswordStrength::TooShort {
+        bail!(text::password_too_short());
+    }
+    let identity = load_identity(dir)?;
+    let verifier = PasswordVerifier::derive(&password, &identity.fingerprint())?;
+    store
+        .save(&verifier)
+        .with_context(|| format!("cannot write {}", store.path().display()))?;
+    println!(
+        "{}",
+        text::password_set(&store.path().display().to_string())
+    );
+    Ok(())
 }
 
 async fn list(seconds: u64) -> Result<()> {
@@ -233,8 +270,13 @@ async fn list(seconds: u64) -> Result<()> {
     Ok(())
 }
 
-async fn serve(dir: &Path, port: u16, cfg: HostConfig, auto_accept: bool) -> Result<()> {
+async fn serve(dir: &Path, port: u16, mut cfg: HostConfig, auto_accept: bool) -> Result<()> {
     let identity = load_identity(dir)?;
+    // Unattended access: the permanent password set with set-password (or in the app).
+    cfg.password = PasswordStore::new(dir)
+        .load()
+        .context("cannot read the permanent password")?;
+    println!("{}", text::password_access(cfg.password.is_some()));
     let name = cfg.device_name.clone();
     let code_enabled = cfg.allow_one_time_code;
     let endpoint = Arc::new(Endpoint::bind(
