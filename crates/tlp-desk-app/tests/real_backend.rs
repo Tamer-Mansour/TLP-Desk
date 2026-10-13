@@ -110,6 +110,7 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
             ..HostConfig::default()
         },
         fallback_discovery: false,
+        ..RealConfig::default()
     }
 }
 
@@ -410,4 +411,127 @@ fn busy_port_degrades_to_dial_only_with_a_clear_problem() {
         BackendEvent::SessionStarted { attempt: a, .. } if *a == attempt => Some(()),
         _ => None,
     });
+}
+
+// --- TLP-settings-tray: connection log + live host settings ---
+
+/// A peer whose connection log goes to its own temp dir.
+fn start_logged(rt: &Runtime) -> (Peer, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let log_dir = dir.path().join("log");
+    let mut cfg = config(dir.path(), Arc::default(), 0);
+    cfg.connection_log = Some(log_dir.clone());
+    let (backend, rx) = RealBackend::start_concrete(rt.handle(), Arc::new(|| {}), cfg);
+    let peer = Peer {
+        backend,
+        events: Events::new(rx),
+        _dir: dir,
+    };
+    (peer, log_dir)
+}
+
+#[test]
+fn connection_log_records_sessions_refusals_and_pause() {
+    use tlp_desk_app::connection_log::{Direction, LogAuth, LogEnd, LogStore};
+    use tlp_desk_app::settings::HostSettings;
+
+    let rt = Runtime::new().unwrap();
+    let (mut host, host_log) = start_logged(&rt);
+    let (mut viewer, viewer_log) = start_logged(&rt);
+    let target = ConnectTarget::Address(host.backend.local_addr().unwrap());
+
+    // A session by one-time code, ended by the viewer.
+    let code = host.backend.local_info().one_time_code;
+    let attempt = viewer.backend.connect(target.clone(), Some(code));
+    let session = viewer.events.wait(&rt, "code session", |e| match e {
+        BackendEvent::SessionStarted {
+            attempt: a,
+            session,
+            ..
+        } if *a == attempt => Some(*session),
+        _ => None,
+    });
+    host.events.wait(&rt, "host session", |e| {
+        matches!(e, BackendEvent::HostSessionStarted { .. }).then_some(())
+    });
+    viewer.backend.disconnect(session);
+    viewer.events.wait(&rt, "viewer end", |e| {
+        matches!(e, BackendEvent::SessionEnded { session: s, .. } if *s == session).then_some(())
+    });
+    host.events.wait(&rt, "host end", |e| {
+        matches!(e, BackendEvent::SessionEnded { .. }).then_some(())
+    });
+
+    // A wrong code is logged as a refusal on the host.
+    let current = host.backend.local_info().one_time_code;
+    let first = (current.as_bytes()[0] - b'0' + 1) % 10;
+    let attempt = viewer
+        .backend
+        .connect(target.clone(), Some(format!("{first}{}", &current[1..])));
+    viewer.events.wait(&rt, "wrong code", |e| {
+        matches!(e, BackendEvent::ConnectFailed { attempt: a, .. } if *a == attempt).then_some(())
+    });
+
+    // Pausing incoming connections refuses everyone before the handshake...
+    let paused = HostSettings {
+        incoming_enabled: false,
+        ..HostSettings::default()
+    };
+    host.backend.apply_host_settings(&paused);
+    let attempt = viewer.backend.connect(target.clone(), None);
+    viewer.events.wait(&rt, "refused while paused", |e| {
+        matches!(e, BackendEvent::ConnectFailed { attempt: a, .. } if *a == attempt).then_some(())
+    });
+    assert!(
+        !host
+            .events
+            .seen
+            .iter()
+            .any(|e| matches!(e, BackendEvent::IncomingRequest { .. })),
+        "a paused host never prompts"
+    );
+    // ...and resuming lets them in again.
+    host.backend.apply_host_settings(&HostSettings::default());
+    let attempt = viewer.backend.connect(target, None);
+    let request = host.events.wait(&rt, "prompt after resume", |e| match e {
+        BackendEvent::IncomingRequest { request, .. } => Some(*request),
+        _ => None,
+    });
+    host.backend.respond_to_request(request, false);
+    viewer.events.wait(&rt, "declined", |e| {
+        matches!(e, BackendEvent::ConnectFailed { attempt: a, .. } if *a == attempt).then_some(())
+    });
+
+    let host_entries = LogStore::new(&host_log).read_all();
+    let ends: Vec<LogEnd> = host_entries.iter().map(|e| e.end).collect();
+    assert_eq!(
+        ends,
+        [
+            LogEnd::ClosedRemotely,
+            LogEnd::WrongCredentials,
+            LogEnd::Declined
+        ],
+        "{host_entries:?}"
+    );
+    let first = &host_entries[0];
+    assert_eq!(first.direction, Direction::Incoming);
+    assert_eq!(first.auth, LogAuth::OneTimeCode);
+    assert_eq!(first.name, "اختبار-pc");
+    assert_eq!(first.address, "127.0.0.1");
+    assert_eq!(first.fingerprint.len(), 64);
+    assert_eq!(
+        first.device_id,
+        viewer.backend.local_info().device_id.0,
+        "the log names the viewer"
+    );
+
+    let viewer_entries = LogStore::new(&viewer_log).read_all();
+    assert_eq!(viewer_entries.len(), 1, "{viewer_entries:?}");
+    assert_eq!(viewer_entries[0].direction, Direction::Outgoing);
+    assert_eq!(viewer_entries[0].end, LogEnd::ClosedHere);
+    assert_eq!(viewer_entries[0].auth, LogAuth::OneTimeCode);
+    assert!(viewer_entries[0]
+        .permissions
+        .0
+        .contains(tlp_desk_proto::Permissions::VIEW));
 }
