@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use tlp_desk_crypto::{DeviceId, Fingerprint};
 use tlp_desk_proto::{
-    encode_frame, Bye, ByeReason, FrameDecoder, Message, Permissions, Role, VideoFrame,
-    MAX_FRAME_LEN,
+    encode_frame, Bye, ByeReason, FrameDecoder, Message, Permissions, Role, StreamHeader,
+    StreamKind, VideoFrame, MAX_FRAME_LEN, STREAM_HEADER_LEN,
 };
 use tokio::sync::{mpsc, Mutex};
 
@@ -16,6 +16,13 @@ use crate::NetError;
 pub(crate) const CLOSE_OK: u32 = 0;
 pub(crate) const CLOSE_REJECTED: u32 = 1;
 pub(crate) const CLOSE_PROTOCOL: u32 = 2;
+
+/// Stream error code (`STOP_SENDING`) for a stream the receiver will not read: unknown or
+/// unexpected kind, malformed header, or nobody accepting that kind.
+pub const STREAM_REFUSED: u32 = 1;
+
+/// How long a peer has to send the stream header after opening a stream.
+const STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Default number of video frames that may be unacknowledged at once before non-key frames
 /// are dropped (see [`Session::send_video`]).
@@ -144,6 +151,7 @@ impl Session {
     ) -> Self {
         let _ = ctrl_tx.set_priority(10);
         let rt = tokio::runtime::Handle::current();
+        let mut router = StreamRouter { video: None };
         let (video_tx, video_rx) = match role {
             Role::Host => (
                 Some(VideoTx {
@@ -156,7 +164,7 @@ impl Session {
             Role::Viewer => {
                 let (tx, rx) = mpsc::channel(VIEWER_VIDEO_QUEUE);
                 let gap = Arc::new(AtomicBool::new(false));
-                rt.spawn(video_reader(conn.clone(), tx, gap.clone()));
+                router.video = Some((tx, gap.clone()));
                 (
                     None,
                     Some(VideoRx {
@@ -170,6 +178,11 @@ impl Session {
                 )
             }
         };
+        // The router (with every sender) lives only in the acceptor tasks: when the connection
+        // ends they exit and every receiver sees the end of its queue.
+        let router = Arc::new(router);
+        rt.spawn(accept_uni_loop(conn.clone(), router.clone()));
+        rt.spawn(accept_bi_loop(conn.clone(), router));
         Self {
             conn,
             role,
@@ -239,7 +252,8 @@ impl Session {
             return Ok(VideoSendStatus::Dropped);
         }
         let seq = frame.seq;
-        let bytes = encode_frame(&Message::VideoFrame(frame))?;
+        let mut bytes = StreamHeader::new(StreamKind::Video, seq).encode().to_vec();
+        bytes.extend_from_slice(&encode_frame(&Message::VideoFrame(frame))?);
         if v.need_keyframe.swap(false, Ordering::AcqRel) {
             tracing::debug!(seq, "keyframe resumes video after drops");
         }
@@ -346,34 +360,98 @@ impl Session {
     }
 }
 
-async fn video_reader(conn: quinn::Connection, tx: mpsc::Sender<VideoFrame>, gap: Arc<AtomicBool>) {
-    loop {
-        let mut stream = match conn.accept_uni().await {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        let tx = tx.clone();
-        let gap = gap.clone();
+impl Drop for Session {
+    /// The acceptor tasks hold connection handles too, so close explicitly: dropping the last
+    /// `Session` handle ends the connection (as documented above).
+    fn drop(&mut self) {
+        self.conn.close(CLOSE_OK.into(), b"session dropped");
+    }
+}
+
+/// Destinations of incoming non-control streams, by [`StreamKind`].
+struct StreamRouter {
+    /// Viewer only: decoded-frame queue and the "a frame was lost" flag.
+    video: Option<(mpsc::Sender<VideoFrame>, Arc<AtomicBool>)>,
+}
+
+/// Reads the [`StreamHeader`] that starts every non-control stream.
+async fn read_stream_header(recv: &mut quinn::RecvStream) -> Result<StreamHeader, NetError> {
+    let mut b = [0u8; STREAM_HEADER_LEN];
+    match tokio::time::timeout(STREAM_HEADER_TIMEOUT, recv.read_exact(&mut b)).await {
+        Err(_) => Err(NetError::Timeout),
+        Ok(Err(e)) => Err(NetError::Unexpected(format!("stream header: {e}"))),
+        Ok(Ok(())) => Ok(StreamHeader::decode(&b)?),
+    }
+}
+
+fn refuse(recv: &mut quinn::RecvStream, why: &str) {
+    tracing::debug!(why, "refusing incoming stream");
+    let _ = recv.stop(STREAM_REFUSED.into());
+}
+
+async fn accept_uni_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
+    while let Ok(mut recv) = conn.accept_uni().await {
+        let router = router.clone();
         tokio::spawn(async move {
-            let bytes = match stream.read_to_end(MAX_FRAME_LEN + 4).await {
-                Ok(b) => b,
+            let header = match read_stream_header(&mut recv).await {
+                Ok(h) => h,
                 Err(e) => {
-                    tracing::debug!(%e, "video stream read failed");
-                    gap.store(true, Ordering::Release);
-                    return;
-                }
-            };
-            let mut dec = FrameDecoder::new();
-            dec.push(&bytes);
-            match dec.next_message() {
-                Ok(Some(Message::VideoFrame(f))) => {
-                    if tx.try_send(f).is_err() {
-                        // Decoder is behind: drop rather than queue.
+                    if let Some((_, gap)) = &router.video {
+                        // Possibly a video frame we could not read.
                         gap.store(true, Ordering::Release);
                     }
+                    return refuse(&mut recv, &e.to_string());
                 }
-                other => tracing::debug!(?other, "unexpected data on video stream"),
+            };
+            match header.kind {
+                StreamKind::Video => match &router.video {
+                    Some((tx, gap)) => read_video_frame(recv, tx, gap).await,
+                    None => refuse(&mut recv, "video stream to a host"),
+                },
+                // FEATURE HOOK: side streams are routed in the next step.
+                _ => refuse(&mut recv, "no handler for this stream kind"),
             }
         });
+    }
+}
+
+async fn accept_bi_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
+    // The control stream was accepted during the handshake; any later bidi stream is a side
+    // stream.
+    while let Ok((_send, mut recv)) = conn.accept_bi().await {
+        let _router = router.clone();
+        tokio::spawn(async move {
+            match read_stream_header(&mut recv).await {
+                Ok(h) => refuse(&mut recv, &format!("no handler for bidi {:?}", h.kind)),
+                Err(e) => refuse(&mut recv, &e.to_string()),
+            }
+        });
+    }
+}
+
+/// One video frame per stream: read it whole and queue it for the decoder.
+async fn read_video_frame(
+    mut stream: quinn::RecvStream,
+    tx: &mpsc::Sender<VideoFrame>,
+    gap: &AtomicBool,
+) {
+    let bytes = match stream.read_to_end(MAX_FRAME_LEN + 4).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::debug!(%e, "video stream read failed");
+            gap.store(true, Ordering::Release);
+            return;
+        }
+    };
+    let mut dec = FrameDecoder::new();
+    dec.push(&bytes);
+    match dec.next_message() {
+        Ok(Some(Message::VideoFrame(f))) => {
+            if tx.try_send(f).is_err() {
+                // Decoder is behind: drop rather than queue.
+                gap.store(true, Ordering::Release);
+            }
+        }
+        other => tracing::debug!(?other, "unexpected data on video stream"),
     }
 }
