@@ -5,6 +5,9 @@
 //! Media Foundation encoder MFTs (`MfEncoder`: Intel Quick Sync, NVIDIA, AMD). Colour
 //! conversion uses BT.709 limited range, which the software encoder signals in the SPS VUI.
 //!
+//! [`new_encoder`] tries hardware first and falls back to OpenH264 ([`FallbackEncoder`]); the
+//! [`ENCODER_ENV`] environment variable (`auto`, `hardware`, `software`) overrides the choice.
+//!
 //! `unsafe` is denied crate-wide; the exceptions are the OpenH264 encoder FFI in `h264::ffi`
 //! and the Windows Media Foundation / DXGI wrappers in `mf`, which document their
 //! `// SAFETY:` invariants.
@@ -16,12 +19,16 @@ pub mod convert;
 mod h264;
 #[cfg(windows)]
 mod mf;
+mod select;
 
 pub use h264::{Downscale, H264Complexity, H264Decoder, H264Encoder, H264Tuning};
 #[cfg(windows)]
 pub use mf::{
     list_adapters, list_hw_encoders, GpuAdapter, HwAdapter, HwEncoderInfo, MfEncoder, VENDOR_AMD,
     VENDOR_INTEL, VENDOR_NVIDIA,
+};
+pub use select::{
+    new_encoder_with, EncoderOptions, EncoderPreference, FallbackEncoder, ADAPTER_ENV, ENCODER_ENV,
 };
 
 /// Encoder settings. `width`/`height` are the size of the *input* frames (the captured
@@ -108,9 +115,11 @@ pub trait VideoDecoder: Send {
     }
 }
 
-/// Creates the default (software H.264) encoder.
+/// Creates the default encoder: hardware H.264 when available, else OpenH264, switching to
+/// OpenH264 transparently if the hardware fails mid-stream. Honours [`ENCODER_ENV`] and
+/// [`ADAPTER_ENV`] (see [`EncoderOptions::from_env`]).
 pub fn new_encoder(config: EncoderConfig) -> Result<Box<dyn VideoEncoder>, CodecError> {
-    Ok(Box::new(H264Encoder::new(config)?))
+    new_encoder_with(config, &EncoderOptions::from_env())
 }
 
 /// Creates the default (software H.264) decoder.
