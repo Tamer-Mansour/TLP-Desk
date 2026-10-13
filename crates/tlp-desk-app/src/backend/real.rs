@@ -37,6 +37,7 @@ use tlp_desk_viewer::{
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::chat::{self, ChatBridge, ChatLine, ChatSendError};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
@@ -71,7 +72,12 @@ impl Default for RealConfig {
             bind: SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), DEFAULT_PORT),
             device_name: None,
             known_hosts: KnownHostsStore::Default,
-            host: HostConfig::default(),
+            host: HostConfig {
+                // Chat is on for accepted viewers; the host user can turn it off per session.
+                default_permissions: tlp_desk_host::DEFAULT_PERMISSIONS
+                    | tlp_desk_proto::Permissions::CHAT,
+                ..HostConfig::default()
+            },
             fallback_discovery: true,
         }
     }
@@ -101,6 +107,7 @@ struct Inner {
     discovery: Option<Arc<Discovery>>,
     own_id: DeviceId,
     bridges: Bridges,
+    chat: ChatBridge,
     state: Mutex<State>,
 }
 
@@ -306,13 +313,15 @@ impl RealBackend {
             }
         }
 
+        let chat = ChatBridge::default();
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
-            let host_cfg = HostConfig {
+            let mut host_cfg = HostConfig {
                 device_name: device_name.clone(),
                 ..cfg.host.clone()
             };
+            chat.register_host(&mut host_cfg);
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
                 Ok((h, ev)) => {
                     host = Some(h);
@@ -352,13 +361,14 @@ impl RealBackend {
                 }
                 repaint();
             });
-            let vcfg = ViewerConfig {
+            let mut vcfg = ViewerConfig {
                 known_hosts: cfg.known_hosts.clone(),
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
                 ..ViewerConfig::default()
             };
+            chat.register_viewer(&mut vcfg);
             match Viewer::new(ep.clone(), vcfg) {
                 Ok(v) => Some(v),
                 Err(e) => {
@@ -382,6 +392,7 @@ impl RealBackend {
             discovery,
             own_id,
             bridges,
+            chat,
             state: Mutex::default(),
         });
         let local = LocalInfo {
@@ -493,6 +504,14 @@ impl Inner {
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 HostEvent::Feature { id, event } => {
+                    // chat (TLP-chat)
+                    if let Some(ev) = self
+                        .app_host_session(id)
+                        .and_then(|s| chat::backend_event(s, &event))
+                    {
+                        self.emit(ev);
+                        continue;
+                    }
                     tracing::debug!(session = id.0, feature = event.feature, "feature event");
                 }
             }
@@ -514,6 +533,15 @@ impl Inner {
             session,
             peer: app_peer(peer),
         });
+    }
+
+    /// The app's id for a host session.
+    fn app_host_session(&self, id: HostSessionId) -> Option<SessionId> {
+        self.state()
+            .host_sessions
+            .iter()
+            .find(|(_, h)| **h == id)
+            .map(|(k, _)| *k)
     }
 
     fn host_session_ended(&self, id: HostSessionId, reason: EndReason) {
@@ -749,6 +777,11 @@ impl Inner {
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 ViewerEvent::Feature(event) => {
+                    // chat (TLP-chat)
+                    if let Some(ev) = chat::backend_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
                     tracing::debug!(
                         session = session.0,
                         feature = event.feature,
@@ -853,6 +886,52 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn send_chat(&self, session: SessionId, text: &str) -> Result<ChatLine, ChatSendError> {
+        let (viewer, host) = {
+            let st = self.inner.state();
+            (
+                st.viewer_sessions.get(&session).map(|s| s.feature_key()),
+                st.host_sessions.get(&session).copied(),
+            )
+        };
+        match (viewer, host) {
+            (Some(key), _) => self.inner.chat.send_viewer(key, text),
+            (None, Some(id)) => self.inner.chat.send_host(id.0, text),
+            (None, None) => Err(ChatSendError::Unavailable),
+        }
+    }
+
+    fn set_chat_allowed(&self, session: SessionId, allowed: bool) {
+        let Some(id) = self.inner.state().host_sessions.get(&session).copied() else {
+            return;
+        };
+        let Some(host) = &self.inner.host else {
+            return;
+        };
+        let Some(current) = host
+            .sessions()
+            .into_iter()
+            .find(|v| v.id == id)
+            .map(|v| v.permissions)
+        else {
+            return;
+        };
+        let chat = tlp_desk_proto::Permissions::CHAT;
+        let new = if allowed {
+            current | chat
+        } else {
+            current.difference(chat)
+        };
+        if new != current {
+            tracing::info!(
+                session = session.0,
+                allowed,
+                "host user changed chat permission"
+            );
+            host.set_permissions(id, new);
         }
     }
 
