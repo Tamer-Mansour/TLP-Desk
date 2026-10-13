@@ -417,6 +417,10 @@ pub enum AuthRequest {
     /// SPAKE2 key confirmation from the viewer (sent after `AuthResult::Spake2Reply`):
     /// `HMAC-SHA256(K, "tlp-desk/kc/viewer" || transcript)`. Added in protocol v2.
     KeyConfirm { mac: Vec<u8> },
+    /// Re-authorize with a single-use ticket from `Message::ReconnectTicket` (e.g. after the
+    /// host rebooted). Valid only from the viewer whose TLS fingerprint the ticket was issued
+    /// to, and only before it expires. Added in protocol v4.
+    ReconnectTicket { token: Vec<u8> },
 }
 
 /// Host's answer to an [`AuthRequest`].

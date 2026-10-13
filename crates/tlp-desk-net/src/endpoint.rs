@@ -511,6 +511,13 @@ async fn host_handshake(
         Message::AuthRequest(AuthRequest::Password { spake2_msg }) => {
             (AuthKind::Password, spake2_msg)
         }
+        Message::AuthRequest(AuthRequest::ReconnectTicket { .. }) => {
+            // FEATURE HOOK (TLP-service): verify the single-use ticket (bound to `viewer_fp`,
+            // not expired) and authorize without a prompt. Until then: politely refused.
+            tracing::info!(peer = %addr, "reconnect ticket not supported yet; rejecting");
+            reject_and_close(&conn, &mut send, RejectReason::NotAllowed).await;
+            return Ok(None);
+        }
         other => {
             conn.close(CLOSE_PROTOCOL.into(), b"expected AuthRequest");
             return Err(unexpected(&other));
@@ -833,5 +840,61 @@ mod tests {
                 reason: RejectReason::NotAllowed
             })
         );
+    }
+
+    /// Reconnect tickets are not accepted until the service lane implements them: the viewer
+    /// gets a clean `Rejected(NotAllowed)` and the host app never sees a pending session.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reconnect_ticket_is_refused_for_now() {
+        let host = Endpoint::bind(
+            Arc::new(Identity::generate().unwrap()),
+            EndpointConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                ..EndpointConfig::default()
+            },
+        )
+        .unwrap();
+        let addr = host.local_addr().unwrap();
+        let me = Identity::generate().unwrap();
+        let (cfg, _) = tls::client_config(&me, Pin::DeviceId(host.device_id())).unwrap();
+        let ep = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let conn = ep
+            .connect_with(cfg, addr, "tlp-desk")
+            .unwrap()
+            .await
+            .unwrap();
+        let (mut send, recv) = conn.open_bi().await.unwrap();
+        let mut rx = FramedRecv::new(recv);
+        let hello = Message::Hello(Hello {
+            protocol_version: PROTOCOL_VERSION,
+            device_id: me.device_id().as_u32(),
+            device_name: "rebooted viewer".into(),
+            role: Role::Viewer,
+        });
+        write_msg(&mut send, &hello).await.unwrap();
+        let host_hello = timeout(Duration::from_secs(10), rx.next())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(host_hello, Message::Hello(_)));
+        write_msg(
+            &mut send,
+            &Message::AuthRequest(AuthRequest::ReconnectTicket { token: vec![7; 32] }),
+        )
+        .await
+        .unwrap();
+        let reply = timeout(Duration::from_secs(10), rx.next())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reply,
+            Message::AuthResult(AuthResult::Rejected {
+                reason: RejectReason::NotAllowed
+            })
+        );
+        assert!(timeout(Duration::from_millis(200), host.accept())
+            .await
+            .is_err());
     }
 }
