@@ -229,6 +229,32 @@ strings! {
     // --- perf ---
 
     // --- power ---
+    // whiteboard (TLP-whiteboard)
+    WbDraw => "Draw on screen", "الرسم على الشاشة";
+    WbDrawHint => "While drawing, the mouse draws on the other device's screen instead of controlling it.", "أثناء الرسم يرسم الفأر على شاشة الجهاز الآخر بدلاً من التحكم به.";
+    WbNotAllowed => "The other device does not allow drawing on its screen.", "لا يسمح الجهاز الآخر بالرسم على شاشته.";
+    WbPen => "Pen", "قلم";
+    WbHighlighter => "Highlighter", "قلم تمييز";
+    WbArrow => "Arrow", "سهم";
+    WbRectangle => "Rectangle", "مستطيل";
+    WbEraser => "Eraser", "ممحاة";
+    WbUndo => "Undo", "تراجع";
+    WbRedo => "Redo", "إعادة";
+    WbClearAll => "Clear all", "مسح الكل";
+    WbFade => "Fade out", "إخفاء تلقائي";
+    WbFadeHint => "Drawings disappear a few seconds after you finish them.", "تختفي الرسوم بعد بضع ثوانٍ من الانتهاء منها.";
+    WbThin => "Thin line", "خط رفيع";
+    WbMedium => "Medium line", "خط متوسط";
+    WbThick => "Thick line", "خط عريض";
+    WbRed => "Red", "أحمر";
+    WbOrange => "Orange", "برتقالي";
+    WbYellow => "Yellow", "أصفر";
+    WbGreen => "Green", "أخضر";
+    WbBlue => "Blue", "أزرق";
+    WbPurple => "Purple", "بنفسجي";
+    WbBlack => "Black", "أسود";
+    WbWhite => "White", "أبيض";
+    WbHostCleared => "The other side cleared the drawings.", "مسح الطرف الآخر الرسوم.";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.
