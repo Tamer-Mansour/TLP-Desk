@@ -82,7 +82,8 @@ automatically when you leave its window, switch monitors or turn on View only.
 ## The Windows key or Alt+Tab acts on my own PC
 
 System keys go to the remote PC only while the TLP-Desk window is active, View only is off, and the
-toolbar shows **Keyboard goes to the remote PC**. Click into the remote picture first.
+toolbar shows the highlighted keyboard icon (**Keyboard goes to the remote PC**). Click into the
+remote picture first.
 Ctrl+Alt+Del and Win+L always act on your own PC.
 
 ## I cannot click in some windows on the remote PC

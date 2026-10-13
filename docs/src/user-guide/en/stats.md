@@ -1,6 +1,6 @@
 # The statistics overlay
 
-The **Stats** button in the session toolbar shows or hides a small panel over the picture (top
+The **Stats** button in the session toolbar (a pulse-line icon) shows or hides a small panel over the picture (top
 right; top left in Arabic). It is on by default and updates once a second.
 
 | Line | Meaning | Typical on a good LAN |

@@ -1,12 +1,22 @@
 # Controlling the remote PC
 
-Once connected, the other PC's screen fills your TLP-Desk window, with a toolbar at the top:
+Once connected, the other PC's screen fills your TLP-Desk window, with a toolbar at the top. Most
+toolbar buttons are **icons**; hover over one to see its name.
 
-```text
-● Connected to Office-PC  [Fit][Actual size] [Full screen] [View only] [Stats]  Screen [1][2]  [Disconnect]
-```
+| Icon | Name | What it does |
+|---|---|---|
+| green dot | **Connected to …** | Shows which PC you are connected to |
+| arrows pointing inwards (shrink) | **Fit** | Scale the remote screen to your window — see [View options](view-options.md) |
+| magnifying glass with + | **Actual size** | One remote pixel per screen pixel |
+| four corners outwards / inwards | **Full screen** / **Exit full screen** | |
+| eye | **View only** | Watch without controlling |
+| pulse line | **Stats** | Show or hide the [statistics overlay](stats.md) |
+| monitor + numbers | **Screen** 1, 2, … | [Switch monitors](monitors.md) (only with two or more) |
+| keyboard (highlighted) | **Keyboard goes to the remote PC** | Appears while system keys are captured (see below) |
+| red button with exit arrow | **Disconnect** | End the session |
 
-Until the first picture arrives you see **Waiting for video…**.
+Selected toggles (for example **Fit** or **View only**) are shown highlighted. In Arabic the
+toolbar is mirrored. Until the first picture arrives you see **Waiting for video…**.
 
 ## Mouse
 
@@ -33,7 +43,8 @@ remote PC too (they copy and paste *there*; clipboard sharing between the two PC
 
 While the TLP-Desk window is active and you are controlling the remote PC, system shortcuts such as
 the **Windows key**, **Alt+Tab**, **Alt+Esc**, **Ctrl+Esc** and **Alt+F4** are sent to the **remote
-PC** instead of your own. The toolbar then shows **Keyboard goes to the remote PC**.
+PC** instead of your own. The toolbar then shows a highlighted keyboard icon and, when there is
+room, the words **Keyboard goes to the remote PC**.
 
 - Click outside the TLP-Desk window (or switch away with the mouse) and the keys work on your own
   PC again.

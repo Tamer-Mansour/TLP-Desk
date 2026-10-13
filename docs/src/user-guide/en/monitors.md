@@ -1,11 +1,10 @@
 # Switching monitors
 
-If the remote PC has **two or more monitors**, the toolbar shows **Screen** followed by one button
-per monitor: **1**, **2**, … They are numbered by position, left to right (then top to bottom), the
+If the remote PC has **two or more monitors**, the toolbar shows a small monitor icon (its tooltip
+says **Screen**) followed by one button per monitor: **1**, **2**, … They are numbered by position, left to right (then top to bottom), the
 way the monitors are arranged in the remote PC's display settings.
 
-- Hover over a button to see its resolution, for example **Screen 2: 1920 × 1080**, and whether it
-  is the **Main screen**.
+- Hover over a button to see its number and resolution, and whether it is the **Main screen**.
 - Click a button to switch. The picture changes to that monitor within a moment; the button
   highlights once the remote PC has switched.
 - Your mouse controls the monitor you are viewing.

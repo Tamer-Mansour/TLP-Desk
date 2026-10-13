@@ -1,6 +1,8 @@
 # View options
 
 The session toolbar lets you choose how the remote screen is shown and whether you control it.
+The buttons are icons — hover over one to see its name (see the table in
+[Controlling the remote PC](controlling.md)).
 
 ## Fit and Actual size
 
