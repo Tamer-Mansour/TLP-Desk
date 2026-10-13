@@ -368,7 +368,7 @@ impl Engagement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::privacy::local_input_blocked;
+    use crate::privacy::{local_input_blocked, ScreenLine};
 
     #[test]
     fn idle_shield_is_not_engaged_and_release_is_harmless() {
@@ -404,12 +404,12 @@ mod tests {
             rec.lock().unwrap().push(sig);
         }));
         let text = PrivacyScreenText {
-            title: "هذا الجهاز قيد الاستخدام عن بُعد — This PC is being used remotely".into(),
             lines: vec![
-                "متصل: مكتب-Office (123 456 789)".into(),
-                "Hold Ctrl+Alt+Shift+P for 3 seconds to end privacy mode here.".into(),
+                ScreenLine::title("هذا الحاسوب قيد الاستخدام عن بُعد"),
+                ScreenLine::title("This PC is being used remotely"),
+                ScreenLine::body("متصل: مكتب-Office (123 456 789)"),
+                ScreenLine::body("Hold Ctrl+Alt+Shift+P for 3 seconds to end privacy mode here."),
             ],
-            rtl: true,
         };
         s.engage(&text).expect("engage");
         assert!(s.is_engaged());

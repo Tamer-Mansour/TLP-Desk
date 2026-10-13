@@ -50,8 +50,8 @@ pub use keys::{normalize_scancode, ScanKey};
 pub use mapping::{normalize_pixel, pixel_to_virtual_absolute, MonitorRect, ViewRect};
 pub use marker_shape::{MarkerImage, TextMask, MARKER_DARK, MARKER_GREEN};
 pub use privacy::{
-    local_input_blocked, start_privacy_shield, PrivacyScreenText, PrivacyShield, ShieldSignal,
-    ShieldSignalFn,
+    local_input_blocked, start_privacy_shield, PrivacyScreenText, PrivacyShield, ScreenLine,
+    ShieldSignal, ShieldSignalFn,
 };
 
 #[cfg(windows)]

@@ -341,8 +341,8 @@ impl Drop for Font {
     }
 }
 
-/// Title and lines centered on the monitor. GDI shapes Arabic itself; `DT_RTLREADING` sets
-/// the paragraph direction for the Arabic UI.
+/// The lines centered on the monitor. GDI shapes Arabic itself; `DT_RTLREADING` is set per
+/// line from its first strong character, so Arabic and English lines mix correctly.
 fn draw_text(hdc: HDC, rc: RECT, scale: f32, text: &PrivacyScreenText) {
     let (Some(title_font), Some(body_font)) = (
         Font::new(TITLE_PX * scale, FW_SEMIBOLD.0 as i32),
@@ -350,10 +350,6 @@ fn draw_text(hdc: HDC, rc: RECT, scale: f32, text: &PrivacyScreenText) {
     ) else {
         return;
     };
-    let mut fmt = DT_CENTER | DT_WORDBREAK | DT_NOPREFIX;
-    if text.rtl {
-        fmt |= DT_RTLREADING;
-    }
     let width = rc.right.saturating_sub(rc.left);
     let margin = width / 8;
     let (left, right) = (
@@ -362,22 +358,39 @@ fn draw_text(hdc: HDC, rc: RECT, scale: f32, text: &PrivacyScreenText) {
     );
     let gap = (BODY_PX * scale * 0.6).round() as i32;
 
-    let mut blocks: Vec<(Vec<u16>, &Font, COLORREF)> = Vec::new();
-    if !text.title.is_empty() {
-        blocks.push((
-            text.title.encode_utf16().collect(),
-            &title_font,
-            TITLE_COLOR,
-        ));
+    struct Block<'a> {
+        buf: Vec<u16>,
+        font: &'a Font,
+        color: COLORREF,
+        fmt: DRAW_TEXT_FORMAT,
     }
     // Never hand DrawTextW an empty buffer (see `measure`).
-    for line in text.lines.iter().filter(|l| !l.is_empty()) {
-        blocks.push((line.encode_utf16().collect(), &body_font, BODY_COLOR));
-    }
+    let mut blocks: Vec<Block<'_>> = text
+        .lines
+        .iter()
+        .filter(|l| !l.text.is_empty())
+        .map(|l| {
+            let mut fmt = DT_CENTER | DT_WORDBREAK | DT_NOPREFIX;
+            if l.is_rtl() {
+                fmt |= DT_RTLREADING;
+            }
+            let (font, color) = if l.large {
+                (&title_font, TITLE_COLOR)
+            } else {
+                (&body_font, BODY_COLOR)
+            };
+            Block {
+                buf: l.text.encode_utf16().collect(),
+                font,
+                color,
+                fmt,
+            }
+        })
+        .collect();
     // Measure every block at the final width, then center the whole stack vertically.
     let heights: Vec<i32> = blocks
         .iter_mut()
-        .map(|(buf, font, _)| measure(hdc, buf, font, left, right, fmt))
+        .map(|b| measure(hdc, &mut b.buf, b.font, left, right, b.fmt))
         .collect();
     let total: i32 = heights.iter().sum::<i32>()
         + gap.saturating_mul(i32::try_from(heights.len().saturating_sub(1)).unwrap_or(0));
@@ -386,25 +399,24 @@ fn draw_text(hdc: HDC, rc: RECT, scale: f32, text: &PrivacyScreenText) {
     unsafe {
         SetBkMode(hdc, TRANSPARENT);
     }
-    for ((buf, font, color), h) in blocks.iter_mut().zip(heights) {
+    for (b, h) in blocks.iter_mut().zip(heights) {
         let mut r = RECT {
             left,
             top: y,
             right,
             bottom: y.saturating_add(h),
         };
-        // SAFETY: `font` is live; the previous font is restored before it is dropped; `buf`
-        // and `r` are writable locals.
+        // SAFETY: the font is live; the previous font is restored before it is dropped; the
+        // buffer is non-empty and `r` is a writable local.
         unsafe {
-            let old = SelectObject(hdc, font.0);
-            SetTextColor(hdc, *color);
-            DrawTextW(hdc, buf, &mut r, fmt);
+            let old = SelectObject(hdc, b.font.0);
+            SetTextColor(hdc, b.color);
+            DrawTextW(hdc, &mut b.buf, &mut r, b.fmt);
             SelectObject(hdc, old);
         }
         y = y.saturating_add(h).saturating_add(gap);
     }
 }
-
 fn measure(
     hdc: HDC,
     buf: &mut [u16],

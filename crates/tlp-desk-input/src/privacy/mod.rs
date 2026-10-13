@@ -55,19 +55,50 @@ use crate::InputError;
 
 /// Longest line drawn on the privacy screen, in characters (peer names are self-reported).
 pub const MAX_LINE_CHARS: usize = 160;
-/// Most lines drawn on the privacy screen (title not included).
-pub const MAX_LINES: usize = 12;
+/// Most lines drawn on the privacy screen.
+pub const MAX_LINES: usize = 16;
 
-/// Text drawn on the privacy screen, already localized by the caller (the input crate has no
-/// translation table). The title is drawn large, the lines below it in a smaller font.
+/// One line of the privacy screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScreenLine {
+    /// The text (UTF-8, any language). Its direction comes from its first strong character,
+    /// so Arabic and English lines can be mixed on one screen.
+    pub text: String,
+    /// Drawn in the large title font.
+    pub large: bool,
+}
+
+impl ScreenLine {
+    /// A title line.
+    pub fn title(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            large: true,
+        }
+    }
+
+    /// A body line.
+    pub fn body(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            large: false,
+        }
+    }
+
+    /// Whether the line is laid out right-to-left (its first strong character is Arabic,
+    /// Hebrew, ...).
+    pub fn is_rtl(&self) -> bool {
+        first_strong_is_rtl(&self.text)
+    }
+}
+
+/// Text drawn on the privacy screen, top to bottom, centered. Already localized by the caller
+/// (this crate has no translation table); typically the title, who is connected and how to end
+/// privacy mode locally, in Arabic and English.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PrivacyScreenText {
-    /// E.g. "This PC is being used remotely".
-    pub title: String,
-    /// Who is connected, how to end privacy mode locally, ...
-    pub lines: Vec<String>,
-    /// Lay the text out right-to-left (Arabic UI).
-    pub rtl: bool,
+    /// The lines, in display order.
+    pub lines: Vec<ScreenLine>,
 }
 
 impl PrivacyScreenText {
@@ -76,19 +107,34 @@ impl PrivacyScreenText {
     /// [`MAX_LINE_CHARS`], at most [`MAX_LINES`] lines, empty lines dropped.
     pub fn sanitized(&self) -> Self {
         Self {
-            title: clean_line(&self.title),
             lines: self
                 .lines
                 .iter()
-                .map(|l| clean_line(l))
-                .filter(|l| !l.is_empty())
+                .map(|l| ScreenLine {
+                    text: clean_line(&l.text),
+                    large: l.large,
+                })
+                .filter(|l| !l.text.is_empty())
                 .take(MAX_LINES)
                 .collect(),
-            rtl: self.rtl,
         }
     }
 }
 
+/// Unicode bidi "first strong character" rule, reduced to what the privacy screen needs:
+/// Hebrew, Arabic, Syriac, Thaana, NKo and the Arabic presentation forms are right-to-left;
+/// any other letter is left-to-right; digits, spaces and punctuation are skipped.
+pub fn first_strong_is_rtl(s: &str) -> bool {
+    for c in s.chars() {
+        if matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF) {
+            return true;
+        }
+        if c.is_alphabetic() {
+            return false;
+        }
+    }
+    false
+}
 /// Removes control and bidi-override characters, trims and caps one line.
 pub fn clean_line(s: &str) -> String {
     s.chars()
@@ -200,27 +246,34 @@ mod tests {
     #[test]
     fn screen_text_is_sanitized() {
         let t = PrivacyScreenText {
-            title: "  هذا الجهاز قيد الاستخدام عن بُعد \u{202E}evil ".into(),
             lines: vec![
-                "Connected: \u{2066}مكتب-Office\u{2069}\r\n (123 456 789)".into(),
-                String::new(),
-                "x".repeat(500),
+                ScreenLine::title("  هذا الجهاز قيد الاستخدام عن بُعد \u{202E}evil "),
+                ScreenLine::body("Connected: \u{2066}مكتب-Office\u{2069}\r\n (123 456 789)"),
+                ScreenLine::body("   "),
+                ScreenLine::body("x".repeat(500)),
             ],
-            rtl: true,
         };
         let s = t.sanitized();
-        assert_eq!(s.title, "هذا الجهاز قيد الاستخدام عن بُعد evil");
-        assert_eq!(s.lines.len(), 2);
-        assert_eq!(s.lines[0], "Connected: مكتب-Office (123 456 789)");
-        assert_eq!(s.lines[1].chars().count(), MAX_LINE_CHARS);
-        assert!(s.rtl);
+        assert_eq!(s.lines.len(), 3);
+        assert_eq!(s.lines[0].text, "هذا الجهاز قيد الاستخدام عن بُعد evil");
+        assert!(s.lines[0].large && !s.lines[1].large);
+        assert_eq!(s.lines[1].text, "Connected: مكتب-Office (123 456 789)");
+        assert_eq!(s.lines[2].text.chars().count(), MAX_LINE_CHARS);
         let many = PrivacyScreenText {
-            lines: vec!["line".into(); 50],
-            ..PrivacyScreenText::default()
+            lines: vec![ScreenLine::body("line"); 50],
         };
         assert_eq!(many.sanitized().lines.len(), MAX_LINES);
     }
 
+    #[test]
+    fn line_direction_follows_first_strong_character() {
+        assert!(ScreenLine::title("هذا الحاسوب قيد الاستخدام").is_rtl());
+        assert!(ScreenLine::body("123 — متصل: Office-PC").is_rtl());
+        assert!(!ScreenLine::body("Connected: مكتب").is_rtl());
+        assert!(!ScreenLine::body("Ctrl+Alt+Shift+P").is_rtl());
+        assert!(!ScreenLine::body("123 456").is_rtl());
+        assert!(!ScreenLine::body("").is_rtl());
+    }
     #[test]
     fn arabic_joiners_and_marks_survive() {
         // ZWNJ, ZWJ and RLM are part of correct Arabic text and must stay.
