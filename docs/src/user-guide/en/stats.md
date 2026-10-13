@@ -1,5 +1,7 @@
 # The statistics overlay
 
+![Session with the statistics overlay](../../media/session-en-light.png)
+
 The **Stats** button in the session toolbar (a pulse-line icon) shows or hides a small panel over the picture (top
 right; top left in Arabic). It is on by default and updates once a second.
 
