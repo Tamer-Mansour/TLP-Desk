@@ -303,11 +303,25 @@ impl ViewerSession {
                     }
                     if self.grab_on {
                         ui.separator();
-                        let weak = ui.visuals().weak_text_color();
-                        icons::icon(ui, tx, Icon::Keyboard, icons::BUTTON_ICON, weak)
-                            .on_hover_text(tx.t(S::KeysCapturedHint));
-                        ui.label(theme::caption(ui, tx.t(S::KeysCaptured)))
-                            .on_hover_text(tx.t(S::KeysCapturedHint));
+                        // Accent icon = keys are captured. The caption is shown only when it fits
+                        // next to Disconnect; otherwise it moves into the tooltip.
+                        let accent = theme::accent(dark);
+                        let caption = theme::caption(ui, tx.t(S::KeysCaptured));
+                        let caption_w = egui::WidgetText::from(caption.clone())
+                            .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Small)
+                            .size()
+                            .x;
+                        let fits = ui.available_width() > caption_w + 200.0;
+                        let hint = if fits {
+                            tx.t(S::KeysCapturedHint).to_owned()
+                        } else {
+                            format!("{}\n{}", tx.t(S::KeysCaptured), tx.t(S::KeysCapturedHint))
+                        };
+                        icons::icon(ui, tx, Icon::Keyboard, icons::BUTTON_ICON, accent)
+                            .on_hover_text(&hint);
+                        if fits {
+                            ui.label(caption).on_hover_text(&hint);
+                        }
                     }
                     theme::row_end(ui, tx.rtl(), |ui| {
                         let b = widgets::danger_icon_button(
@@ -337,8 +351,9 @@ impl ViewerSession {
         }
         ui.separator();
         let weak = ui.visuals().weak_text_color();
-        icons::icon(ui, tx, Icon::Monitor, icons::BUTTON_ICON, weak);
-        ui.label(theme::caption(ui, tx.t(S::Screens)));
+        // Icon only (the label is its tooltip): the toolbar must fit 760 pt in Arabic too.
+        icons::icon(ui, tx, Icon::Monitor, icons::BUTTON_ICON, weak)
+            .on_hover_text(tx.t(S::Screens));
         let mut picked = None;
         // Number the screens left to right as they are arranged on the host; the toolbar row
         // itself is mirrored in Arabic by `theme::row`.

@@ -29,7 +29,7 @@ what is mirrored in Arabic: arrows that mean "forward/back", connect/disconnect,
 | `Fullscreen` | `maximize` | lucide (tlp-icons override) |  | enter fullscreen |
 | `ExitFullscreen` | `minimize` | lucide |  | leave fullscreen |
 | `FitToWindow` | `shrink` | lucide (tlp-icons override) |  | scale the remote screen to the window |
-| `ActualSize` | `scan` | lucide |  | one remote pixel per screen pixel |
+| `ActualSize` | `zoom-in` | lucide (tlp-icons override) |  | one remote pixel per screen pixel (100%) |
 | `ViewOnly` | `eye` | lucide (tlp-icons override) |  | view-only mode |
 | `Hidden` | `eye-off` | lucide (tlp-icons override) |  | hidden / not visible |
 | `Stats` | `activity` | lucide |  | stats overlay |

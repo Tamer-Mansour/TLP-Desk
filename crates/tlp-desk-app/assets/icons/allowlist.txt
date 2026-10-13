@@ -13,7 +13,7 @@ MonitorOff          monitor-off             host screen blanked
 Fullscreen          maximize                enter fullscreen
 ExitFullscreen      minimize                leave fullscreen
 FitToWindow         shrink                  scale the remote screen to the window
-ActualSize          scan                    one remote pixel per screen pixel
+ActualSize          zoom-in                 one remote pixel per screen pixel (100%)
 ViewOnly            eye                     view-only mode
 Hidden              eye-off                 hidden / not visible
 Stats               activity                stats overlay

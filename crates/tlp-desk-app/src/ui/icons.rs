@@ -92,7 +92,7 @@ icons! {
     Fullscreen => "maximize",
     ExitFullscreen => "minimize",
     FitToWindow => "shrink",
-    ActualSize => "scan",
+    ActualSize => "zoom-in",
     ViewOnly => "eye",
     Hidden => "eye-off",
     Stats => "activity",
