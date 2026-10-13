@@ -10,6 +10,7 @@ use eframe::egui::{
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
 use super::icons::{self, Icon};
+use super::privacy::PrivacyUi;
 use super::{theme, widgets};
 use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, SessionStats};
 use crate::i18n::{format, ltr_isolate, Tx, S};
@@ -50,6 +51,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Privacy mode of the host (toolbar toggle, confirmation, banner).
+    pub privacy: PrivacyUi,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -89,6 +92,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            privacy: PrivacyUi::default(),
         }
     }
 
@@ -186,6 +190,11 @@ impl ViewerSession {
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        self.privacy.banner(ui, tx);
+        if let Some(on) = self.privacy.dialog(&ctx, tx, &self.peer.name) {
+            backend.set_privacy_mode(self.id, on);
+        }
+        let modal_open = modal_open || self.privacy.confirming();
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
@@ -295,6 +304,10 @@ impl ViewerSession {
                         .clicked()
                     {
                         self.show_stats = !self.show_stats;
+                    }
+                    let privacy_allowed = self.permissions.contains(Permissions::PRIVACY_MODE);
+                    if let Some(on) = self.privacy.toolbar(ui, tx, privacy_allowed) {
+                        backend.set_privacy_mode(self.id, on);
                     }
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
@@ -855,6 +868,10 @@ mod tests {
                     clicked = true;
                     break 'outer;
                 }
+                // The scan may hit the privacy toggle: dismiss its confirmation dialog.
+                if session.privacy.confirming() {
+                    session.privacy.confirm(false, Instant::now());
+                }
             }
             assert!(clicked, "no monitor button found ({lang:?})");
             assert_eq!(*backend.1.lock().unwrap(), vec![1]);
@@ -899,6 +916,75 @@ mod tests {
             out.textures_delta.clear(); // headless: no renderer consumes the uploads
         }
         assert!(backend.1.lock().unwrap().is_empty());
+    }
+
+    /// The privacy banner, notice and confirmation dialog render in both languages, and no
+    /// remote input is sent while the confirmation dialog is open.
+    #[test]
+    fn privacy_dialog_pauses_input_and_banners_render() {
+        for lang in [Lang::En, Lang::Ar] {
+            let ctx = egui::Context::default();
+            icons::install(&ctx);
+            let backend = Recorder::default();
+            let frames = FrameSlot::new();
+            frames.publish(VideoImage {
+                width: 100,
+                height: 50,
+                rgba: vec![255; 100 * 50 * 4],
+                seq: 0,
+            });
+            let peer = PeerInfo {
+                device_id: DeviceId(2),
+                name: "حاسوب-المكتبة".into(),
+                address: "192.168.1.2".parse().unwrap(),
+            };
+            let mut session = ViewerSession::new(SessionId(1), peer, Permissions::ALL, frames);
+            let tx = Tx::new(lang, DigitStyle::Western);
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0));
+            let run = |session: &mut ViewerSession, events: Vec<egui::Event>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| session.ui(ui, tx, &backend, false));
+                out.textures_delta.clear();
+            };
+            run(&mut session, vec![]);
+            // Open the confirmation dialog: remote input must pause.
+            assert_eq!(session.privacy.toggle(Instant::now()), None);
+            assert!(session.privacy.confirming());
+            let p = pos2(500.0, 400.0);
+            run(
+                &mut session,
+                vec![
+                    egui::Event::PointerMoved(p),
+                    egui::Event::Key {
+                        key: egui::Key::A,
+                        physical_key: Some(egui::Key::A),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+            assert!(
+                !backend
+                    .0
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|e| !matches!(e, InputEvent::ReleaseAll)),
+                "{lang:?}: input leaked while the dialog was open"
+            );
+            assert_eq!(session.privacy.confirm(true, Instant::now()), Some(true));
+            // "On" banner, then the notice after the host ended it.
+            session.privacy.on_state(true, Instant::now());
+            run(&mut session, vec![]);
+            session.privacy.on_state(false, Instant::now());
+            assert!(session.privacy.notice_visible(Instant::now()));
+            run(&mut session, vec![]);
+        }
     }
 
     #[test]
