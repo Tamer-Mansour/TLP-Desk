@@ -26,6 +26,11 @@
 - [Performance notes](dev/performance.md)
 - [i18n and Arabic](dev/i18n.md)
 - [Release process](dev/release.md)
+
+# Architecture decisions
+
+- [Decision records](adr/index.md)
+  - [Template](adr/template.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
