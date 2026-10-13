@@ -39,6 +39,7 @@
   - [0006 OpenH264 first](adr/0006-openh264-first.md)
   - [0007 egui with a bidi pass](adr/0007-egui-with-bidi-workaround.md)
   - [0008 Inno Setup instead of MSI](adr/0008-inno-setup-instead-of-msi.md)
+  - [0009 Rename to TLP-Desk](adr/0009-rename-to-tlp-desk.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
