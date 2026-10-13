@@ -10,6 +10,7 @@
   - [Your device ID and one-time code](user-guide/en/device-id-and-code.md)
   - [Finding devices on your network](user-guide/en/finding-devices.md)
   - [Connecting](user-guide/en/connecting.md)
+  - [The Accept prompt and the banner](user-guide/en/accept-prompt.md)
 
 # Security
 
