@@ -47,6 +47,7 @@
   - [الاتصال](user-guide/ar/connecting.md)
   - [طلب القبول وشريط الاتصال](user-guide/ar/accept-prompt.md)
   - [التحكم بالحاسوب البعيد](user-guide/ar/controlling.md)
+  - [التبديل بين الشاشات](user-guide/ar/monitors.md)
 
 # Security
 
