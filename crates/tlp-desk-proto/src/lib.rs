@@ -6,9 +6,13 @@
 
 mod framing;
 mod messages;
+mod stream;
 
 pub use framing::{decode_message, encode_frame, encode_message, FrameDecoder, MAX_FRAME_LEN};
 pub use messages::*;
+pub use stream::{
+    FileDataHeader, StreamHeader, StreamKind, FILE_DATA_HEADER_LEN, STREAM_HEADER_LEN,
+};
 
 /// Wire protocol version. Bump on every incompatible change to [`Message`] and update
 /// `docs/protocol.md`.
@@ -21,4 +25,6 @@ pub enum ProtoError {
     Serde(#[from] postcard::Error),
     #[error("frame of {0} bytes exceeds the {MAX_FRAME_LEN} byte limit")]
     FrameTooLarge(usize),
+    #[error("unknown stream kind {0}")]
+    UnknownStreamKind(u8),
 }
