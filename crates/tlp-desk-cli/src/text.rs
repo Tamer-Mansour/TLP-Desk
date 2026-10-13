@@ -4,7 +4,10 @@
 use std::time::Duration;
 
 use tlp_desk_crypto::{DeviceId, Fingerprint};
-use tlp_desk_host::{CancelReason, ConnectedViewer, EndReason as HostEnd, IncomingRequest};
+use tlp_desk_host::{
+    CancelReason, ConnectedViewer, EndReason as HostEnd, IncomingRequest, PrivacyScreenText,
+    PrivacyStatus, PrivacyViewer, ScreenLine,
+};
 use tlp_desk_net::{AuthKind, DiscoveredDevice, PeerInfo};
 use tlp_desk_proto::{Permissions, RejectReason};
 use tlp_desk_viewer::{EndReason as ViewerEnd, MonitorDesc, ViewerStats};
@@ -223,4 +226,79 @@ pub fn monitors(list: &[MonitorDesc], active: u32) -> String {
 
 pub fn selecting_monitor(index: u32) -> String {
     format!("Switching to monitor {index}...")
+}
+
+pub fn privacy_allowed() -> &'static str {
+    "Privacy mode is allowed: viewers may blank this PC's screen and block its keyboard/mouse.\n\
+     To end it here: hold Ctrl+Alt+Shift+P for 3 seconds, or press Ctrl+Alt+Del."
+}
+
+/// The host's black privacy screen. Shown to whoever sits at the host, so it is always in
+/// Arabic and English (same wording as the GUI's i18n table).
+pub fn privacy_screen(viewers: &[PrivacyViewer]) -> PrivacyScreenText {
+    let mut lines = vec![
+        ScreenLine::title("هذا الحاسوب قيد الاستخدام عن بُعد عبر TLP-Desk"),
+        ScreenLine::title("This PC is being used remotely with TLP-Desk"),
+    ];
+    for v in viewers {
+        lines.push(ScreenLine::body(format!(
+            "متصل: {} ({})",
+            v.name, v.device_id
+        )));
+        lines.push(ScreenLine::body(format!(
+            "Connected: {} ({})",
+            v.name, v.device_id
+        )));
+    }
+    lines.push(ScreenLine::body(
+        "لإنهاء وضع الخصوصية من هنا، اضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ أو اضغط Ctrl+Alt+Del.",
+    ));
+    lines.push(ScreenLine::body(
+        "To end privacy mode here, hold Ctrl+Alt+Shift+P for 3 seconds or press Ctrl+Alt+Del.",
+    ));
+    PrivacyScreenText { lines }
+}
+
+pub fn host_privacy(peer: &str, status: &PrivacyStatus) -> String {
+    let state = if status.active { "ON" } else { "OFF" };
+    format!(
+        "PRIVACY MODE {state} ({:?}; reported to {peer})",
+        status.cause
+    )
+}
+
+pub fn requesting_privacy() -> &'static str {
+    "Asking the host to turn privacy mode on..."
+}
+
+pub fn viewer_privacy(enabled: bool) -> &'static str {
+    if enabled {
+        "Privacy mode is ON: the host screen is black and its keyboard/mouse are blocked."
+    } else {
+        "Privacy mode is OFF (turned off, refused, or ended on the host)."
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn privacy_screen_is_bilingual_and_names_viewers() {
+        let t = privacy_screen(&[PrivacyViewer {
+            name: "مكتب-Office".into(),
+            device_id: "123 456 789".into(),
+        }]);
+        assert!(t.lines[0].large && t.lines[0].is_rtl());
+        assert!(t.lines[1].large && !t.lines[1].is_rtl());
+        assert!(t
+            .lines
+            .iter()
+            .any(|l| l.text == "متصل: مكتب-Office (123 456 789)"));
+        assert!(t
+            .lines
+            .iter()
+            .any(|l| l.text == "Connected: مكتب-Office (123 456 789)"));
+        assert_eq!(t.sanitized(), t, "fits the privacy screen limits");
+    }
 }

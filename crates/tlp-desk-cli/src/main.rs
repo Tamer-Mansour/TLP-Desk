@@ -13,12 +13,14 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use tlp_desk_crypto::Identity;
-use tlp_desk_host::{Host, HostConfig, HostEvent, DEFAULT_PERMISSIONS};
+use tlp_desk_host::{
+    FeatureSet, Host, HostConfig, HostEvent, PrivacyFeature, PrivacyStatus, DEFAULT_PERMISSIONS,
+};
 use tlp_desk_net::{Discovery, DiscoveryConfig, Endpoint, EndpointConfig};
 use tlp_desk_proto::{InputEvent, Permissions};
 use tlp_desk_viewer::{
-    AuthMethod, ConnectTarget, DecodedFrame, KnownHostsStore, PixelFormat, Viewer, ViewerConfig,
-    ViewerError, ViewerEvent,
+    privacy_request, AuthMethod, ConnectTarget, DecodedFrame, KnownHostsStore, PixelFormat,
+    PrivacyState, PrivacyViewerFeature, Viewer, ViewerConfig, ViewerError, ViewerEvent,
 };
 
 #[derive(Parser)]
@@ -76,6 +78,10 @@ enum Cmd {
         /// Do not show the green marker at the pointer while a viewer moves it.
         #[arg(long)]
         no_pointer_marker: bool,
+        /// Let viewers turn on privacy mode (black screen + blocked local keyboard/mouse here).
+        /// Hold Ctrl+Alt+Shift+P for 3 s, or press Ctrl+Alt+Del, to end it locally.
+        #[arg(long)]
+        allow_privacy: bool,
     },
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect {
@@ -106,6 +112,9 @@ enum Cmd {
         /// whole session (needs mouse permission).
         #[arg(long)]
         move_pointer: bool,
+        /// Turn on privacy mode on the host for the session (needs the host's permission).
+        #[arg(long)]
+        privacy: bool,
     },
 }
 
@@ -168,18 +177,31 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             name,
             local_grace_ms,
             no_pointer_marker,
+            allow_privacy,
         } => {
+            let base = if view_only {
+                Permissions::VIEW
+            } else {
+                DEFAULT_PERMISSIONS
+            };
+            if allow_privacy {
+                println!("{}", text::privacy_allowed());
+            }
             let cfg = HostConfig {
                 local_input_grace: Duration::from_millis(local_grace_ms),
                 remote_pointer_marker: !no_pointer_marker,
                 monitor,
                 fps,
                 allow_one_time_code: code,
-                default_permissions: if view_only {
-                    Permissions::VIEW
+                default_permissions: if allow_privacy {
+                    base | Permissions::PRIVACY_MODE
                 } else {
-                    DEFAULT_PERMISSIONS
+                    base
                 },
+                // FEATURE HOOK: session features of the CLI host.
+                features: FeatureSet::new().with(Arc::new(PrivacyFeature::new(Arc::new(
+                    text::privacy_screen,
+                )))),
                 advertise: !no_discovery,
                 device_name: name.unwrap_or_else(tlp_desk_net::default_device_name),
                 ..HostConfig::default()
@@ -196,6 +218,7 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
             forget_key,
             monitor,
             move_pointer,
+            privacy,
         } => {
             let auth = match (code, password) {
                 (Some(c), _) => AuthMethod::OneTimeCode(c),
@@ -212,6 +235,7 @@ async fn run(cmd: Cmd, dir: PathBuf) -> Result<()> {
                 forget_key,
                 monitor,
                 move_pointer,
+                privacy,
             };
             connect(&dir, &target, auth, opts).await
         }
@@ -314,7 +338,16 @@ async fn serve(dir: &Path, port: u16, cfg: HostConfig, auto_accept: bool) -> Res
                         println!("{}", text::viewer_left(&peer, &reason));
                     }
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { .. } => {}
+                    HostEvent::Feature { id, event } => {
+                        if let Some(status) = event.payload::<PrivacyStatus>() {
+                            let peer = host
+                                .sessions()
+                                .into_iter()
+                                .find(|v| v.id == id)
+                                .map_or_else(|| id.0.to_string(), |v| v.peer.device_id.to_string());
+                            println!("{}", text::host_privacy(&peer, status));
+                        }
+                    }
                 }
             }
         }
@@ -335,6 +368,7 @@ struct ConnectOpts {
     forget_key: bool,
     monitor: Option<u32>,
     move_pointer: bool,
+    privacy: bool,
 }
 
 async fn connect(dir: &Path, target: &str, auth: AuthMethod, opts: ConnectOpts) -> Result<()> {
@@ -345,6 +379,7 @@ async fn connect(dir: &Path, target: &str, auth: AuthMethod, opts: ConnectOpts) 
         forget_key,
         monitor,
         move_pointer,
+        privacy,
     } = opts;
     let identity = load_identity(dir)?;
     let endpoint = Arc::new(Endpoint::bind(
@@ -368,6 +403,7 @@ async fn connect(dir: &Path, target: &str, auth: AuthMethod, opts: ConnectOpts) 
             known_hosts: KnownHostsStore::File(dir.join(tlp_desk_crypto::KNOWN_HOSTS_FILE)),
             pixel_format: PixelFormat::Rgba,
             discovery,
+            features: FeatureSet::new().with(Arc::new(PrivacyViewerFeature)),
             ..ViewerConfig::default()
         },
     )?;
@@ -399,6 +435,10 @@ async fn connect(dir: &Path, target: &str, auth: AuthMethod, opts: ConnectOpts) 
         text::connected_host(session.peer(), session.permissions())
     );
 
+    if privacy {
+        println!("{}", text::requesting_privacy());
+        session.send_message(privacy_request(true));
+    }
     let start = Instant::now();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
     let mut last: Option<DecodedFrame> = None;
@@ -444,7 +484,11 @@ async fn connect(dir: &Path, target: &str, auth: AuthMethod, opts: ConnectOpts) 
                     println!("{}", text::permissions(p));
                 }
                 // FEATURE HOOK: CLI commands print their feature events here.
-                Some(ViewerEvent::Feature(_)) => {}
+                Some(ViewerEvent::Feature(event)) => {
+                    if let Some(state) = event.payload::<PrivacyState>() {
+                        println!("{}", text::viewer_privacy(state.enabled));
+                    }
+                }
                 Some(ViewerEvent::Ended(r)) => {
                     ended = Some(r);
                     break;
