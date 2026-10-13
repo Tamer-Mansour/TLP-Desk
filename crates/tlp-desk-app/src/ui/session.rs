@@ -36,6 +36,8 @@ pub struct ViewerSession {
     pub show_stats: bool,
     pub stats: Option<SessionStats>,
     started: Instant,
+    /// Session duration to show instead of the wall clock (deterministic README media).
+    fixed_elapsed: Option<std::time::Duration>,
     pressed: Vec<MouseButton>,
     last_pos: Option<(u16, u16)>,
     focus_requested: bool,
@@ -80,6 +82,7 @@ impl ViewerSession {
             show_stats: true,
             stats: None,
             started: Instant::now(),
+            fixed_elapsed: None,
             pressed: Vec::new(),
             last_pos: None,
             focus_requested: false,
@@ -100,6 +103,12 @@ impl ViewerSession {
         }
         self.monitors = monitors;
         self.active_monitor = active;
+    }
+
+    /// Show `elapsed` as the session duration instead of the wall clock (`None` = wall clock).
+    /// Used by the README media generator so screenshots and the demo are reproducible.
+    pub fn set_fixed_elapsed(&mut self, elapsed: Option<std::time::Duration>) {
+        self.fixed_elapsed = elapsed;
     }
 
     /// Monitors and the active index, as last reported by the host.
@@ -443,7 +452,10 @@ impl ViewerSession {
         ));
         lines.push((
             S::StatDuration,
-            ltr_isolate(&format::duration(self.started.elapsed(), d)),
+            ltr_isolate(&format::duration(
+                self.fixed_elapsed.unwrap_or_else(|| self.started.elapsed()),
+                d,
+            )),
         ));
 
         let font = egui::FontId::proportional(13.5);
