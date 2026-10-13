@@ -17,6 +17,7 @@
   - [The statistics overlay](user-guide/en/stats.md)
   - [Settings](user-guide/en/settings.md)
   - [When the host key has changed](user-guide/en/host-key-changed.md)
+  - [Security and privacy](user-guide/en/security-privacy.md)
 
 # Security
 
