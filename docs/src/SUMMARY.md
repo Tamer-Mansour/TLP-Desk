@@ -5,6 +5,7 @@
 # User guide (English)
 
 - [Overview](user-guide/en/index.md)
+  - [Installing](user-guide/en/installing.md)
 
 # Security
 
