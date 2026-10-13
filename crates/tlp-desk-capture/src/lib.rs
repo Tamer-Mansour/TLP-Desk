@@ -9,11 +9,13 @@
 
 use std::time::Duration;
 
+mod dirty;
 mod scale;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows_capture;
 
+pub use dirty::{DirtyRect, DirtyTracker, FrameChange, DEFAULT_TILE};
 pub use scale::{fit_within, mip_level_for};
 
 /// One captured frame in BGRA8 layout.
