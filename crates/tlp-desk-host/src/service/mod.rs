@@ -30,6 +30,12 @@
 //! are confined to the platform module.
 
 pub mod ipc;
+mod pipe_security;
+
+pub use pipe_security::{
+    agent_pipe_name, is_agent_pipe_name, PipeSpec, AGENT_PIPE_SDDL, GUI_CLIENT_ACCESS,
+    GUI_PIPE_NAME, GUI_PIPE_SDDL,
+};
 
 /// Service name in the Service Control Manager (`sc query TLP-Desk`).
 pub const SERVICE_NAME: &str = "TLP-Desk";
