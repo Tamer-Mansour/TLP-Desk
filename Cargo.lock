@@ -3974,6 +3974,7 @@ dependencies = [
  "tlp-desk-input",
  "tlp-desk-net",
  "tlp-desk-proto",
+ "tlp-desk-testkit",
  "tlp-desk-viewer",
  "tokio",
  "tracing",
