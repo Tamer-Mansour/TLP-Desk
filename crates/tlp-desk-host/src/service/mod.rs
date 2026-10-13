@@ -29,11 +29,16 @@
 //! The pure logic lives in small, unit-tested modules (IPC framing in [`ipc`]); Windows calls
 //! are confined to the platform module.
 
+mod desktop;
 pub mod ipc;
 mod pipe_security;
 mod session;
 mod supervisor;
 
+pub use desktop::{
+    is_secure_desktop, DesktopChange, DesktopFollower, DesktopSource, DesktopStatus,
+    DesktopWatcher, DEFAULT_DESKTOP, INACCESSIBLE_DESKTOP,
+};
 pub use pipe_security::{
     agent_pipe_name, is_agent_pipe_name, PipeSpec, AGENT_PIPE_SDDL, GUI_CLIENT_ACCESS,
     GUI_PIPE_NAME, GUI_PIPE_SDDL,
