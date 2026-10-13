@@ -24,6 +24,9 @@
 //! into the frame every tick so the encoder always sees motion. With `--static` only real desktop
 //! changes are encoded.
 
+// Process-time and test-window helpers call Win32 directly; every block has a SAFETY note.
+#![allow(unsafe_code)]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};

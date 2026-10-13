@@ -285,10 +285,8 @@ mod ffi {
         pub(super) fn new(p: &Params) -> Result<Self, CodecError> {
             let mut enc: *mut ISVCEncoder = ptr::null_mut();
             // SAFETY: WelsCreateSVCEncoder writes a fresh encoder pointer into `enc`.
-            check(
-                unsafe { APILoader::WelsCreateSVCEncoder(&mut enc) },
-                "create",
-            )?;
+            let rc = unsafe { APILoader::WelsCreateSVCEncoder(&mut enc) };
+            check(rc, "create")?;
             if enc.is_null() {
                 return Err(CodecError::Backend(
                     "OpenH264 returned a null encoder".into(),
@@ -460,10 +458,8 @@ mod ffi {
             };
             // SAFETY: `pic` describes planes of at least w*h and (w/2)*(h/2) bytes (checked
             // above) that stay borrowed for the call; `info` is a valid output struct we own.
-            check(
-                unsafe { (self.encode_frame)(self.enc, &pic, &mut *self.info) },
-                "EncodeFrame",
-            )?;
+            let rc = unsafe { (self.encode_frame)(self.enc, &pic, &mut *self.info) };
+            check(rc, "EncodeFrame")?;
             let info = &*self.info;
             let kind = match info.eFrameType {
                 t if t == videoFrameTypeIDR || t == videoFrameTypeI => FrameKind::Intra,

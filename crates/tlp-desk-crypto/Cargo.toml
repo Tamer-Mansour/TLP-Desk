@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 thiserror.workspace = true
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
