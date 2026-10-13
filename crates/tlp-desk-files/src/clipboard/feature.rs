@@ -268,6 +268,10 @@ impl SessionTask {
                 return;
             }
         };
+        // Sync may have been switched off or revoked while reading.
+        if !self.allowed() {
+            return;
+        }
         if let ClipContent::Files(paths) = content {
             let hook = lock(&self.inner.files_hook).clone();
             if let Some(h) = hook {

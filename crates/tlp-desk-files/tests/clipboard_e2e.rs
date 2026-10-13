@@ -305,6 +305,8 @@ async fn revoking_clipboard_stops_sync_both_ways_live() {
 #[tokio::test(flavor = "multi_thread")]
 async fn sync_toggle_stops_and_resumes_with_a_push() {
     let (host, viewer) = pair(all(), MemoryClipboard::new()).await;
+    // Let the (empty) push-on-start finish first.
+    tokio::time::sleep(QUIET).await;
     assert_eq!(viewer.role(), Role::Viewer);
     assert_eq!(
         viewer.feature.sync_enabled(Role::Viewer, viewer.key),
