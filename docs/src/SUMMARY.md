@@ -51,6 +51,7 @@
   - [خيارات العرض](user-guide/ar/view-options.md)
   - [لوحة الإحصاءات](user-guide/ar/stats.md)
   - [الإعدادات](user-guide/ar/settings.md)
+  - [عند تغيّر مفتاح الجهاز المضيف](user-guide/ar/host-key-changed.md)
 
 # Security
 
