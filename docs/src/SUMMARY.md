@@ -24,6 +24,7 @@
   - [Uninstalling](user-guide/en/uninstall.md)
   - [Coming soon](user-guide/en/coming-soon/index.md)
     - [File transfer and file browser](user-guide/en/coming-soon/file-transfer.md)
+    - [Clipboard sharing](user-guide/en/coming-soon/clipboard.md)
 
 # Security
 
