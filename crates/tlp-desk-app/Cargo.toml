@@ -29,6 +29,8 @@ sys-locale = "0.3"
 # Rasterizes the vendored tlp-icons SVGs (ui::icons). No default features: icons have no text or
 # embedded raster images, so no font database (fontdb/system fonts) is pulled in.
 resvg = { version = "0.48", default-features = false }
+# Chat timestamps in the local time zone (`local-offset`); no formatting/parsing features.
+time = { version = "0.3", default-features = false, features = ["std", "local-offset"] }
 
 [dev-dependencies]
 tlp-desk-capture.workspace = true

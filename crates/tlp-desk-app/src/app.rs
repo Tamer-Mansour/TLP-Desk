@@ -1,11 +1,12 @@
 //! Top-level eframe application: owns UI state, drains backend events, routes screens.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use eframe::egui::{self, Id, RichText};
 use tlp_desk_proto::RejectReason;
 
+use crate::backend::chat::ChatLine;
 use crate::backend::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DiscoveredDevice, EndReason,
     EventReceiver, HostProblem, LocalInfo, PeerInfo, RequestId, SessionId,
@@ -13,6 +14,7 @@ use crate::backend::{
 use crate::i18n::{format::to_western_digits, Lang, Tx, S};
 use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
+use crate::ui::chat::{self as chat_ui, ChatState};
 use crate::ui::icons::{self, Icon};
 use crate::ui::session::ViewerSession;
 use crate::ui::{theme, widgets};
@@ -99,6 +101,8 @@ pub struct App {
     hwnd: Option<isize>,
     pub incoming: VecDeque<(RequestId, PeerInfo)>,
     pub host_sessions: Vec<(SessionId, PeerInfo)>,
+    /// Host side: chat with each connected viewer (window opens when the viewer writes).
+    pub host_chats: HashMap<SessionId, ChatState>,
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
@@ -141,6 +145,7 @@ impl App {
             hwnd: keygrab::window_handle(cc),
             incoming: VecDeque::new(),
             host_sessions: Vec::new(),
+            host_chats: HashMap::new(),
             session: None,
             notice: None,
         };
@@ -327,6 +332,7 @@ impl App {
                 }
                 BackendEvent::SessionEnded { session, reason } => {
                     self.host_sessions.retain(|(id, _)| *id != session);
+                    self.host_chats.remove(&session);
                     if self.session.as_ref().is_some_and(|s| s.id == session) {
                         self.session = None;
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
@@ -355,6 +361,48 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // chat (TLP-chat)
+                BackendEvent::ChatReceived { session, line } => {
+                    self.chat_received(ctx, session, line)
+                }
+                BackendEvent::ChatAvailability { session, allowed } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.chat.set_allowed(allowed);
+                    } else if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_chats
+                            .entry(session)
+                            .or_insert_with(|| ChatState::new(allowed))
+                            .set_allowed(allowed);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A chat message arrived: into the viewer session's panel, or the host chat window (which
+    /// opens). The taskbar button flashes when the window is in the background.
+    fn chat_received(&mut self, ctx: &egui::Context, session: SessionId, line: ChatLine) {
+        if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+            s.chat.push(line);
+        } else if self.host_sessions.iter().any(|(id, _)| *id == session) {
+            let chat = self
+                .host_chats
+                .entry(session)
+                .or_insert_with(|| ChatState::new(true));
+            chat.push(line);
+            chat.set_open(true);
+        } else {
+            return;
+        }
+        chat_ui::notify_if_unfocused(ctx);
+    }
+
+    /// Host side: one chat window per connected viewer that has one open.
+    fn host_chat_windows(&mut self, ctx: &egui::Context) {
+        let tx = self.tx;
+        for (session, peer) in &self.host_sessions {
+            if let Some(chat) = self.host_chats.get_mut(session) {
+                chat_ui::host_window(ctx, tx, chat, &peer.name, self.backend.as_ref(), *session);
             }
         }
     }
@@ -374,6 +422,7 @@ impl App {
         let tx = self.tx;
         let dark = ui.visuals().dark_mode;
         let mut end = None;
+        let mut toggle_chat = None;
         egui::Panel::top("host-banner")
             .frame(
                 egui::Frame::new()
@@ -392,12 +441,21 @@ impl App {
                             if ui.add(end_button).clicked() {
                                 end = Some(*session);
                             }
+                            // chat (TLP-chat)
+                            if let Some(chat) = self.host_chats.get(session) {
+                                if chat_ui::chat_toggle(ui, tx, chat) {
+                                    toggle_chat = Some(*session);
+                                }
+                            }
                         });
                     });
                 }
             });
         if let Some(s) = end {
             self.backend.disconnect(s);
+        }
+        if let Some(chat) = toggle_chat.and_then(|s| self.host_chats.get_mut(&s)) {
+            chat.set_open(!chat.is_open());
         }
     }
 
@@ -638,6 +696,7 @@ impl eframe::App for App {
             self.host_problem_banner(ui);
         }
         let modal_open = self.dialogs(&ctx);
+        self.host_chat_windows(&ctx);
 
         if self.session.is_some() {
             let tx = self.tx;

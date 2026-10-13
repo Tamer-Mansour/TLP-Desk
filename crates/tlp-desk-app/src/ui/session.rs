@@ -9,6 +9,7 @@ use eframe::egui::{
 };
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
+use super::chat::{self, ChatState};
 use super::icons::{self, Icon};
 use super::{theme, widgets};
 use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, SessionStats};
@@ -50,6 +51,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Chat with the host user (side panel).
+    pub chat: ChatState,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -89,6 +92,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            chat: ChatState::new(permissions.contains(Permissions::CHAT)),
         }
     }
 
@@ -186,6 +190,7 @@ impl ViewerSession {
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        chat::side_panel(ui, tx, &mut self.chat, backend, self.id);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
@@ -295,6 +300,9 @@ impl ViewerSession {
                         .clicked()
                     {
                         self.show_stats = !self.show_stats;
+                    }
+                    if chat::chat_toggle(ui, tx, &self.chat) {
+                        self.chat.set_open(!self.chat.is_open());
                     }
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.

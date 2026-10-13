@@ -19,6 +19,7 @@
 //! constructed like
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
+pub mod chat;
 pub mod fake;
 pub mod real;
 
@@ -347,8 +348,15 @@ pub enum BackendEvent {
 
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
 
-    // --- chat (TLP-ux) ---
-
+    // --- chat (TLP-chat) ---
+    /// A chat message from the other side of a viewer or host session.
+    ChatReceived {
+        session: SessionId,
+        line: chat::ChatLine,
+    },
+    /// Chat was turned on (`true`) or off for a session (the host's live `CHAT` permission).
+    /// Sent once when the session starts and on every change.
+    ChatAvailability { session: SessionId, allowed: bool },
     // --- audio (TLP-audio) ---
 
     // --- service: unattended access, secure desktop, Ctrl+Alt+Del, restart (TLP-service) ---
@@ -424,7 +432,27 @@ pub trait Backend: Send + Sync {
 
     // --- clipboard (TLP-clipboard) ---
 
-    // --- chat (TLP-ux) ---
+    // --- chat (TLP-chat) ---
+    /// Send a chat message in a viewer or host session (queued, never blocks). Returns the
+    /// line to show in the conversation.
+    fn send_chat(
+        &self,
+        session: SessionId,
+        text: &str,
+    ) -> Result<chat::ChatLine, chat::ChatSendError> {
+        let _ = (session, text);
+        Err(chat::ChatSendError::Unavailable)
+    }
+
+    /// Host side: turn chat on or off for a connected viewer (live `CHAT` permission). The
+    /// change arrives as [`BackendEvent::ChatAvailability`].
+    fn set_chat_allowed(&self, session: SessionId, allowed: bool) {
+        tracing::debug!(
+            session = session.0,
+            allowed,
+            "chat permission not supported"
+        );
+    }
 
     // --- audio (TLP-audio) ---
 

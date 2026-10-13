@@ -1,5 +1,6 @@
 //! egui views.
 
+pub mod chat;
 pub mod home;
 pub mod icons;
 pub mod session;
