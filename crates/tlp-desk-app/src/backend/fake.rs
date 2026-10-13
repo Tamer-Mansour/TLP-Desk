@@ -503,6 +503,26 @@ impl Backend for FakeBackend {
             });
         }
     }
+
+    // --- power (TLP-power) ---
+    // recording (TLP-recording): simulated; the fake session's frames are not H.264, so no
+    // file is written.
+    fn start_recording(&self, session: SessionId) {
+        if self.inner.state().sessions.contains_key(&session) {
+            self.inner.emit(BackendEvent::RecordingStarted {
+                session,
+                folder: super::recording::recordings_folder().unwrap_or_default(),
+            });
+        }
+    }
+
+    fn stop_recording(&self, session: SessionId) {
+        self.inner.emit(BackendEvent::RecordingStopped {
+            session,
+            files: Vec::new(),
+            problem: None,
+        });
+    }
 }
 
 /// Synthetic "remote desktop": animated gradient, a grid, a sweeping bar, and indicators that

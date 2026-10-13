@@ -102,6 +102,8 @@ struct Inner {
     own_id: DeviceId,
     bridges: Bridges,
     state: Mutex<State>,
+    /// Running session recordings (TLP-recording).
+    recorders: super::recording::Recorders,
 }
 
 #[derive(Default)]
@@ -239,6 +241,11 @@ impl RealBackend {
     /// The local UDP address of the shared endpoint (`None` if networking failed).
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.inner.endpoint.as_ref()?.local_addr().ok()
+    }
+
+    /// Records sessions into `folder` instead of `%USERPROFILE%\Videos\TLP-Desk` (tests).
+    pub fn set_recordings_folder(&self, folder: PathBuf) {
+        self.inner.recorders.set_folder(folder);
     }
 
     /// Like [`RealBackend::start_with`] but returns the concrete type (tests).
@@ -383,6 +390,7 @@ impl RealBackend {
             own_id,
             bridges,
             state: Mutex::default(),
+            recorders: Default::default(),
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -409,6 +417,16 @@ impl Inner {
         if self.tx.send(event).is_ok() {
             (self.repaint)();
         }
+    }
+
+    /// [`Inner::emit`] as a callback for other threads (a no-op once the backend is gone).
+    fn emitter(self: &Arc<Self>) -> super::recording::Emit {
+        let me = Arc::downgrade(self);
+        Arc::new(move |event| {
+            if let Some(me) = me.upgrade() {
+                me.emit(event);
+            }
+        })
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -763,6 +781,7 @@ impl Inner {
         }
         self.state().viewer_sessions.remove(&session);
         lock(&self.bridges).retain(|b| b.session != session);
+        self.recorders.stop(session, &self.rt, self.emitter());
         self.emit(BackendEvent::SessionEnded { session, reason });
     }
 }
@@ -872,11 +891,30 @@ impl Backend for RealBackend {
             }
         }
     }
+
+    // --- power (TLP-power) ---
+    // recording (TLP-recording)
+    fn start_recording(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .recorders
+                .start(session, &s, self.inner.emitter());
+        }
+    }
+
+    fn stop_recording(&self, session: SessionId) {
+        self.inner
+            .recorders
+            .stop(session, &self.inner.rt, self.inner.emitter());
+    }
 }
 
 impl Drop for RealBackend {
     /// App exit: say goodbye to every peer, then close the endpoint so they notice at once.
     fn drop(&mut self) {
+        // Close recording files properly before the sessions go away.
+        self.inner.recorders.stop_all_blocking();
         if let Some(h) = &self.inner.host {
             h.shutdown();
         }

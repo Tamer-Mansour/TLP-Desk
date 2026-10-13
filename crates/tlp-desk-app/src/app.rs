@@ -355,6 +355,8 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // recording (TLP-recording)
+                BackendEvent::RecordingStarted { .. } | BackendEvent::RecordingStopped { .. } => {}
             }
         }
     }

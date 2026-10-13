@@ -21,6 +21,7 @@
 
 pub mod fake;
 pub mod real;
+pub mod recording;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
@@ -360,6 +361,20 @@ pub enum BackendEvent {
     // --- perf: quality presets, latency overlay, all monitors (TLP-perf) ---
 
     // --- power: WOL, recording, tunnels, whiteboard, connection log, device info (TLP-power) ---
+    // recording (TLP-recording)
+    /// Viewer side: the session is being recorded into `folder` (show the red indicator).
+    RecordingStarted {
+        session: SessionId,
+        folder: std::path::PathBuf,
+    },
+    /// Viewer side: recording ended (stopped, failed to start, or failed). `files` are the
+    /// recordings written (several if the remote screen size changed); `problem` says why it
+    /// ended early, if it did. May arrive after `SessionEnded`.
+    RecordingStopped {
+        session: SessionId,
+        files: Vec<std::path::PathBuf>,
+        problem: Option<recording::RecordingProblem>,
+    },
 }
 
 /// Why this device cannot act as a host.
@@ -437,6 +452,23 @@ pub trait Backend: Send + Sync {
     // --- perf (TLP-perf) ---
 
     // --- power (TLP-power) ---
+    // recording (TLP-recording)
+    /// Viewer side: start recording the session's video to a file in the recordings folder.
+    /// Answered by [`BackendEvent::RecordingStarted`] or [`BackendEvent::RecordingStopped`].
+    fn start_recording(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "recording not supported by this backend"
+        );
+    }
+
+    /// Viewer side: stop recording; [`BackendEvent::RecordingStopped`] follows.
+    fn stop_recording(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "recording not supported by this backend"
+        );
+    }
 }
 
 #[cfg(test)]
