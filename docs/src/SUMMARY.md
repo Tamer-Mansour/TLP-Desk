@@ -37,6 +37,10 @@
     - [Whiteboard](user-guide/en/coming-soon/whiteboard.md)
     - [Remote device information](user-guide/en/coming-soon/device-info.md)
 
+# دليل المستخدم (العربية)
+
+- [نظرة عامة](user-guide/ar/index.md)
+
 # Security
 
 - [Security model](security.md)
