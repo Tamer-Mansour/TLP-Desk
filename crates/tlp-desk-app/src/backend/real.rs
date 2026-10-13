@@ -37,6 +37,7 @@ use tlp_desk_viewer::{
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::audio::{AudioBridge, AudioDevices};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
@@ -62,6 +63,9 @@ pub struct RealConfig {
     pub host: HostConfig,
     /// Start a browse-only discovery when the host (and its discovery) is unavailable.
     pub fallback_discovery: bool,
+    // --- audio (TLP-audio) ---
+    /// Sound devices (tests use [`AudioDevices::fake`]).
+    pub audio: AudioDevices,
 }
 
 impl Default for RealConfig {
@@ -73,6 +77,7 @@ impl Default for RealConfig {
             known_hosts: KnownHostsStore::Default,
             host: HostConfig::default(),
             fallback_discovery: true,
+            audio: AudioDevices::default(),
         }
     }
 }
@@ -102,6 +107,7 @@ struct Inner {
     own_id: DeviceId,
     bridges: Bridges,
     state: Mutex<State>,
+    audio: AudioBridge,
 }
 
 #[derive(Default)]
@@ -306,11 +312,13 @@ impl RealBackend {
             }
         }
 
+        let audio = AudioBridge::new(&cfg.audio);
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
             let host_cfg = HostConfig {
                 device_name: device_name.clone(),
+                features: audio.host_features(cfg.host.features.clone()),
                 ..cfg.host.clone()
             };
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
@@ -357,6 +365,7 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
+                features: audio.viewer_features(tlp_desk_net::FeatureSet::new()),
                 ..ViewerConfig::default()
             };
             match Viewer::new(ep.clone(), vcfg) {
@@ -383,6 +392,7 @@ impl RealBackend {
             own_id,
             bridges,
             state: Mutex::default(),
+            audio,
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -749,6 +759,11 @@ impl Inner {
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 ViewerEvent::Feature(event) => {
+                    // --- audio (TLP-audio) ---
+                    if let Some(ev) = super::audio::viewer_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
                     tracing::debug!(
                         session = session.0,
                         feature = event.feature,
@@ -871,6 +886,31 @@ impl Backend for RealBackend {
                 h.disconnect(id); // SessionEnded via pump_host
             }
         }
+    }
+
+    // --- audio (TLP-audio) ---
+    fn set_audio_enabled(&self, session: SessionId, enabled: bool) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .audio
+                .viewer()
+                .set_enabled(s.feature_key(), enabled);
+        }
+    }
+
+    fn set_audio_volume(&self, session: SessionId, volume: f32) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .audio
+                .viewer()
+                .set_volume(s.feature_key(), volume);
+        }
+    }
+
+    fn set_audio_on_connect(&self, enabled: bool) {
+        self.inner.audio.viewer().set_enabled_by_default(enabled);
     }
 }
 

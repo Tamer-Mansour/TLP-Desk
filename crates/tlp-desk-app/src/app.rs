@@ -355,6 +355,8 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- audio (TLP-audio) ---
+                BackendEvent::AudioState { .. } | BackendEvent::AudioDeviceFailed { .. } => {}
             }
         }
     }

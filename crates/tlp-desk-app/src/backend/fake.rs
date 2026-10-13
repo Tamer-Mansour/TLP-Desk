@@ -66,6 +66,7 @@ struct Inner {
     repaint: RepaintFn,
     next_id: AtomicU64,
     state: Mutex<State>,
+    audio: super::audio::FakeAudio,
 }
 
 struct State {
@@ -130,6 +131,7 @@ impl FakeBackend {
                 key_changed: true,
                 rng,
             }),
+            audio: Default::default(),
         });
         inner.spawn_discovery();
         inner.spawn_incoming_request();
@@ -501,6 +503,24 @@ impl Backend for FakeBackend {
                 session,
                 reason: EndReason::Local,
             });
+        }
+    }
+
+    // --- audio (TLP-audio): the fake host always permits sound; nothing is played ---
+    fn set_audio_enabled(&self, session: SessionId, enabled: bool) {
+        if self.inner.state().sessions.contains_key(&session) {
+            let ev = self.inner.audio.update(session, |a| a.enabled = enabled);
+            self.inner.emit(ev);
+        }
+    }
+
+    fn set_audio_volume(&self, session: SessionId, volume: f32) {
+        if self.inner.state().sessions.contains_key(&session) {
+            let ev = self
+                .inner
+                .audio
+                .update(session, |a| a.volume = volume.clamp(0.0, 1.0));
+            self.inner.emit(ev);
         }
     }
 }

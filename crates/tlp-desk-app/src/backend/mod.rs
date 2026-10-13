@@ -19,6 +19,7 @@
 //! constructed like
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
+pub mod audio;
 pub mod fake;
 pub mod real;
 
@@ -350,7 +351,13 @@ pub enum BackendEvent {
     // --- chat (TLP-ux) ---
 
     // --- audio (TLP-audio) ---
-
+    /// Viewer side: the session's sound state changed (toolbar toggle and volume).
+    AudioState {
+        session: SessionId,
+        state: audio::AudioState,
+    },
+    /// Viewer side: the speakers could not be opened; sound was switched off.
+    AudioDeviceFailed { session: SessionId },
     // --- service: unattended access, secure desktop, Ctrl+Alt+Del, restart (TLP-service) ---
 
     // --- privacy mode (TLP-privacy) ---
@@ -427,6 +434,30 @@ pub trait Backend: Send + Sync {
     // --- chat (TLP-ux) ---
 
     // --- audio (TLP-audio) ---
+    /// Viewer side: hear the remote computer's sound in this session (toolbar toggle). Sound
+    /// only flows while the host grants `AUDIO`; the state arrives as
+    /// [`BackendEvent::AudioState`].
+    fn set_audio_enabled(&self, session: SessionId, enabled: bool) {
+        tracing::debug!(
+            session = session.0,
+            enabled,
+            "audio not supported by this backend"
+        );
+    }
+
+    /// Viewer side: playback volume of this session's sound, `0.0..=1.0`.
+    fn set_audio_volume(&self, session: SessionId, volume: f32) {
+        tracing::debug!(
+            session = session.0,
+            volume,
+            "audio not supported by this backend"
+        );
+    }
+
+    /// Whether new viewer sessions ask for the remote sound right away (setting).
+    fn set_audio_on_connect(&self, enabled: bool) {
+        tracing::debug!(enabled, "audio not supported by this backend");
+    }
 
     // --- service (TLP-service) ---
 

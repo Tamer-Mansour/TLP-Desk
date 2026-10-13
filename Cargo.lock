@@ -4017,6 +4017,7 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "tempfile",
+ "tlp-desk-audio",
  "tlp-desk-capture",
  "tlp-desk-crypto",
  "tlp-desk-host",
