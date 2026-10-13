@@ -3983,6 +3983,7 @@ dependencies = [
  "anyhow",
  "clap",
  "png",
+ "serde_json",
  "tlp-desk-crypto",
  "tlp-desk-host",
  "tlp-desk-net",
