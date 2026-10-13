@@ -10,4 +10,12 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+tlp-desk-proto.workspace = true
+tlp-desk-net.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tracing = "0.1"
 
+[dev-dependencies]
+tlp-desk-crypto.workspace = true
+tokio = { version = "1", features = ["full"] }
