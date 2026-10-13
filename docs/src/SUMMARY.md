@@ -15,6 +15,7 @@
   - [tlp-desk-files](dev/crates/files.md)
   - [tlp-desk-host](dev/crates/host.md)
   - [tlp-desk-viewer](dev/crates/viewer.md)
+  - [tlp-desk-app](dev/crates/app.md)
 
 # Reference
 
