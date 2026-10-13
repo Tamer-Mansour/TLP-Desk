@@ -3,18 +3,29 @@
 //! On Windows, [`open_capturer`] tries Windows.Graphics.Capture first and falls back to DXGI
 //! Desktop Duplication. Other platforms currently return [`CaptureError::Unsupported`].
 //!
+//! Platform independent helpers:
+//! * [`DirtyTracker`] tells which tiles of a frame changed, so the host skips encoding frames
+//!   identical to the previous one.
+//! * [`AllMonitorsCapturer`] composes one capturer per monitor into a picture of the whole
+//!   virtual desktop ("all monitors" view), scaled to a size cap.
+//!
 //! `unsafe` is denied crate-wide and only allowed inside the Windows platform module, where every
 //! block carries a `// SAFETY:` comment.
 #![deny(unsafe_code)]
 
 use std::time::Duration;
 
+mod compose;
 mod dirty;
 mod scale;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows_capture;
 
+pub use compose::{
+    blit, virtual_bounds, AllMonitorsCapturer, ComposeLayout, OpenMonitor, Placement, ALL_MONITORS,
+    ALL_MONITORS_NAME,
+};
 pub use dirty::{DirtyRect, DirtyTracker, FrameChange, DEFAULT_TILE};
 pub use scale::{fit_within, mip_level_for};
 
