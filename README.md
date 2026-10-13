@@ -83,6 +83,24 @@ Windows Firewall prompt the first time.
 
 ---
 
+## Documentation
+
+The full documentation is an [mdBook](https://rust-lang.github.io/mdBook/) in [`docs/`](docs/)
+(build it with `mdbook build docs`; it is published to GitHub Pages from `TLP-Desk`):
+
+- **User guide:** [English](docs/src/user-guide/en/index.md) ·
+  [العربية](docs/src/user-guide/ar/index.md) — installing, connecting, controlling, settings,
+  troubleshooting, FAQ.
+- **[Security model](docs/src/security.md)** — threat model, identity and pinning, known limitations.
+- **Contributor guide:** [architecture](docs/src/dev/architecture/index.md),
+  [one page per crate](docs/src/dev/crates/index.md), [building](docs/src/dev/building.md),
+  [testing](docs/src/dev/testing.md), [i18n and Arabic](docs/src/dev/i18n.md),
+  [release process](docs/src/dev/release.md).
+- **[Architecture decision records](docs/src/adr/index.md)** and the
+  [wire protocol](docs/protocol.md).
+
+---
+
 ## Build from source
 
 Prerequisites (Windows):
@@ -172,6 +190,8 @@ GitHub Security Advisories rather than public issues.
 
 للتثبيت: نزّل ملف `TLP-Desk-<version>-setup.exe` من صفحة
 [الإصدارات](https://github.com/Tamer-Mansour/TLP-Desk/releases) وشغّله على الجهازين.
+
+الدليل الكامل بالعربية: [دليل المستخدم](docs/src/user-guide/ar/index.md).
 
 </div>
 
