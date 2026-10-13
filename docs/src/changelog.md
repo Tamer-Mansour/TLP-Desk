@@ -12,14 +12,26 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
 
 ### Added
 
-- **Wire protocol v4** — remote file-system messages: `FsRequest { req_id, op }` and
-  `FsResponse { req_id, result }` with the operations `ListDir`, `Stat`, `Roots`, `MakeDir`,
-  `Rename` and `Delete`. Every message now declares the permission the host enforces for it
-  (`Message::required_permissions()`). Groundwork for the remote file browser; there is no UI yet.
+- **Wire protocol v4** — the message set for the rest of the roadmap, defined ahead of the
+  features: remote file system (`FsRequest` / `FsResponse`), file transfer (`TransferOffer` …
+  `TransferError`), clipboard HTML and files, chat, audio control, session and system control
+  (Ctrl+Alt+Del, lock, restart, privacy mode, reconnect tickets), quality and latency probes, an
+  all-monitors view, TCP tunnels, whiteboard and device info. Every message declares the
+  permission it needs (`Message::required_permissions()`). **v4 peers cannot connect to v3
+  peers.** No user-visible feature uses the new messages yet.
 - Permission bits `CHAT` (8), `TUNNEL` (9), `WHITEBOARD` (10) and `SYSTEM` (11, for
   Ctrl+Alt+Del and lock). Existing bits keep their positions.
-- Typed stream header for side streams: every non-control QUIC stream will start with a 9-byte
-  header (stream kind + 64-bit id). Kinds: video, file data, tunnel, audio, clipboard.
+- Typed streams: every non-control QUIC stream starts with a 9-byte header (stream kind + 64-bit
+  id). Video uses it, and features can open **side streams** (file data, tunnel, audio,
+  clipboard) with per-kind accept queues and QUIC priorities that keep bulk data behind input and
+  video. Flow-control windows were enlarged for LAN-speed bulk transfers.
+- Session feature plug-ins: features register once and the host and viewer route their messages
+  to them per session, after checking permissions.
+- GUI icon set (vendored SVG icons with RTL mirroring); the session toolbar uses icon buttons
+  with tooltips.
+- Continuous integration on GitHub Actions (fmt, clippy, tests, release build, spelling,
+  dependency policy), issue and pull-request templates, Dependabot.
+- Project documentation book (this site) in English and Arabic.
 - Windows installer (`TLP-Desk-<version>-setup.exe`, Inno Setup, Arabic + English) that adds
   Windows Firewall rules for private and domain networks only, and a portable zip.
   Both builds write `SHA256SUMS.txt`.
