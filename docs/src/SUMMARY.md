@@ -53,6 +53,7 @@
   - [الإعدادات](user-guide/ar/settings.md)
   - [عند تغيّر مفتاح الجهاز المضيف](user-guide/ar/host-key-changed.md)
   - [الأمان والخصوصية](user-guide/ar/security-privacy.md)
+  - [سطر الأوامر](user-guide/ar/command-line.md)
 
 # Security
 
