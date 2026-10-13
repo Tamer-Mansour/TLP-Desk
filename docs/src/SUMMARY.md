@@ -43,6 +43,7 @@
   - [التثبيت](user-guide/ar/installing.md)
   - [التشغيل الأول والجدار الناري](user-guide/ar/first-run.md)
   - [معرّف جهازك والرمز لمرة واحدة](user-guide/ar/device-id-and-code.md)
+  - [العثور على الأجهزة](user-guide/ar/finding-devices.md)
 
 # Security
 
