@@ -780,6 +780,48 @@ proptest! {
     fn file_data_headers_roundtrip(b in any::<[u8; FILE_DATA_HEADER_LEN]>()) {
         check_file_data_header(b)?;
     }
+
+    /// A decoder with a smaller limit accepts frames up to it and refuses longer prefixes
+    /// before buffering their body.
+    #[test]
+    fn custom_limit_is_enforced(msg in message(), slack in 0usize..64) {
+        let frame = encode_frame(&msg).unwrap();
+        let body = frame.len() - 4;
+        let mut dec = FrameDecoder::with_max_len(body + slack);
+        dec.push(&frame);
+        prop_assert_eq!(&dec.next_message().unwrap().unwrap(), &msg);
+        if body > 0 {
+            let mut dec = FrameDecoder::with_max_len(body - 1);
+            dec.push(&frame[..4]);
+            prop_assert!(matches!(dec.next_message(), Err(ProtoError::FrameTooLarge(n)) if n == body));
+        }
+    }
+}
+
+/// Limits above `MAX_FRAME_LEN` are clamped; a limit can be raised after the handshake.
+#[test]
+fn decoder_limit_is_clamped_and_adjustable() {
+    assert_eq!(FrameDecoder::new().max_len(), MAX_FRAME_LEN);
+    assert_eq!(
+        FrameDecoder::with_max_len(usize::MAX).max_len(),
+        MAX_FRAME_LEN
+    );
+    let mut dec = FrameDecoder::with_max_len(8);
+    let big = encode_frame(&Message::ChatMessage {
+        id: 1,
+        text: "رسالة طويلة نوعا ما".into(),
+        sent_unix_ms: 0,
+    })
+    .unwrap();
+    dec.push(&big[..4]);
+    assert!(dec.next_message().is_err());
+    let mut dec = FrameDecoder::with_max_len(8);
+    dec.set_max_len(MAX_FRAME_LEN);
+    dec.push(&big);
+    assert!(matches!(
+        dec.next_message(),
+        Ok(Some(Message::ChatMessage { .. }))
+    ));
 }
 
 proptest! {

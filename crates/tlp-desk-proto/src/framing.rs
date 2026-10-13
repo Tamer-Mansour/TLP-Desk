@@ -29,20 +29,49 @@ pub fn encode_frame(msg: &Message) -> Result<Vec<u8>, ProtoError> {
 }
 
 /// Incremental decoder: feed arbitrary byte chunks, pull out complete messages.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct FrameDecoder {
     buf: Vec<u8>,
+    max_len: usize,
+}
+
+impl Default for FrameDecoder {
+    fn default() -> Self {
+        Self {
+            buf: Vec::new(),
+            max_len: MAX_FRAME_LEN,
+        }
+    }
 }
 
 impl FrameDecoder {
-    /// An empty decoder.
+    /// An empty decoder accepting frames up to [`MAX_FRAME_LEN`].
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// An empty decoder accepting frame bodies up to `max_len` bytes (at most
+    /// [`MAX_FRAME_LEN`]), e.g. a small limit before the peer is authenticated.
+    pub fn with_max_len(max_len: usize) -> Self {
+        Self {
+            buf: Vec::new(),
+            max_len: max_len.min(MAX_FRAME_LEN),
+        }
+    }
+
+    /// Changes the body limit for the frames that follow (at most [`MAX_FRAME_LEN`]).
+    pub fn set_max_len(&mut self, max_len: usize) {
+        self.max_len = max_len.min(MAX_FRAME_LEN);
+    }
+
+    /// The current body limit.
+    pub fn max_len(&self) -> usize {
+        self.max_len
+    }
+
     /// Appends received bytes. Call [`FrameDecoder::next_message`] until it returns `Ok(None)`
-    /// after every push: then at most one incomplete frame (`MAX_FRAME_LEN + 4` bytes) plus
-    /// the latest chunk is ever buffered.
+    /// after every push: then at most one incomplete frame (`max_len + 4` bytes) plus the
+    /// latest chunk is ever buffered.
     pub fn push(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
     }
@@ -61,7 +90,7 @@ impl FrameDecoder {
             return Ok(None);
         };
         let len = u32::from_le_bytes(*prefix) as usize;
-        if len > MAX_FRAME_LEN {
+        if len > self.max_len {
             return Err(ProtoError::FrameTooLarge(len));
         }
         let end = LEN_PREFIX + len;

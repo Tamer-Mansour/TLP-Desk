@@ -33,7 +33,9 @@ pub const PROTOCOL_VERSION: u32 = 4;
 pub enum ProtoError {
     #[error("serialization failed: {0}")]
     Serde(#[from] postcard::Error),
-    #[error("frame of {0} bytes exceeds the {MAX_FRAME_LEN} byte limit")]
+    /// The length prefix is above the decoder's limit ([`MAX_FRAME_LEN`] or
+    /// [`FrameDecoder::with_max_len`]).
+    #[error("frame of {0} bytes exceeds the size limit")]
     FrameTooLarge(usize),
     #[error("unknown stream kind {0}")]
     UnknownStreamKind(u8),
