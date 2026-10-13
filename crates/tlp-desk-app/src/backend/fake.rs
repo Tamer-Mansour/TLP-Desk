@@ -23,6 +23,7 @@ use tlp_desk_proto::{InputEvent, Permissions};
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::chat::{ChatLine, ChatSendError};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, LocalInfo, MonitorDesc, PeerInfo, RepaintFn,
@@ -135,6 +136,13 @@ impl FakeBackend {
         inner.spawn_incoming_request();
         (Arc::new(FakeBackend { inner }), rx)
     }
+}
+
+fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 fn device(id: u32, name: &str, ip: [u8; 4], online: bool) -> DiscoveredDevice {
@@ -311,6 +319,31 @@ impl Inner {
             monitors: fake_monitors(),
             active: 0,
         });
+        self.emit(BackendEvent::ChatAvailability {
+            session,
+            allowed: true,
+        });
+    }
+
+    /// The simulated peer writes `text` to `session` after `delay` (chat, TLP-chat).
+    fn fake_chat_reply(self: &Arc<Self>, session: SessionId, delay: Duration, text: String) {
+        let me = Arc::clone(self);
+        self.rt.spawn(async move {
+            tokio::time::sleep(delay).await;
+            let id = me.next_id();
+            if !me.state().sessions.contains_key(&session) {
+                return;
+            }
+            me.emit(BackendEvent::ChatReceived {
+                session,
+                line: ChatLine {
+                    id,
+                    mine: false,
+                    text,
+                    at_unix_ms: unix_ms_now(),
+                },
+            });
+        });
     }
 
     async fn run_video(
@@ -430,6 +463,52 @@ impl Backend for FakeBackend {
             );
             self.inner
                 .emit(BackendEvent::HostSessionStarted { session, peer });
+            // The simulated viewer writes to the host user, which opens the chat window.
+            self.inner.emit(BackendEvent::ChatAvailability {
+                session,
+                allowed: true,
+            });
+            self.inner.fake_chat_reply(
+                session,
+                Duration::from_secs(3),
+                "مرحباً! هل يمكنني فتح ملف report-2026.pdf؟".into(),
+            );
+        }
+    }
+
+    fn send_chat(&self, session: SessionId, text: &str) -> Result<ChatLine, ChatSendError> {
+        let viewer = match self.inner.state().sessions.get(&session) {
+            Some(ctl) => ctl.task.is_some(),
+            None => return Err(ChatSendError::Unavailable),
+        };
+        if text.trim().is_empty() {
+            return Err(ChatSendError::Empty);
+        }
+        let max = super::chat::max_chat_chars();
+        if text.chars().count() > max {
+            return Err(ChatSendError::TooLong { max });
+        }
+        if viewer {
+            // The simulated host user answers in Arabic, quoting the start of the message.
+            let quote: String = text.chars().take(40).collect();
+            self.inner.fake_chat_reply(
+                session,
+                Duration::from_millis(1200),
+                format!("وصلت رسالتك: «{quote}» ✓"),
+            );
+        }
+        Ok(ChatLine {
+            id: self.inner.next_id(),
+            mine: true,
+            text: text.to_owned(),
+            at_unix_ms: unix_ms_now(),
+        })
+    }
+
+    fn set_chat_allowed(&self, session: SessionId, allowed: bool) {
+        if self.inner.state().sessions.contains_key(&session) {
+            self.inner
+                .emit(BackendEvent::ChatAvailability { session, allowed });
         }
     }
 
@@ -671,6 +750,42 @@ mod tests {
         // Unknown index: nothing happens.
         backend.select_monitor(session, 9);
         backend.disconnect(session);
+    }
+
+    #[test]
+    fn fake_host_user_answers_chat_in_arabic() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (backend, mut rx) = FakeBackend::start(rt.handle(), Arc::new(|| {}));
+        backend.connect(
+            ConnectTarget::Address("192.168.1.30:47400".parse().unwrap()),
+            Some("123456".into()),
+        );
+        let session = rt.block_on(async {
+            loop {
+                if let BackendEvent::SessionStarted { session, .. } = rx.recv().await.unwrap() {
+                    return session;
+                }
+            }
+        });
+        let sent = backend.send_chat(session, "مرحبا").unwrap();
+        assert!(sent.mine);
+        assert_eq!(backend.send_chat(session, " "), Err(ChatSendError::Empty));
+        let reply = rt.block_on(async {
+            loop {
+                if let BackendEvent::ChatReceived { session: s, line } = rx.recv().await.unwrap() {
+                    assert_eq!(s, session);
+                    return line;
+                }
+            }
+        });
+        assert!(!reply.mine && reply.text.contains("مرحبا"), "{reply:?}");
+        assert_eq!(
+            backend.send_chat(SessionId(424242), "x"),
+            Err(ChatSendError::Unavailable)
+        );
     }
 
     #[test]
