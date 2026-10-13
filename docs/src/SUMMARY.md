@@ -40,6 +40,7 @@
 # دليل المستخدم (العربية)
 
 - [نظرة عامة](user-guide/ar/index.md)
+  - [التثبيت](user-guide/ar/installing.md)
 
 # Security
 
