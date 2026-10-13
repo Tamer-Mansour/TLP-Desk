@@ -59,8 +59,35 @@ Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-pro
 - **Streams**:
   - **Control**: one bidirectional stream opened by the viewer. Carries every message except video.
   - **Video**: the host opens **one unidirectional stream per `VideoFrame`** after
-    `AuthResult::Accepted`, writes exactly one framed `Message::VideoFrame` and finishes it.
-- Keep-alive 4 s, idle timeout 15 s.
+    `AuthResult::Accepted`, writes the stream header (`Video`, `id = seq`), exactly one framed
+    `Message::VideoFrame`, and finishes it.
+  - **Side streams (v4)**: either side may open further uni or bidi streams for feature data.
+  - Every stream except the control stream starts with a 9-byte **stream header**:
+
+    ```
+    +-----------+------------------+
+    | kind: u8  | id: u64 little-e.|
+    +-----------+------------------+
+    ```
+
+    | kind | Name | Type | Opened by | `id` | Body |
+    |---|---|---|---|---|---|
+    | 0 | `Video` | uni | host | frame `seq` | one framed `Message::VideoFrame` |
+    | 1 | `FileData` | uni | sender of a transfer | transfer id | `FileDataHeader { item: u32 LE, offset: u64 LE }` + raw bytes |
+    | 2 | `Tunnel` | bidi | viewer | tunnel id | raw TCP bytes both ways |
+    | 3 | `Audio` | uni | host | audio generation | repeated `u16` LE length + Opus packet |
+    | 4 | `Clipboard` | uni | either | clipboard sequence | one framed `ClipboardData` / `ClipboardHtml` |
+
+    A stream with an unknown kind, a video stream sent to a host, a video kind on a bidi stream,
+    or a header not received within 10 s is refused with `STOP_SENDING` code `1`
+    (`STREAM_REFUSED`). Each side-stream kind has its own bounded accept queue (64); when it is full
+    further streams of that kind are refused. Features must refuse streams their permission does
+    not allow (e.g. `FileData` without `FILES`).
+  - **Scheduling**: QUIC send priorities (higher first): control 10, audio 6, video 5,
+    clipboard 2, tunnel 1, file data -10. Bulk transfers therefore only use bandwidth that input,
+    audio and video leave free, and never add latency to them.
+  - **Flow control** (both sides): stream receive window 16 MiB, connection window 64 MiB, send
+    window 64 MiB, up to 256 concurrent uni and 256 bidi streams, MTU discovery up to 9000 bytes.- Keep-alive 4 s, idle timeout 15 s.
 - Application close codes: `0` normal, `1` rejected, `2` protocol error.
 
 ### Why one stream per video frame
