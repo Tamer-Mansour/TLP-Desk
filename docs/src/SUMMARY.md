@@ -58,6 +58,7 @@
   - [أسئلة شائعة](user-guide/ar/faq.md)
   - [إزالة التثبيت](user-guide/ar/uninstall.md)
   - [قريبًا](user-guide/ar/coming-soon/index.md)
+    - [نقل الملفات ومستعرض الملفات البعيد](user-guide/ar/coming-soon/file-transfer.md)
 
 # Security
 
