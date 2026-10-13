@@ -15,6 +15,7 @@ tlp-desk-crypto.workspace = true
 tlp-desk-net.workspace = true
 tlp-desk-capture.workspace = true
 tlp-desk-codec.workspace = true
+tlp-desk-input.workspace = true
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 tracing = "0.1"

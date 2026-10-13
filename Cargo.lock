@@ -3986,6 +3986,7 @@ dependencies = [
  "tlp-desk-capture",
  "tlp-desk-codec",
  "tlp-desk-crypto",
+ "tlp-desk-input",
  "tlp-desk-net",
  "tlp-desk-proto",
  "tokio",
