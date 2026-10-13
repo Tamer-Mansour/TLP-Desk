@@ -41,6 +41,7 @@
 
 - [نظرة عامة](user-guide/ar/index.md)
   - [التثبيت](user-guide/ar/installing.md)
+  - [التشغيل الأول والجدار الناري](user-guide/ar/first-run.md)
 
 # Security
 
