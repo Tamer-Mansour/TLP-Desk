@@ -179,6 +179,27 @@ pub enum Message {
     /// `SelectMonitor` returns to one monitor; `MonitorList::active` is `u32::MAX` while all
     /// monitors are shown. (v4)
     SelectAllMonitors,
+
+    // --- power features (M4) ---
+    /// Viewer -> host: forward TCP connections to `target_host:target_port` as seen from the
+    /// host (`None` = the host itself, 127.0.0.1). Each forwarded connection is one
+    /// `StreamKind::Tunnel` bidi stream, opened by the viewer, with this `id`. Needs `TUNNEL`.
+    /// (v4)
+    TunnelOpen {
+        id: u64,
+        target_port: u16,
+        target_host: Option<String>,
+    },
+    /// Host -> viewer: the tunnel is allowed; the viewer may open its streams. (v4)
+    TunnelOpened {
+        id: u64,
+    },
+    /// Either direction: close the tunnel and all its streams; `error` explains a refusal or
+    /// failure (e.g. connection refused on the host). (v4)
+    TunnelClose {
+        id: u64,
+        error: Option<String>,
+    },
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -225,6 +246,8 @@ impl Message {
             | M::ViewerFeedback { .. }
             | M::LatencyProbe { .. }
             | M::SelectAllMonitors => Permissions::VIEW,
+            M::TunnelOpened { .. } => Permissions::NONE,
+            M::TunnelOpen { .. } | M::TunnelClose { .. } => Permissions::TUNNEL,
             // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }

@@ -423,6 +423,22 @@ fn v4_samples() -> Vec<Message> {
             t_host_capture_us: 987_654_321,
         },
         Message::SelectAllMonitors,
+        // --- tunnels ---
+        Message::TunnelOpen {
+            id: 3,
+            target_port: 8080,
+            target_host: Some("192.168.1.50".into()),
+        },
+        Message::TunnelOpen {
+            id: 4,
+            target_port: 3389,
+            target_host: None,
+        },
+        Message::TunnelOpened { id: 3 },
+        Message::TunnelClose {
+            id: 3,
+            error: Some("رفض الاتصال connection refused".into()),
+        },
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -485,6 +501,7 @@ fn v4_variants_are_appended_in_order() {
         (Message::SendCtrlAltDel, 26),
         (Message::LockWorkstation, 31),
         (Message::SelectAllMonitors, 36),
+        (Message::TunnelOpened { id: 0 }, 38),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];
     for (m, i) in expected {
