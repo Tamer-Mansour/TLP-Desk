@@ -302,10 +302,7 @@ async fn arabic_and_mixed_messages_both_ways() {
         assert_eq!(sent.author, ChatAuthor::Me);
         assert_eq!(host_received(&mut c).await, line);
     }
-    let host_lines = [
-        "نعم، أراها بوضوح",
-        "Sure — سأفتحه الآن: 192.168.1.40",
-    ];
+    let host_lines = ["نعم، أراها بوضوح", "Sure — سأفتحه الآن: 192.168.1.40"];
     for line in host_lines {
         c.host_chat.send(c.host_session.0, line).unwrap();
         assert_eq!(viewer_received(&mut c).await, line);
@@ -372,9 +369,7 @@ async fn revoking_chat_blocks_both_sides_live() {
         Err(ChatRejected::NotAllowed)
     );
     // ...and a viewer that bypasses its own check is stopped by the host.
-    assert!(c
-        .session
-        .send_message(raw_chat(500, "رسالة ممنوعة")));
+    assert!(c.session.send_message(raw_chat(500, "رسالة ممنوعة")));
     sync_host(&mut c).await;
 
     let all = DEFAULT_PERMISSIONS | Permissions::CHAT;
@@ -437,9 +432,7 @@ async fn peer_flood_is_rate_limited() {
     })
     .await;
     for id in 0..40u64 {
-        assert!(c
-            .session
-            .send_message(raw_chat(id, &format!("رسالة {id}"))));
+        assert!(c.session.send_message(raw_chat(id, &format!("رسالة {id}"))));
     }
     sync_host(&mut c).await;
     for id in 0..u64::from(burst) {
