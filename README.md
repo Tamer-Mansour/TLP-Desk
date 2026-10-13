@@ -181,8 +181,8 @@ GitHub Security Advisories rather than public issues.
 
 Dual-licensed under either of
 
-- MIT license
-- Apache License, Version 2.0
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 
 at your option. Bundled fonts and icons keep their own licenses (SIL OFL, MIT, ISC); see the
-license files shipped with the installer.
+license files shipped with the installer and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
