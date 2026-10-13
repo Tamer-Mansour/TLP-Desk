@@ -4,7 +4,7 @@
 //! Adapter choice is what makes the output reproducible across machines: a software
 //! rasterizer (WARP on Windows, lavapipe/llvmpipe elsewhere) is preferred over any GPU, so a
 //! developer's PC and the CI runner produce the same pixels. Set `TLP_MEDIA_GPU=1` to allow a
-//! hardware adapter (faster, but the PNGs will differ slightly from CI's).
+//! hardware adapter (faster, but the images will differ slightly from CI's).
 
 use std::path::Path;
 use std::sync::{Arc, Once};
