@@ -68,7 +68,9 @@ incoming message from the viewer — for example `VIEW` for `RequestKeyframe` / 
 for `ClipboardData`, `FILES` for `FsRequest` and the transfer messages, `CLIPBOARD | FILES` for
 `ClipboardFiles`, `CHAT`, `AUDIO`, `SYSTEM`, `RESTART`, `PRIVACY_MODE`, `TUNNEL` and
 `WHITEBOARD` for their features. The authoritative mapping is the `match` in `messages.rs` and the
-test `v4_permissions_gate_feature_messages`.
+test `v4_permissions_gate_feature_messages`. The host does not call it yet — it currently gates
+the v1–v3 messages it handles by hand — so a feature lane that adds a handler should route through
+`required_permissions()` rather than add another hand-written check.
 
 ### Permissions
 
