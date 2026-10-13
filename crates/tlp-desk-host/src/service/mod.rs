@@ -31,6 +31,7 @@
 
 mod agent;
 mod desktop;
+mod gui;
 pub mod ipc;
 mod pipe_security;
 mod remote;
@@ -42,6 +43,9 @@ mod testutil;
 
 pub use agent::{
     serve_connection, AgentPlatform, DESKTOP_CHECK_EVERY, DESKTOP_POLL_EVERY, MAX_FRAME_WAIT,
+};
+pub use gui::{
+    route_prompt, serve_gui_connection, GuiCommands, GuiHub, PromptRoute, GUI_HEARTBEAT,
 };
 pub use remote::{AgentConn, AgentConnector, AgentLink, RemoteCapturer, RemoteInjector};
 
