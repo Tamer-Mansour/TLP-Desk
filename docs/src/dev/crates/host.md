@@ -27,7 +27,7 @@ GUI dependency — the GUI and the CLI both drive the same `Host`.
   `IncomingRequest`, `RequestCancelled { reason }` (`ViewerLeft`, `TimedOut`, `HostShutdown`),
   `AuthFailed`, `CodeChanged`, `SessionStarted(ConnectedViewer)`, `PermissionsChanged`,
   `SessionEnded { reason }` (`Local`, `Remote(ByeReason)`, `PermissionRevoked`,
-  `ConnectionLost`, `Error`).
+  `ConnectionLost`, `Error`), `Feature { id, event }`.
 - Factories (`CapturerFactory`, `EncoderFactory`, `InjectorFactory`, `LocalActivityFactory`,
   `PointerMarkerFactory`, `MonitorLister`) let tests replace real hardware with fakes.
 
@@ -46,6 +46,16 @@ GUI dependency — the GUI and the CLI both drive the same `Host`.
 | `advertise` | `true` |
 | `local_input_grace` | 1000 ms (0 disables local priority) |
 | `remote_pointer_marker` | `true` |
+| `features` | empty `FeatureSet` — the app or CLI registers session features here |
+
+### Session features
+
+Feature lanes (files, clipboard, chat, audio, ...) do not edit this crate. For each session the
+host starts a `FeatureDispatch` from `HostConfig::features`; control messages the core does not
+handle are passed to the feature that claims them **after** the session's permissions are checked
+against `Message::required_permissions()` (blocked messages are dropped). Permission changes are
+forwarded to the features, and features report to the UI through
+`HostEvent::Feature { id, event }`. See [tlp-desk-net, Features](net.md#features-featurers).
 
 `MAX_CAPTURE_SIZE = (1920, 1200)`; `open_default_capturer(monitor)` opens WGC with DXGI fallback
 capped at that size.
