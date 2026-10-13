@@ -143,7 +143,8 @@ Contributions are welcome. In short:
   desktop products.
 - Any feature that shows or moves text must work in Arabic.
 
-The full rules for humans and coding agents are in [CLAUDE.md](CLAUDE.md) and
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). The full rules for humans and coding agents are in
+[CLAUDE.md](CLAUDE.md) and
 [docs/CODE_STYLE.md](docs/CODE_STYLE.md).
 
 ---
