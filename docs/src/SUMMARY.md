@@ -30,6 +30,7 @@
     - [Address book](user-guide/en/coming-soon/address-book.md)
     - [Unattended access](user-guide/en/coming-soon/unattended-access.md)
     - [Ctrl+Alt+Del and lock](user-guide/en/coming-soon/ctrl-alt-del.md)
+    - [Privacy mode](user-guide/en/coming-soon/privacy-mode.md)
 
 # Security
 
