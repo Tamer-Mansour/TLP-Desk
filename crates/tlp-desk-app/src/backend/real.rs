@@ -23,11 +23,11 @@ use std::time::Duration;
 use tlp_desk_crypto::{Fingerprint, HostKey, Identity};
 use tlp_desk_host::{
     EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, RequestId as HostRequestId,
-    SessionId as HostSessionId,
+    SessionId as HostSessionId, WhiteboardHost,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
-    NetError, DEFAULT_PORT,
+    FeatureSet, NetError, DEFAULT_PORT,
 };
 use tlp_desk_proto::{InputEvent, RejectReason};
 use tlp_desk_viewer::{
@@ -38,9 +38,9 @@ use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
 use super::{
-    AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
-    EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
-    RequestId, SessionId, SessionStats, VideoImage,
+    whiteboard, AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId,
+    DiscoveredDevice, EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo,
+    PeerInfo, RepaintFn, RequestId, SessionId, SessionStats, VideoImage, WhiteboardOp,
 };
 
 /// How often host sessions are reconciled with [`Host::sessions`] and LAN addresses re-read.
@@ -309,12 +309,15 @@ impl RealBackend {
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
-            let host_cfg = HostConfig {
+            let mut host_cfg = HostConfig {
                 device_name: device_name.clone(),
                 ..cfg.host.clone()
             };
+            let whiteboard = Arc::new(WhiteboardHost::new());
+            host_cfg.features.push(whiteboard.clone());
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
                 Ok((h, ev)) => {
+                    whiteboard.set_monitor_source(h.streamed_monitor_fn());
                     host = Some(h);
                     host_events = Some(ev);
                 }
@@ -357,6 +360,7 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
+                features: FeatureSet::new().with(whiteboard::viewer_feature()),
                 ..ViewerConfig::default()
             };
             match Viewer::new(ep.clone(), vcfg) {
@@ -749,6 +753,10 @@ impl Inner {
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 ViewerEvent::Feature(event) => {
+                    if let Some(op) = whiteboard::remote_op(&event) {
+                        self.emit(BackendEvent::WhiteboardRemote { session, op });
+                        continue;
+                    }
                     tracing::debug!(
                         session = session.0,
                         feature = event.feature,
@@ -853,6 +861,15 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn send_whiteboard(&self, session: SessionId, ops: Vec<WhiteboardOp>) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            for msg in whiteboard::messages(&ops) {
+                s.send_message(msg);
+            }
         }
     }
 
