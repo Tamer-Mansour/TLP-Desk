@@ -420,6 +420,35 @@ pub fn selecting_monitor(index: u32) -> String {
     )
 }
 
+// --- chat (TLP-chat) ---
+
+/// A chat message from the other side (`from` is the peer's name).
+pub fn chat_received(from: &str, text: &str) -> String {
+    t(
+        format!("[chat] {from}: {text}"),
+        format!("[دردشة] {from}: {text}"),
+    )
+}
+
+pub fn chat_sent() -> &'static str {
+    t("Message sent.", "أُرسلت الرسالة.")
+}
+
+pub fn chat_not_allowed() -> &'static str {
+    t(
+        "The host does not allow chat in this session.",
+        "لا يسمح الجهاز المضيف بالدردشة في هذه الجلسة.",
+    )
+}
+
+/// Why the message was not sent (`detail` is the technical reason).
+pub fn chat_rejected(detail: &str) -> String {
+    t(
+        format!("Message not sent: {detail}"),
+        format!("لم تُرسل الرسالة: {detail}"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

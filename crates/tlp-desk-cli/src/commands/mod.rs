@@ -4,6 +4,7 @@
 //! `Args` struct and a `run(ctx, args)` function, then add one line in each FEATURE HOOK below
 //! (`mod`, the [`Cmd`] variant, the [`run`] arm). Dial/auth helpers live in [`common`].
 
+pub mod chat;
 pub mod common;
 pub mod connect;
 pub mod id;
@@ -60,6 +61,8 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// Viewer: send one chat message to a host and print the replies.
+    Chat(chat::ChatArgs),
     // FEATURE HOOK: one variant per new subcommand.
 }
 
@@ -87,6 +90,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::Chat(a) => chat::run(&ctx, a).await,
         // FEATURE HOOK: one arm per new subcommand.
     }
 }

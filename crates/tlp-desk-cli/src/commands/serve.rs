@@ -8,7 +8,7 @@ use anyhow::Result;
 use clap::Args;
 use serde_json::json;
 use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
-use tlp_desk_net::{Endpoint, EndpointConfig, FeatureSet};
+use tlp_desk_net::{ChatEvent, ChatFeature, Endpoint, EndpointConfig, FeatureSet};
 use tlp_desk_proto::Permissions;
 
 use super::common::{any_addr, id_str, load_identity, peer_json, Ctx};
@@ -63,7 +63,7 @@ impl ServeArgs {
             default_permissions: if self.view_only {
                 Permissions::VIEW
             } else {
-                DEFAULT_PERMISSIONS
+                DEFAULT_PERMISSIONS | Permissions::CHAT
             },
             advertise: !self.no_discovery,
             device_name: self
@@ -79,7 +79,8 @@ impl ServeArgs {
 /// The session features the CLI host serves.
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
 fn host_features() -> FeatureSet {
-    FeatureSet::new()
+    // chat (TLP-chat): received messages are printed; the CLI host does not reply.
+    FeatureSet::new().with(ChatFeature::new())
 }
 
 /// Runs `serve` until Ctrl+C.
@@ -187,7 +188,21 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { .. } => {}
+                    HostEvent::Feature { id, event } => {
+                        // chat (TLP-chat)
+                        if let Some(ChatEvent::Received(m)) = event.payload::<ChatEvent>() {
+                            let name = host
+                                .sessions()
+                                .into_iter()
+                                .find(|v| v.id == id)
+                                .map(|v| v.peer.name)
+                                .unwrap_or_default();
+                            out.event(
+                                text::chat_received(&name, &m.text),
+                                &json!({ "type": "chat", "session": id.0, "text": m.text }),
+                            );
+                        }
+                    }
                 }
             }
         }
