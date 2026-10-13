@@ -5,7 +5,7 @@
 # Contributor guide
 
 - [Architecture](dev/architecture/index.md)
-
+  - [Video pipeline](dev/architecture/video.md)
 - [Crates](dev/crates/index.md)
   - [tlp-desk-proto](dev/crates/proto.md)
   - [tlp-desk-crypto](dev/crates/crypto.md)
