@@ -57,6 +57,7 @@ item:
 | input | `marker_window_starts_toggles_and_stops` | shows a window on the desktop | `cargo test -p tlp-desk-input -- --ignored marker_window` |
 | net | `mdns_advertise_and_browse` | needs a multicast-capable adapter | `cargo test -p tlp-desk-net --test discovery -- --ignored` |
 | host | `real_capture_end_to_end` | needs a real interactive desktop session | `cargo test -p tlp-desk-host --test e2e -- --ignored` |
+| net | `bulk_side_stream_throughput` | benchmark: moves several GB over loopback (target ≥ 1 GB/s) | `cargo test --release -p tlp-desk-net --test session -- --ignored --nocapture bulk_side_stream_throughput` |
 
 Tips:
 
