@@ -23,5 +23,5 @@ pub use device::{
 };
 pub use dsp::Resampler;
 pub use error::AudioError;
-pub use feature::Player;
+pub use feature::{AudioEvent, AudioHost, AudioViewer, Player, ViewerAudioState, FEATURE_NAME};
 pub use jitter::{JitterBuffer, JitterConfig, JitterStats, Playout};

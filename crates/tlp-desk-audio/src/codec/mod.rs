@@ -76,6 +76,11 @@ impl OpusEncoder {
         Ok(self.buf.get(..n).unwrap_or_default().to_vec())
     }
 
+    /// Forgets the encoder history (a new stream generation starts, decoded from scratch).
+    pub fn reset(&mut self) {
+        let _ = self.enc.reset_state();
+    }
+
     /// Samples per channel the decoder output lags the encoder input (codec look-ahead).
     pub fn lookahead(&mut self) -> usize {
         self.enc

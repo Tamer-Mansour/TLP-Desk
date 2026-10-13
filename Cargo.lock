@@ -4036,8 +4036,12 @@ dependencies = [
  "cpal",
  "opus",
  "thiserror 2.0.21",
+ "tlp-desk-crypto",
+ "tlp-desk-net",
+ "tlp-desk-proto",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
