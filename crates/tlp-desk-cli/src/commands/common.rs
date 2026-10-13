@@ -137,7 +137,7 @@ pub async fn dial(ctx: &Ctx, args: &DialArgs, features: FeatureSet) -> Result<Di
     )?;
     println!("{}", text::connecting(&target.to_string()));
     if auth == AuthMethod::AcceptPrompt {
-        println!("{}", text::WAITING_FOR_ACCEPT);
+        println!("{}", text::waiting_for_accept());
     }
     let forget_key = args.forget_key;
     let attempt = async {

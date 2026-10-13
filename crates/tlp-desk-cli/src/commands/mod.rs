@@ -29,6 +29,15 @@ pub struct Cli {
     /// More logging (repeat for even more). RUST_LOG overrides.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
+    /// Language of human-readable output (JSON output is never translated).
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        env = "TLP_DESK_LANG",
+        default_value = "en"
+    )]
+    pub lang: text::Lang,
     #[command(subcommand)]
     pub cmd: Cmd,
 }
@@ -143,6 +152,13 @@ mod tests {
         assert_eq!(cfg.default_permissions, tlp_desk_proto::Permissions::VIEW);
         assert_eq!(cfg.device_name, "حاسوب المكتب");
         assert_eq!(s.port, tlp_desk_net::DEFAULT_PORT);
+    }
+
+    #[test]
+    fn lang_is_global_and_validated() {
+        assert_eq!(parse(&["--lang", "ar", "id"]).unwrap().lang, text::Lang::Ar);
+        assert_eq!(parse(&["id", "--lang", "en"]).unwrap().lang, text::Lang::En);
+        assert!(parse(&["--lang", "fr", "id"]).is_err());
     }
 
     #[test]

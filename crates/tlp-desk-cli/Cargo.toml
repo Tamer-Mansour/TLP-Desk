@@ -20,7 +20,7 @@ tlp-desk-crypto.workspace = true
 tlp-desk-net.workspace = true
 tlp-desk-host.workspace = true
 tlp-desk-viewer.workspace = true
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 png = "0.18"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "signal", "io-std", "io-util"] }
 tracing = "0.1"

@@ -25,7 +25,7 @@ pub async fn run(_ctx: &Ctx, args: &ListArgs) -> Result<()> {
     tokio::time::sleep(Duration::from_secs(args.seconds)).await;
     let devices = disc.devices();
     if devices.is_empty() {
-        println!("{}", text::NO_DEVICES);
+        println!("{}", text::no_devices());
     }
     for d in devices {
         println!("{}", text::device_row(&d));

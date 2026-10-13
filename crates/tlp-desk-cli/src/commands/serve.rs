@@ -129,7 +129,7 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                             host.accept(r.id, None);
                         } else {
                             println!("{}", text::incoming(&r));
-                            println!("{}", text::PROMPT_HINT);
+                            println!("{}", text::prompt_hint());
                             print!("{}", text::accept_question());
                             let _ = std::io::stdout().flush();
                             let host = host.clone();
@@ -169,7 +169,7 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
             }
         }
     }
-    println!("{}", text::STOPPING);
+    println!("{}", text::stopping());
     host.shutdown();
     // Let the Bye reach connected viewers.
     tokio::time::sleep(Duration::from_millis(300)).await;

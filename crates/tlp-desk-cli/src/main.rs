@@ -7,11 +7,13 @@
 mod commands;
 mod text;
 
-use anyhow::Result;
+use std::process::ExitCode;
+
 use clap::Parser;
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
     let cli = commands::Cli::parse();
+    text::set_lang(cli.lang);
     let level = match cli.verbose {
         0 => "warn",
         1 => "info",
@@ -23,8 +25,16 @@ fn main() -> Result<()> {
         )
         .with_writer(std::io::stderr)
         .init();
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?;
-    rt.block_on(commands::run(&cli))
+        .build()
+        .map_err(anyhow::Error::from)
+        .and_then(|rt| rt.block_on(commands::run(&cli)));
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{}", text::error_line(&e));
+            ExitCode::FAILURE
+        }
+    }
 }

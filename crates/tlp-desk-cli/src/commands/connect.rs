@@ -121,7 +121,7 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
                     text::snapshot_saved(&path.display().to_string(), f.width, f.height)
                 );
             }
-            None => println!("{}", text::NO_FRAME),
+            None => println!("{}", text::no_frame()),
         }
     }
     dialed.close().await;
