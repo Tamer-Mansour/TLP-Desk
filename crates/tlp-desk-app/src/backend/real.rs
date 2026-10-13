@@ -62,6 +62,9 @@ pub struct RealConfig {
     pub host: HostConfig,
     /// Start a browse-only discovery when the host (and its discovery) is unavailable.
     pub fallback_discovery: bool,
+    /// Clipboard to sync in sessions (the app passes the system clipboard). `None` = a private
+    /// in-memory clipboard, so tests never touch the user's real clipboard.
+    pub clipboard: Option<Arc<dyn tlp_desk_files::ClipboardBackend>>,
 }
 
 impl Default for RealConfig {
@@ -73,6 +76,7 @@ impl Default for RealConfig {
             known_hosts: KnownHostsStore::Default,
             host: HostConfig::default(),
             fallback_discovery: true,
+            clipboard: None,
         }
     }
 }
@@ -102,6 +106,7 @@ struct Inner {
     own_id: DeviceId,
     bridges: Bridges,
     state: Mutex<State>,
+    clipboard: Arc<tlp_desk_files::ClipboardFeature>,
 }
 
 #[derive(Default)]
@@ -306,11 +311,13 @@ impl RealBackend {
             }
         }
 
+        let clipboard = super::clipboard::feature(cfg.clipboard.clone());
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
             let host_cfg = HostConfig {
                 device_name: device_name.clone(),
+                features: super::clipboard::register(cfg.host.features.clone(), &clipboard),
                 ..cfg.host.clone()
             };
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
@@ -357,6 +364,7 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
+                features: super::clipboard::register(Default::default(), &clipboard),
                 ..ViewerConfig::default()
             };
             match Viewer::new(ep.clone(), vcfg) {
@@ -383,6 +391,7 @@ impl RealBackend {
             own_id,
             bridges,
             state: Mutex::default(),
+            clipboard,
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -494,10 +503,23 @@ impl Inner {
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 HostEvent::Feature { id, event } => {
                     tracing::debug!(session = id.0, feature = event.feature, "feature event");
+                    let session = self.host_session_of(id);
+                    if let Some(ev) = session.and_then(|s| super::clipboard::map(s, &event)) {
+                        self.emit(ev);
+                    }
                 }
             }
         }
         tracing::debug!("host event stream ended");
+    }
+
+    /// The app's id for a host session.
+    fn host_session_of(&self, id: HostSessionId) -> Option<SessionId> {
+        self.state()
+            .host_sessions
+            .iter()
+            .find(|(_, h)| **h == id)
+            .map(|(s, _)| *s)
     }
 
     fn host_session_started(&self, id: HostSessionId, peer: &tlp_desk_net::PeerInfo) {
@@ -754,6 +776,9 @@ impl Inner {
                         feature = event.feature,
                         "feature event"
                     );
+                    if let Some(ev) = super::clipboard::map(session, &event) {
+                        self.emit(ev);
+                    }
                 }
                 ViewerEvent::Ended(r) => {
                     reason = map_viewer_end(r);
@@ -871,6 +896,27 @@ impl Backend for RealBackend {
                 h.disconnect(id); // SessionEnded via pump_host
             }
         }
+    }
+
+    // --- clipboard (TLP-clipboard) ---
+    fn set_clipboard_sync(&self, session: SessionId, enabled: bool) {
+        let (viewer, host) = {
+            let st = self.inner.state();
+            (
+                st.viewer_sessions.get(&session).map(|v| v.feature_key()),
+                st.host_sessions.get(&session).map(|h| h.0),
+            )
+        };
+        let clip = &self.inner.clipboard;
+        if let Some(key) = viewer {
+            clip.set_sync_enabled(tlp_desk_proto::Role::Viewer, key, enabled);
+        } else if let Some(key) = host {
+            clip.set_sync_enabled(tlp_desk_proto::Role::Host, key, enabled);
+        }
+    }
+
+    fn set_clipboard_default(&self, enabled: bool) {
+        self.inner.clipboard.set_default_enabled(enabled);
     }
 }
 

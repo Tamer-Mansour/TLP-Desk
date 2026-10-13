@@ -110,6 +110,7 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
             ..HostConfig::default()
         },
         fallback_discovery: false,
+        clipboard: None,
     }
 }
 
@@ -410,4 +411,72 @@ fn busy_port_degrades_to_dial_only_with_a_clear_problem() {
         BackendEvent::SessionStarted { attempt: a, .. } if *a == attempt => Some(()),
         _ => None,
     });
+}
+
+/// Clipboard sync through the real backends, with in-memory clipboards on both sides (never the
+/// user's real clipboard): Arabic text copied on the viewer lands byte-exact on the host, both
+/// UIs get their events, and the viewer's "Sync clipboard" switch stops it.
+#[test]
+fn clipboard_syncs_through_the_backends() {
+    use tlp_desk_files::{ClipContent, ClipboardEvent, Direction, MemoryClipboard};
+    let rt = Runtime::new().unwrap();
+    let peer = |clip: Arc<MemoryClipboard>| {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(dir.path(), Arc::default(), 0);
+        cfg.clipboard = Some(clip);
+        cfg.host.default_permissions =
+            tlp_desk_host::DEFAULT_PERMISSIONS.union(tlp_desk_proto::Permissions::CLIPBOARD);
+        let (backend, rx) = RealBackend::start_concrete(rt.handle(), Arc::new(|| {}), cfg);
+        Peer {
+            backend,
+            events: Events::new(rx),
+            _dir: dir,
+        }
+    };
+    let host_clip = Arc::new(MemoryClipboard::new());
+    let viewer_clip = Arc::new(MemoryClipboard::new());
+    let mut host = peer(host_clip.clone());
+    let mut viewer = peer(viewer_clip.clone());
+    let code = host.backend.local_info().one_time_code;
+    let target = ConnectTarget::Address(host.backend.local_addr().unwrap());
+    viewer.backend.connect(target, Some(code));
+    let (session, _frames) = viewer.events.wait(&rt, "session started", started);
+    let host_session = host.events.wait(&rt, "host session", |e| match e {
+        BackendEvent::HostSessionStarted { session, .. } => Some(*session),
+        _ => None,
+    });
+
+    let text = "نسخ\u{200F} من العارض\r\nلا\u{200C}مي 👋";
+    viewer_clip.copy(ClipContent::Text(text.into()));
+    let ev = viewer.events.wait(&rt, "clipboard sent", |e| match e {
+        BackendEvent::Clipboard { session: s, event } if *s == session => Some(event.clone()),
+        _ => None,
+    });
+    assert!(matches!(
+        ev,
+        ClipboardEvent::Synced {
+            direction: Direction::Sent,
+            ..
+        }
+    ));
+    let ev = host.events.wait(&rt, "clipboard received", |e| match e {
+        BackendEvent::Clipboard { session: s, event } if *s == host_session => Some(event.clone()),
+        _ => None,
+    });
+    assert!(matches!(
+        ev,
+        ClipboardEvent::Synced {
+            direction: Direction::Received,
+            ..
+        }
+    ));
+    assert_eq!(host_clip.content(), Some(ClipContent::Text(text.into())));
+
+    // "Sync clipboard" off on the viewer: nothing moves any more.
+    viewer.backend.set_clipboard_sync(session, false);
+    std::thread::sleep(Duration::from_millis(200));
+    viewer_clip.copy(ClipContent::Text("لا يُرسل".into()));
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(host_clip.content(), Some(ClipContent::Text(text.into())));
+    assert_eq!(host_clip.write_count(), 1);
 }

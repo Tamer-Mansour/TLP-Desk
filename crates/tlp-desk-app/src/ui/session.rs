@@ -50,6 +50,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// "Sync clipboard" switch and toast (TLP-clipboard).
+    pub clipboard: super::clipboard::ClipboardUi,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -89,6 +91,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            clipboard: Default::default(),
         }
     }
 
@@ -296,6 +299,8 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    let (id, perms) = (self.id, self.permissions);
+                    self.clipboard.toolbar(ui, tx, id, perms, backend);
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
                         self.release_all(backend);

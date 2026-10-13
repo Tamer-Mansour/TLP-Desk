@@ -19,6 +19,7 @@
 //! constructed like
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
+mod clipboard;
 pub mod fake;
 pub mod real;
 
@@ -346,7 +347,12 @@ pub enum BackendEvent {
     // --- files: remote browser, transfers, Explorer copy/paste (TLP-files) ---
 
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
-
+    /// Clipboard content was synced (or refused) in a viewer or host session. Kinds and sizes
+    /// only, never contents.
+    Clipboard {
+        session: SessionId,
+        event: tlp_desk_files::ClipboardEvent,
+    },
     // --- chat (TLP-ux) ---
 
     // --- audio (TLP-audio) ---
@@ -423,6 +429,20 @@ pub trait Backend: Send + Sync {
     // --- files (TLP-files) ---
 
     // --- clipboard (TLP-clipboard) ---
+    /// Switch clipboard sync on or off for one viewer or host session ("Sync clipboard").
+    /// The host's `CLIPBOARD` permission still applies.
+    fn set_clipboard_sync(&self, session: SessionId, enabled: bool) {
+        tracing::debug!(
+            session = session.0,
+            enabled,
+            "clipboard sync toggle not supported"
+        );
+    }
+
+    /// Whether sessions started from now on sync the clipboard (settings default).
+    fn set_clipboard_default(&self, enabled: bool) {
+        tracing::debug!(enabled, "clipboard default not supported");
+    }
 
     // --- chat (TLP-ux) ---
 

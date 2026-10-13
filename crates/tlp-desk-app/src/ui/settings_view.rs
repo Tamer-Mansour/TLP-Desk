@@ -116,6 +116,13 @@ impl App {
                             }
                         });
                     });
+                    ui.add_space(12.0);
+                    super::clipboard::settings_card(
+                        ui,
+                        tx,
+                        &mut self.settings,
+                        self.backend.as_ref(),
+                    );
                 });
             });
 

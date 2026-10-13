@@ -3851,6 +3851,7 @@ dependencies = [
  "tempfile",
  "tlp-desk-capture",
  "tlp-desk-crypto",
+ "tlp-desk-files",
  "tlp-desk-host",
  "tlp-desk-input",
  "tlp-desk-net",
