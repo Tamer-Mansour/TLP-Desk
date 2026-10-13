@@ -33,6 +33,10 @@ resvg = { version = "0.48", default-features = false }
 [dev-dependencies]
 tlp-desk-capture.workspace = true
 tempfile = "3"
+# README media generator (`examples/readme_media`): renders the real UI headlessly with wgpu
+# (`wgpu`) and drives `App` through a real `eframe::CreationContext` (`eframe`).
+egui_kittest = { version = "0.36.2", features = ["wgpu", "eframe"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [lib]
 path = "src/lib.rs"
