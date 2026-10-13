@@ -21,6 +21,7 @@
   - [Command line](user-guide/en/command-line.md)
   - [Troubleshooting](user-guide/en/troubleshooting.md)
   - [FAQ](user-guide/en/faq.md)
+  - [Uninstalling](user-guide/en/uninstall.md)
 
 # Security
 
