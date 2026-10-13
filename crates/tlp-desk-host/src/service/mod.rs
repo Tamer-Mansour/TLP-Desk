@@ -34,6 +34,7 @@ pub mod ipc;
 mod pipe_security;
 mod session;
 mod supervisor;
+mod system;
 
 pub use desktop::{
     is_secure_desktop, DesktopChange, DesktopFollower, DesktopSource, DesktopStatus,
@@ -48,6 +49,9 @@ pub use session::{
 };
 pub use supervisor::{
     AgentLauncher, AgentProcess, AgentSupervisor, RestartPolicy, SupervisorEvent,
+};
+pub use system::{
+    SystemAction, SystemActions, SystemControl, SystemEvent, MIN_ACTION_INTERVAL, SYSTEM_FEATURE,
 };
 
 /// Service name in the Service Control Manager (`sc query TLP-Desk`).
