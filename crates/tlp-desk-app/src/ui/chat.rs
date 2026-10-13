@@ -478,8 +478,14 @@ fn message_box(ui: &mut Ui, tx: Tx, chat: &mut ChatState, id: Id, width: f32) ->
             .interactive(chat.allowed)
             .layouter(&mut layouter),
     );
+    // Plain Enter (Shift+Enter is the newline above; Ctrl/Alt+Enter do nothing).
     let enter = resp.has_focus()
-        && ui.input(|i| i.key_pressed(Key::Enter) && !i.modifiers.shift && !i.modifiers.ctrl);
+        && ui.input(|i| {
+            i.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. }
+                    if !modifiers.shift && !modifiers.ctrl && !modifiers.alt)
+            })
+        });
     (resp, enter)
 }
 
@@ -778,6 +784,124 @@ mod tests {
             .into_iter()
             .map(|r| &text[r])
             .collect()
+    }
+
+    /// Backend that records the chat messages the UI sends.
+    #[derive(Default)]
+    struct ChatRecorder(std::sync::Mutex<Vec<String>>);
+
+    impl Backend for ChatRecorder {
+        fn local_info(&self) -> crate::backend::LocalInfo {
+            crate::backend::LocalInfo {
+                device_id: crate::backend::DeviceId(1),
+                device_name: String::new(),
+                addresses: vec![],
+                one_time_code: String::new(),
+            }
+        }
+        fn set_device_name(&self, _: String) {}
+        fn refresh_one_time_code(&self) {}
+        fn connect(
+            &self,
+            _: crate::backend::ConnectTarget,
+            _: Option<String>,
+        ) -> crate::backend::AttemptId {
+            crate::backend::AttemptId(0)
+        }
+        fn cancel_connect(&self, _: crate::backend::AttemptId) {}
+        fn forget_host_key(&self, _: crate::backend::AttemptId) -> bool {
+            false
+        }
+        fn respond_to_request(&self, _: crate::backend::RequestId, _: bool) {}
+        fn send_input(&self, _: SessionId, _: tlp_desk_proto::InputEvent) {}
+        fn set_view_only(&self, _: SessionId, _: bool) {}
+        fn disconnect(&self, _: SessionId) {}
+        fn select_monitor(&self, _: SessionId, _: u32) {}
+        fn send_chat(&self, _: SessionId, text: &str) -> Result<ChatLine, ChatSendError> {
+            self.0.lock().unwrap().push(text.to_owned());
+            Ok(line(1, true, text))
+        }
+    }
+
+    fn key_enter(shift: bool) -> egui::Event {
+        egui::Event::Key {
+            key: Key::Enter,
+            physical_key: Some(Key::Enter),
+            pressed: true,
+            repeat: false,
+            modifiers: if shift {
+                Modifiers::SHIFT
+            } else {
+                Modifiers::NONE
+            },
+        }
+    }
+
+    #[test]
+    fn enter_sends_and_shift_enter_adds_a_line() {
+        for lang in [Lang::En, Lang::Ar] {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let tx = Tx::new(lang, DigitStyle::Western);
+            let backend = ChatRecorder::default();
+            let mut chat = ChatState::new(true);
+            chat.set_open(true);
+            let session = SessionId(7);
+            let run = |chat: &mut ChatState, events: Vec<egui::Event>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 600.0))),
+                    events,
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    conversation_ui(ui, tx, chat, &backend, session, S::ChatOffViewer)
+                });
+                out.textures_delta.clear();
+            };
+            run(&mut chat, vec![]);
+            ctx.memory_mut(|m| m.request_focus(Id::new(("chat-input", session.0))));
+            run(&mut chat, vec![]);
+            run(&mut chat, vec![egui::Event::Text("مرحبا".into())]);
+            run(&mut chat, vec![key_enter(true)]);
+            assert_eq!(chat.draft, "مرحبا\n", "{lang:?}");
+            assert!(backend.0.lock().unwrap().is_empty());
+            run(&mut chat, vec![egui::Event::Text("world 👍".into())]);
+            run(&mut chat, vec![key_enter(false)]);
+            assert_eq!(
+                *backend.0.lock().unwrap(),
+                vec!["مرحبا\nworld 👍"],
+                "{lang:?}"
+            );
+            assert!(chat.draft.is_empty());
+            assert_eq!(chat.lines().count(), 1);
+            // The bubbles render (and a blank draft is never sent).
+            run(&mut chat, vec![key_enter(false)]);
+            assert_eq!(backend.0.lock().unwrap().len(), 1);
+        }
+    }
+
+    #[test]
+    fn chat_off_disables_sending() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let tx = Tx::new(Lang::Ar, DigitStyle::ArabicIndic);
+        let backend = ChatRecorder::default();
+        let mut chat = ChatState::new(false);
+        chat.draft = "رسالة".into();
+        let session = SessionId(3);
+        for events in [vec![], vec![key_enter(false)]] {
+            ctx.memory_mut(|m| m.request_focus(Id::new(("chat-input", session.0))));
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| conversation_ui(ui, tx, &mut chat, &backend, session, S::ChatOffHost),
+            );
+            out.textures_delta.clear();
+        }
+        assert!(backend.0.lock().unwrap().is_empty());
+        assert_eq!(chat.draft, "رسالة");
     }
 
     #[test]
