@@ -66,6 +66,7 @@
     - [الوصول غير المراقَب](user-guide/ar/coming-soon/unattended-access.md)
     - [Ctrl+Alt+Del والقفل](user-guide/ar/coming-soon/ctrl-alt-del.md)
     - [وضع الخصوصية](user-guide/ar/coming-soon/privacy-mode.md)
+    - [التشغيل عبر الشبكة (Wake-on-LAN)](user-guide/ar/coming-soon/wake-on-lan.md)
 
 # Security
 
