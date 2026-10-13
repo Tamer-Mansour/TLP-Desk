@@ -3871,6 +3871,7 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "tlp-desk-capture",
+ "tlp-desk-codec",
  "tlp-desk-crypto",
  "tlp-desk-host",
  "tlp-desk-input",
