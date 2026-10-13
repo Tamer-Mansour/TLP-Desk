@@ -24,6 +24,7 @@
 - [Building on Windows](dev/building.md)
 - [Testing](dev/testing.md)
 - [Performance notes](dev/performance.md)
+- [i18n and Arabic](dev/i18n.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
