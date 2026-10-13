@@ -24,6 +24,10 @@ mod backend;
 mod feature;
 mod memory;
 mod sync;
+mod system;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows;
 mod wire;
 
 use std::path::PathBuf;
@@ -31,6 +35,7 @@ use std::path::PathBuf;
 pub use backend::ClipboardBackend;
 pub use feature::{ClipboardFeature, LocalFilesHook, FEATURE_NAME};
 pub use memory::MemoryClipboard;
+pub use system::SystemClipboard;
 pub use wire::INLINE_MAX;
 
 /// An RGBA8 image (tightly packed, row-major, `width * height * 4` bytes).
