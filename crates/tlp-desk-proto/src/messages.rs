@@ -104,6 +104,15 @@ pub enum Message {
         html: String,
         alt_text: String,
     },
+
+    // --- chat (CHAT) ---
+    /// Either direction: one chat message (UTF-8; Arabic, RTL marks and joiners preserved
+    /// exactly). `id` is unique per sender and session. (v4)
+    ChatMessage {
+        id: u64,
+        text: String,
+        sent_unix_ms: u64,
+    },
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -139,6 +148,7 @@ impl Message {
             | M::TransferError { .. } => Permissions::FILES,
             M::ClipboardHtml { .. } => Permissions::CLIPBOARD,
             M::ClipboardFiles { .. } => Permissions::CLIPBOARD.union(Permissions::FILES),
+            M::ChatMessage { .. } => Permissions::CHAT,
             // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }

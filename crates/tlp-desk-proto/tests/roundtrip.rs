@@ -365,6 +365,12 @@ fn v4_samples() -> Vec<Message> {
             html: "<b>\u{202B}مرحبا\u{202C}</b> \u{200D}\u{200C}".into(),
             alt_text: "مرحبا".into(),
         },
+        // --- chat ---
+        Message::ChatMessage {
+            id: 1,
+            text: "السلام عليكم 👋 — can you see my screen? ١٢٣".into(),
+            sent_unix_ms: 1_760_000_000_123,
+        },
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -407,6 +413,14 @@ fn v4_variants_are_appended_in_order() {
                 alt_text: String::new(),
             },
             23,
+        ),
+        (
+            Message::ChatMessage {
+                id: 0,
+                text: String::new(),
+                sent_unix_ms: 0,
+            },
+            24,
         ),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];
