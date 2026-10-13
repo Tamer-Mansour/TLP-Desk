@@ -68,6 +68,7 @@
     - [وضع الخصوصية](user-guide/ar/coming-soon/privacy-mode.md)
     - [التشغيل عبر الشبكة (Wake-on-LAN)](user-guide/ar/coming-soon/wake-on-lan.md)
     - [تسجيل الجلسة](user-guide/ar/coming-soon/recording.md)
+    - [إعادة توجيه المنافذ (الأنفاق)](user-guide/ar/coming-soon/port-forwarding.md)
 
 # Security
 
