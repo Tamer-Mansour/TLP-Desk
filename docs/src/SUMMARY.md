@@ -50,6 +50,7 @@
   - [التبديل بين الشاشات](user-guide/ar/monitors.md)
   - [خيارات العرض](user-guide/ar/view-options.md)
   - [لوحة الإحصاءات](user-guide/ar/stats.md)
+  - [الإعدادات](user-guide/ar/settings.md)
 
 # Security
 
