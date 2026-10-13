@@ -22,6 +22,7 @@
   - [Troubleshooting](user-guide/en/troubleshooting.md)
   - [FAQ](user-guide/en/faq.md)
   - [Uninstalling](user-guide/en/uninstall.md)
+  - [Coming soon](user-guide/en/coming-soon/index.md)
 
 # Security
 
