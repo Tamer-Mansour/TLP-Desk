@@ -10,6 +10,63 @@ The interface is available in **Arabic (right-to-left)** and **English**.
 > Status: early development (`0.1.x`). The core remote-control experience works and the features
 > below are being built in the open. See [ROADMAP.md](ROADMAP.md).
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/home-en-dark@2x.png">
+    <img src="docs/media/home-en-light@2x.png" width="840"
+         alt="TLP-Desk home screen: this device's ID and one-time code, the connect box and devices found on the network">
+  </picture>
+</p>
+
+### See it in action
+
+<p align="center">
+  <a href="docs/media/demo-en.mp4">
+    <img src="docs/media/demo-en.gif" width="800"
+         alt="Demo: connect with a device ID and one-time code, control the remote screen, switch monitors, disconnect">
+  </a>
+  <br><sub>Connect by ID and one-time code, control the remote PC, switch screens, disconnect.
+  <a href="docs/media/demo-en.mp4">Full-quality MP4</a> ·
+  <a href="docs/media/demo-ar.mp4">Arabic version</a></sub>
+</p>
+
+**English and Arabic (right-to-left), side by side:**
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/media/session-en-dark.png">
+        <img src="docs/media/session-en-light.png" alt="Viewer session in English with toolbar and stats overlay">
+      </picture>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/media/session-ar-dark.png">
+        <img src="docs/media/session-ar-light.png" alt="The same session in Arabic: mirrored toolbar and overlay">
+      </picture>
+    </td>
+  </tr>
+</table>
+
+<details>
+<summary><b>More screenshots</b></summary>
+
+| | |
+|---|---|
+| ![Incoming request with Accept and Decline](docs/media/incoming-en-dark.png) | ![Banner on the host showing who is connected](docs/media/host-banner-en-dark.png) |
+| **Accept prompt** on the host | **Always-visible banner**: who is connected |
+| ![Monitor picker on a two-screen host](docs/media/monitors-en-dark.png) | ![Warning that the host's key changed](docs/media/key-changed-en-dark.png) |
+| **Switch between the host's screens** | **Loud warning** if a host's identity changes |
+| ![Connect with a device ID and one-time code](docs/media/connect-code-en-dark.png) | ![Settings in Arabic with Arabic-Indic digits](docs/media/settings-ar-dark.png) |
+| **Connect** by ID, name or IP, with an optional code | **Settings**: language and digit style |
+
+All images and videos are generated from the real UI by
+[`scripts/update-readme-media.ps1`](scripts/update-readme-media.ps1); see
+[docs/media](docs/media) for every screen in both languages and themes.
+
+</details>
+
 ---
 
 ## Features
@@ -142,6 +199,8 @@ Contributions are welcome. In short:
 - **Clean-room rule:** never copy code, protocol details, assets or UI text from other remote
   desktop products.
 - Any feature that shows or moves text must work in Arabic.
+- Changed something visible? Run `scripts\update-readme-media.ps1` and commit the updated
+  `docs/media/` in the same PR. Other screenshots never go into git.
 
 The full rules for humans and coding agents are in [CLAUDE.md](CLAUDE.md) and
 [docs/CODE_STYLE.md](docs/CODE_STYLE.md).
@@ -162,6 +221,20 @@ GitHub Security Advisories rather than public issues.
 **TLP-Desk** برنامج مجاني ومفتوح المصدر للتحكم بجهاز آخر عن بُعد داخل الشبكة المحلية فقط، بدون
 إنترنت ولا خوادم ولا حسابات. البرنامج نفسه يعمل كجهاز مُتحكَّم به وكجهاز متحكِّم، وواجهته متوفرة
 بالعربية (من اليمين لليسار) وبالإنجليزية.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/home-ar-dark@2x.png">
+    <img src="docs/media/home-ar-light@2x.png" width="760" alt="الشاشة الرئيسية لبرنامج TLP-Desk بالعربية">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="docs/media/demo-ar.mp4">
+    <img src="docs/media/demo-ar.gif" width="760" alt="عرض توضيحي: الاتصال برقم الجهاز والرمز، التحكم، التنقل بين الشاشات">
+  </a>
+  <br><sub><a href="docs/media/demo-ar.mp4">الفيديو بجودة كاملة (MP4)</a></sub>
+</p>
 
 - اكتشاف الأجهزة على الشبكة تلقائياً، أو الاتصال برقم الجهاز المكوّن من 9 خانات أو بعنوان IP.
 - كل اتصال مشفّر، والسماح بالجلسة يتم بالضغط على «قبول» أو برمز لمرة واحدة.
