@@ -23,6 +23,7 @@
   - [tlp-desk-cli](dev/crates/cli.md)
 - [Building on Windows](dev/building.md)
 - [Testing](dev/testing.md)
+- [Performance notes](dev/performance.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
