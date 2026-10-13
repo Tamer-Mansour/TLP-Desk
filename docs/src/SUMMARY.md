@@ -57,6 +57,7 @@
   - [حل المشكلات](user-guide/ar/troubleshooting.md)
   - [أسئلة شائعة](user-guide/ar/faq.md)
   - [إزالة التثبيت](user-guide/ar/uninstall.md)
+  - [قريبًا](user-guide/ar/coming-soon/index.md)
 
 # Security
 
