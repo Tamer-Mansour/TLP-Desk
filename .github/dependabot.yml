@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: TLP-Desk
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "TLP-deps"
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: TLP-Desk
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "TLP-ci"
