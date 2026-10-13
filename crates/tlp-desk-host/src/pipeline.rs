@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use tlp_desk_capture::{BgraFrame, CaptureError, MonitorInfo};
+use tlp_desk_capture::{BgraFrame, CaptureError, DirtyTracker, MonitorInfo};
 use tlp_desk_codec::{CodecError, VideoEncoder};
 use tlp_desk_input::MonitorRect;
 use tlp_desk_net::{Session, VideoSendStatus};
@@ -242,6 +242,10 @@ struct CaptureState {
     cursor: CursorOverlay,
     /// A cap we failed to reopen with; not retried until the wanted cap changes again.
     failed_cap: Option<(u32, u32)>,
+    /// Static-screen detection: frames identical to the previous one are not published.
+    dirty: DirtyTracker,
+    /// Identical frames skipped (for the log).
+    skipped: u64,
 }
 
 impl CaptureState {
@@ -251,6 +255,7 @@ impl CaptureState {
         self.index = index;
         self.gen += 1;
         self.failed_cap = None;
+        self.dirty.reset();
         // A frame of the old source must not be encoded any more.
         drop(mailbox.lock().frame.take());
         self.cursor = CursorOverlay::new();
@@ -278,6 +283,8 @@ fn capture_loop(
         gen: 0,
         cursor: CursorOverlay::new(),
         failed_cap: None,
+        dirty: DirtyTracker::default(),
+        skipped: 0,
     };
     let mut capture_errors = 0u32;
 
@@ -305,6 +312,16 @@ fn capture_loop(
 
         let interval = frame_interval(ctx.quality.borrow().fps);
         match st.src.cap.next_frame(interval) {
+            Ok(Some(frame)) if !st.dirty.update(&frame).is_changed() => {
+                // Nothing on screen changed (the OS reports frames for other reasons too):
+                // nothing to encode or send. Cursor moves still reach the encoder below.
+                capture_errors = 0;
+                st.skipped += 1;
+                if st.skipped % 600 == 0 {
+                    tracing::debug!(skipped = st.skipped, "identical frames not encoded");
+                }
+                st.src.cap.recycle(frame);
+            }
             Ok(Some(frame)) => {
                 capture_errors = 0;
                 let m = st.src.cap.monitor();

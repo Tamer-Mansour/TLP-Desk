@@ -374,6 +374,39 @@ async fn set_quality_applies_cap_fps_and_bitrate_live() {
     drop(r.vevents);
 }
 
+fn encoded(log: &EncLog) -> usize {
+    log.lock()
+        .unwrap()
+        .iter()
+        .filter(|e| **e == EncEvent::Encoded)
+        .count()
+}
+
+/// The capturer keeps delivering frames (as WGC does for many reasons), but they are all
+/// identical: after the first frame nothing is encoded or sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn static_screen_is_not_reencoded() {
+    let r = rig(Setup {
+        moving: false,
+        ..Setup::default()
+    })
+    .await;
+    frame_of_size(&r.session, 640, 400).await;
+    // Let the first frames settle, then watch a full second of a static desktop
+    // (the fake delivers ~60 identical frames per second).
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let _ = r.session.take_frame();
+    let enc_before = encoded(&r.enc);
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    let enc_after = encoded(&r.enc);
+    assert!(
+        enc_before <= 3,
+        "{enc_before} frames encoded for a static screen"
+    );
+    assert_eq!(enc_after, enc_before, "static frames were encoded");
+    assert!(r.session.take_frame().is_none(), "static frames were sent");
+}
+
 /// Viewer feedback that reports lost frames makes the host lower the encoder bitrate.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn viewer_feedback_with_losses_lowers_the_bitrate() {
