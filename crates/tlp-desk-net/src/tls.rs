@@ -59,7 +59,7 @@ pub(crate) fn provider() -> Arc<CryptoProvider> {
 }
 
 fn bad_cert(e: impl std::fmt::Display) -> rustls::Error {
-    tracing::debug!(%e, "unparseable peer certificate");
+    tracing::debug!(%e, "unparsable peer certificate");
     rustls::Error::InvalidCertificate(CertificateError::BadEncoding)
 }
 

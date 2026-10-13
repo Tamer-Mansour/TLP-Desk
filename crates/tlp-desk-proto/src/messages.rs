@@ -52,6 +52,174 @@ pub enum Message {
         req_id: u64,
         result: Result<FsReply, FsError>,
     },
+
+    // --- file transfer (FILES); bulk bytes travel on `StreamKind::FileData` streams ---
+    /// Viewer -> host: start a transfer (see [`TransferOffer`]). (v4)
+    TransferOffer(TransferOffer),
+    /// Host -> viewer: the offer is accepted. For uploads `resume` lists `(item index, byte
+    /// offset)` pairs the host already has (partial files); the sender starts there. (v4)
+    TransferAccept {
+        id: u64,
+        resume: Vec<(u32, u64)>,
+    },
+    /// Host -> viewer: the offer is refused (user declined, no permission, path error). (v4)
+    TransferReject {
+        id: u64,
+        error: FsError,
+    },
+    /// Receiver -> sender: bytes durably written so far (at most ~4 per second). (v4)
+    TransferProgress {
+        id: u64,
+        bytes_done: u64,
+    },
+    /// Either direction: abort the transfer; both sides stop and reset its data streams. (v4)
+    TransferCancel {
+        id: u64,
+    },
+    /// Sender -> receiver: every byte of item `item` was written to its data stream(s);
+    /// `blake3` is the hash of the complete file for end-to-end verification. (v4)
+    TransferDone {
+        id: u64,
+        item: u32,
+        blake3: [u8; 32],
+    },
+    /// Either direction: the transfer (`item: None`) or one item of it failed. (v4)
+    TransferError {
+        id: u64,
+        item: Option<u32>,
+        error: FsError,
+    },
+
+    // --- clipboard (CLIPBOARD; files also need FILES) ---
+    /// Either direction: files were copied (e.g. Ctrl+C in Explorer). The list is announced
+    /// under `transfer_id`; when the user pastes on the other side, the bytes are pulled with a
+    /// [`TransferOffer`] carrying the same id (direction from the viewer's point of view). (v4)
+    ClipboardFiles {
+        transfer_id: u64,
+        items: Vec<TransferItem>,
+    },
+    /// Either direction: HTML clipboard content (the `CF_HTML` fragment, UTF-8) plus its
+    /// plain-text alternative. (v4)
+    ClipboardHtml {
+        html: String,
+        alt_text: String,
+    },
+
+    // --- chat (CHAT) ---
+    /// Either direction: one chat message (UTF-8; Arabic, RTL marks and joiners preserved
+    /// exactly). `id` is unique per sender and session. (v4)
+    ChatMessage {
+        id: u64,
+        text: String,
+        sent_unix_ms: u64,
+    },
+
+    // --- audio (AUDIO); Opus packets travel on a `StreamKind::Audio` stream ---
+    /// Viewer -> host: start/stop system-audio streaming with this format. Host -> viewer: the
+    /// format actually used (sent before the first audio stream opens). (v4)
+    AudioControl {
+        enabled: bool,
+        sample_rate: u32,
+        channels: u8,
+    },
+
+    // --- session / system (M3) ---
+    /// Viewer -> host: press Ctrl+Alt+Del (`SendSAS`, needs the service). Needs `SYSTEM`. (v4)
+    SendCtrlAltDel,
+    /// Viewer -> host: restart the host PC. With `reconnect` the host first sends a
+    /// [`Message::ReconnectTicket`]. Needs `RESTART`. (v4)
+    RestartRemote {
+        reconnect: bool,
+    },
+    /// Host -> viewer: a single-use ticket that lets this viewer (bound to its TLS fingerprint
+    /// on the host) re-authorize with `AuthRequest::ReconnectTicket` until `expires_unix_ms`,
+    /// without a new prompt, e.g. after the host rebooted. (v4)
+    ReconnectTicket {
+        token: Vec<u8>,
+        expires_unix_ms: u64,
+    },
+    /// Viewer -> host: blank the host's physical screen and block local input (or undo).
+    /// Host -> viewer: the actual state. Needs `PRIVACY_MODE`. (v4)
+    PrivacyMode {
+        enabled: bool,
+    },
+    /// Host -> viewer: the host shows the secure desktop (UAC, login or Ctrl+Alt+Del screen)
+    /// and/or is locked. Sent on change. (v4)
+    DesktopState {
+        secure_desktop: bool,
+        locked: bool,
+    },
+    /// Viewer -> host: lock the host workstation. Needs `SYSTEM`. (v4)
+    LockWorkstation,
+
+    // --- quality / performance ---
+    /// Viewer -> host: change capture/encode parameters. (v4)
+    SetQuality(QualitySettings),
+    /// Viewer -> host, about once per second: decoder health for adaptive bitrate. (v4)
+    ViewerFeedback {
+        /// Average decode time per frame over the last second, microseconds.
+        decode_us: u32,
+        /// Frames the viewer dropped (queue overflow, decode errors) in the last second.
+        frames_dropped: u32,
+        /// QUIC smoothed RTT as seen by the viewer, microseconds.
+        rtt_us: u32,
+    },
+    /// Viewer -> host: latency probe, answered by [`Message::LatencyEcho`]. (v4)
+    LatencyProbe {
+        /// Viewer clock (microseconds since the viewer's session start).
+        t_viewer_us: u64,
+    },
+    /// Host -> viewer: echo of [`Message::LatencyProbe`] plus the capture timestamp (same clock
+    /// as `VideoFrame::timestamp_us`) of the newest frame captured when the probe arrived. (v4)
+    LatencyEcho {
+        t_viewer_us: u64,
+        t_host_capture_us: u64,
+    },
+    /// Viewer -> host: stream all monitors as one picture of the whole virtual desktop.
+    /// `SelectMonitor` returns to one monitor; `MonitorList::active` is `u32::MAX` while all
+    /// monitors are shown. (v4)
+    SelectAllMonitors,
+
+    // --- power features (M4) ---
+    /// Viewer -> host: forward TCP connections to `target_host:target_port` as seen from the
+    /// host (`None` = the host itself, 127.0.0.1). Each forwarded connection is one
+    /// `StreamKind::Tunnel` bidi stream, opened by the viewer, with this `id`. Needs `TUNNEL`.
+    /// (v4)
+    TunnelOpen {
+        id: u64,
+        target_port: u16,
+        target_host: Option<String>,
+    },
+    /// Host -> viewer: the tunnel is allowed; the viewer may open its streams. (v4)
+    TunnelOpened {
+        id: u64,
+    },
+    /// Either direction: close the tunnel and all its streams; `error` explains a refusal or
+    /// failure (e.g. connection refused on the host). (v4)
+    TunnelClose {
+        id: u64,
+        error: Option<String>,
+    },
+
+    // --- whiteboard ---
+    /// Either direction: one whiteboard stroke over the streamed monitor. Points are normalized
+    /// to `0..=65535` like `InputEvent::MouseMove`. Needs `WHITEBOARD`. (v4)
+    WhiteboardStroke {
+        id: u64,
+        points: Vec<(u16, u16)>,
+        /// `0xRRGGBBAA`.
+        color_rgba: u32,
+        /// Line width in 1/10000 of the monitor height.
+        width: u16,
+    },
+    /// Either direction: erase every stroke. Needs `WHITEBOARD`. (v4)
+    WhiteboardClear,
+
+    // --- device info ---
+    /// Viewer -> host: ask for [`Message::DeviceInfo`]. Needs `VIEW`. (v4)
+    DeviceInfoRequest,
+    /// Host -> viewer: system information for the device-info panel. (v4)
+    DeviceInfo(DeviceInfo),
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -75,7 +243,35 @@ impl Message {
             M::RequestKeyframe | M::SelectMonitor { .. } => Permissions::VIEW,
             M::InputEvent(_) => Permissions::CONTROL,
             M::ClipboardData(_) => Permissions::CLIPBOARD,
-            M::FileChunk(_) | M::FsRequest { .. } | M::FsResponse { .. } => Permissions::FILES,
+            M::FileChunk(_)
+            | M::FsRequest { .. }
+            | M::FsResponse { .. }
+            | M::TransferOffer(_)
+            | M::TransferAccept { .. }
+            | M::TransferReject { .. }
+            | M::TransferProgress { .. }
+            | M::TransferCancel { .. }
+            | M::TransferDone { .. }
+            | M::TransferError { .. } => Permissions::FILES,
+            M::ClipboardHtml { .. } => Permissions::CLIPBOARD,
+            M::ClipboardFiles { .. } => Permissions::CLIPBOARD.union(Permissions::FILES),
+            M::ChatMessage { .. } => Permissions::CHAT,
+            M::AudioControl { .. } => Permissions::AUDIO,
+            M::ReconnectTicket { .. } | M::DesktopState { .. } => Permissions::NONE,
+            M::SendCtrlAltDel | M::LockWorkstation => Permissions::SYSTEM,
+            M::RestartRemote { .. } => Permissions::RESTART,
+            M::PrivacyMode { .. } => Permissions::PRIVACY_MODE,
+            M::LatencyEcho { .. } => Permissions::NONE,
+            M::SetQuality(_)
+            | M::ViewerFeedback { .. }
+            | M::LatencyProbe { .. }
+            | M::SelectAllMonitors => Permissions::VIEW,
+            M::TunnelOpened { .. } => Permissions::NONE,
+            M::TunnelOpen { .. } | M::TunnelClose { .. } => Permissions::TUNNEL,
+            M::WhiteboardStroke { .. } | M::WhiteboardClear => Permissions::WHITEBOARD,
+            M::DeviceInfo(_) => Permissions::NONE,
+            M::DeviceInfoRequest => Permissions::VIEW,
+            // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }
 }
@@ -221,6 +417,10 @@ pub enum AuthRequest {
     /// SPAKE2 key confirmation from the viewer (sent after `AuthResult::Spake2Reply`):
     /// `HMAC-SHA256(K, "tlp-desk/kc/viewer" || transcript)`. Added in protocol v2.
     KeyConfirm { mac: Vec<u8> },
+    /// Re-authorize with a single-use ticket from `Message::ReconnectTicket` (e.g. after the
+    /// host rebooted). Valid only from the viewer whose TLS fingerprint the ticket was issued
+    /// to, and only before it expires. Added in protocol v4.
+    ReconnectTicket { token: Vec<u8> },
 }
 
 /// Host's answer to an [`AuthRequest`].
@@ -382,4 +582,98 @@ pub enum ByeReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bye {
     pub reason: ByeReason,
+}
+
+/// Direction of a transfer, from the viewer's point of view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransferDirection {
+    /// Viewer -> host: the viewer sends the bytes.
+    Upload,
+    /// Host -> viewer: the host sends the bytes.
+    Download,
+}
+
+/// One file or directory in a transfer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferItem {
+    /// Path relative to the transfer's `source_dir` / `dest_dir`, `/`-separated, UTF-8. Must
+    /// not be absolute or contain `..` (the receiver rejects it with `InvalidPath`).
+    pub rel_path: String,
+    /// Bytes (0 for directories).
+    pub size: u64,
+    /// Milliseconds since the Unix epoch; the receiver restores it.
+    pub modified_unix_ms: i64,
+    pub is_dir: bool,
+}
+
+/// A transfer request, always sent by the viewer. Data then flows from the sender (viewer for
+/// `Upload`, host for `Download`) on one or more `StreamKind::FileData` uni streams with
+/// stream id = the transfer id, each body starting with a [`crate::FileDataHeader`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransferOffer {
+    /// Unique per session and viewer; also the side-stream id.
+    pub id: u64,
+    pub direction: TransferDirection,
+    /// Directory on the sending side that `items[].rel_path` are relative to.
+    pub source_dir: String,
+    /// Directory on the receiving side to write into.
+    pub dest_dir: String,
+    pub items: Vec<TransferItem>,
+    /// Sum of `items[].size`.
+    pub total_bytes: u64,
+    /// `Download` only: `(item index, byte offset)` the viewer already has (resume). For
+    /// uploads the host answers with offsets in `Message::TransferAccept::resume` instead.
+    pub resume: Vec<(u32, u64)>,
+}
+
+/// Encoder preset chosen in the viewer toolbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QualityPreset {
+    /// Lowest latency and bandwidth.
+    Speed,
+    Balanced,
+    /// Best picture.
+    Quality,
+    /// Use the explicit fields of [`QualitySettings`].
+    Custom,
+}
+
+/// Capture/encode parameters requested by the viewer. Zero means "host default" for
+/// `max_width`, `max_height` and `fps`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualitySettings {
+    pub preset: QualityPreset,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub fps: u32,
+    /// `None` = adaptive bitrate.
+    pub bitrate_kbps: Option<u32>,
+}
+
+/// One disk in [`DeviceInfo`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskInfo {
+    /// Mount point / drive (`C:\`).
+    pub mount: String,
+    /// Volume label, may be empty.
+    pub label: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+/// Host system information.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceInfo {
+    /// e.g. "Windows 11 Pro".
+    pub os: String,
+    /// OS version/build, e.g. "10.0.26100".
+    pub version: String,
+    /// CPU brand string.
+    pub cpu: String,
+    /// Logical processors.
+    pub cores: u32,
+    pub ram_bytes: u64,
+    pub disks: Vec<DiskInfo>,
+    pub uptime_s: u64,
+    pub hostname: String,
 }

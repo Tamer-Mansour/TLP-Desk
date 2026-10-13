@@ -1,0 +1,5 @@
+# Stable rustfmt options only (no nightly toolchain needed). The default width (100) is kept on
+# purpose: the tree is already formatted with it, and a wider width would reformat every file.
+edition = "2021"
+use_field_init_shorthand = true
+use_try_shorthand = true

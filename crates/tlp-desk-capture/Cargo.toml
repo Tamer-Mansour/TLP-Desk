@@ -7,6 +7,9 @@ license.workspace = true
 # windows 0.62 needs 1.82; openh264 (codec crate) needs 1.85.
 rust-version = "1.85"
 
+[lints]
+workspace = true
+
 [dependencies]
 thiserror.workspace = true
 

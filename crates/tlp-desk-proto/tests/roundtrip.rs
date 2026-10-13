@@ -291,6 +291,182 @@ fn v4_samples() -> Vec<Message> {
             req_id: 6,
             result: Err(FsError::NotEmpty),
         },
+        // --- file transfer ---
+        Message::TransferOffer(TransferOffer {
+            id: 9,
+            direction: TransferDirection::Upload,
+            source_dir: r"C:\Users\مستخدم\Documents".into(),
+            dest_dir: r"D:\وارد".into(),
+            items: vec![
+                TransferItem {
+                    rel_path: "مجلد".into(),
+                    size: 0,
+                    modified_unix_ms: 1,
+                    is_dir: true,
+                },
+                TransferItem {
+                    rel_path: "مجلد/ملف.bin".into(),
+                    size: 5 << 30,
+                    modified_unix_ms: 1_760_000_000_000,
+                    is_dir: false,
+                },
+            ],
+            total_bytes: 5 << 30,
+            resume: vec![],
+        }),
+        Message::TransferOffer(TransferOffer {
+            id: 10,
+            direction: TransferDirection::Download,
+            source_dir: r"C:\".into(),
+            dest_dir: String::new(),
+            items: vec![],
+            total_bytes: 0,
+            resume: vec![(1, 4096)],
+        }),
+        Message::TransferAccept {
+            id: 9,
+            resume: vec![(1, 1 << 20), (u32::MAX, u64::MAX)],
+        },
+        Message::TransferReject {
+            id: 9,
+            error: FsError::Declined,
+        },
+        Message::TransferProgress {
+            id: 9,
+            bytes_done: 3 << 30,
+        },
+        Message::TransferCancel { id: 9 },
+        Message::TransferDone {
+            id: 9,
+            item: 1,
+            blake3: [0xAB; 32],
+        },
+        Message::TransferError {
+            id: 9,
+            item: Some(1),
+            error: FsError::HashMismatch,
+        },
+        Message::TransferError {
+            id: 9,
+            item: None,
+            error: FsError::NoSpace,
+        },
+        // --- clipboard ---
+        Message::ClipboardFiles {
+            transfer_id: 77,
+            items: vec![TransferItem {
+                rel_path: "صورة.png".into(),
+                size: 10,
+                modified_unix_ms: 0,
+                is_dir: false,
+            }],
+        },
+        Message::ClipboardHtml {
+            html: "<b>\u{202B}مرحبا\u{202C}</b> \u{200D}\u{200C}".into(),
+            alt_text: "مرحبا".into(),
+        },
+        // --- chat ---
+        Message::ChatMessage {
+            id: 1,
+            text: "السلام عليكم 👋 — can you see my screen? ١٢٣".into(),
+            sent_unix_ms: 1_760_000_000_123,
+        },
+        // --- audio ---
+        Message::AudioControl {
+            enabled: true,
+            sample_rate: 48_000,
+            channels: 2,
+        },
+        Message::AudioControl {
+            enabled: false,
+            sample_rate: 0,
+            channels: 0,
+        },
+        // --- session / system ---
+        Message::SendCtrlAltDel,
+        Message::RestartRemote { reconnect: true },
+        Message::ReconnectTicket {
+            token: vec![0x5A; 32],
+            expires_unix_ms: 1_760_000_600_000,
+        },
+        Message::PrivacyMode { enabled: true },
+        Message::DesktopState {
+            secure_desktop: true,
+            locked: false,
+        },
+        Message::LockWorkstation,
+        // --- quality / performance ---
+        Message::SetQuality(QualitySettings {
+            preset: QualityPreset::Custom,
+            max_width: 2560,
+            max_height: 1440,
+            fps: 60,
+            bitrate_kbps: Some(20_000),
+        }),
+        Message::SetQuality(QualitySettings {
+            preset: QualityPreset::Speed,
+            max_width: 0,
+            max_height: 0,
+            fps: 0,
+            bitrate_kbps: None,
+        }),
+        Message::ViewerFeedback {
+            decode_us: 2_900,
+            frames_dropped: 3,
+            rtt_us: 450,
+        },
+        Message::LatencyProbe {
+            t_viewer_us: 123_456_789,
+        },
+        Message::LatencyEcho {
+            t_viewer_us: 123_456_789,
+            t_host_capture_us: 987_654_321,
+        },
+        Message::SelectAllMonitors,
+        // --- tunnels ---
+        Message::TunnelOpen {
+            id: 3,
+            target_port: 8080,
+            target_host: Some("192.168.1.50".into()),
+        },
+        Message::TunnelOpen {
+            id: 4,
+            target_port: 3389,
+            target_host: None,
+        },
+        Message::TunnelOpened { id: 3 },
+        Message::TunnelClose {
+            id: 3,
+            error: Some("رفض الاتصال connection refused".into()),
+        },
+        // --- whiteboard ---
+        Message::WhiteboardStroke {
+            id: 1,
+            points: vec![(0, 0), (32_768, 100), (u16::MAX, u16::MAX)],
+            color_rgba: 0xFF00_00FF,
+            width: 30,
+        },
+        Message::WhiteboardClear,
+        // --- device info ---
+        Message::DeviceInfoRequest,
+        Message::DeviceInfo(DeviceInfo {
+            os: "Windows 11 Pro".into(),
+            version: "10.0.26100".into(),
+            cpu: "AMD Ryzen 7".into(),
+            cores: 16,
+            ram_bytes: 32 << 30,
+            disks: vec![DiskInfo {
+                mount: r"C:\".into(),
+                label: "النظام".into(),
+                total_bytes: 1 << 40,
+                free_bytes: 1 << 39,
+            }],
+            uptime_s: 86_400,
+            hostname: "مكتب-1".into(),
+        }),
+        // --- auth (v4) ---
+        Message::AuthRequest(AuthRequest::ReconnectTicket { token: vec![1; 32] }),
+        // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
 
@@ -317,10 +493,55 @@ fn v4_variants_are_appended_in_order() {
             },
             14,
         ),
+        (Message::TransferCancel { id: 0 }, 19),
+        (
+            Message::TransferError {
+                id: 0,
+                item: None,
+                error: FsError::Cancelled,
+            },
+            21,
+        ),
+        (
+            Message::ClipboardHtml {
+                html: String::new(),
+                alt_text: String::new(),
+            },
+            23,
+        ),
+        (
+            Message::ChatMessage {
+                id: 0,
+                text: String::new(),
+                sent_unix_ms: 0,
+            },
+            24,
+        ),
+        (
+            Message::AudioControl {
+                enabled: false,
+                sample_rate: 0,
+                channels: 0,
+            },
+            25,
+        ),
+        (Message::SendCtrlAltDel, 26),
+        (Message::LockWorkstation, 31),
+        (Message::SelectAllMonitors, 36),
+        (Message::TunnelOpened { id: 0 }, 38),
+        (Message::WhiteboardClear, 41),
+        (Message::DeviceInfoRequest, 42),
+        // FEATURE HOOK: pin the index of every newly appended message here.
     ];
     for (m, i) in expected {
         assert_eq!(index(m), *i, "{m:?}");
     }
+    // AuthRequest::ReconnectTicket follows KeyConfirm (index 3).
+    let ticket = encode_message(&Message::AuthRequest(AuthRequest::ReconnectTicket {
+        token: vec![],
+    }))
+    .unwrap();
+    assert_eq!(ticket, vec![1, 4, 0]);
 }
 
 #[test]
