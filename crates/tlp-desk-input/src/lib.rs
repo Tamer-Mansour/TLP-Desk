@@ -17,6 +17,11 @@
 //! [`RemotePointerMarker`] shows a green arrow at the pointer on the host screen while the
 //! remote viewer is moving it; it is excluded from screen capture.
 //!
+//! # Privacy mode (host)
+//! [`privacy`]: a [`PrivacyShield`] blanks the host's physical screens (overlay excluded from
+//! capture) and swallows physical keyboard/mouse input while the viewer's injected input
+//! passes, with a local emergency exit. See the module docs for the safety rules.
+//!
 //! # Viewer
 //! [`ViewRect`] maps a pointer position inside the displayed (scaled, letterboxed) video to
 //! the normalized wire coordinates. [`KeyboardGrab`] captures system keys (Win, Alt+Tab,
@@ -30,6 +35,7 @@ mod grab_logic;
 mod keys;
 mod mapping;
 mod marker_shape;
+pub mod privacy;
 mod tracker;
 
 #[cfg(windows)]
@@ -43,6 +49,10 @@ pub use activity::{ActivityStamp, LocalActivity};
 pub use keys::{normalize_scancode, ScanKey};
 pub use mapping::{normalize_pixel, pixel_to_virtual_absolute, MonitorRect, ViewRect};
 pub use marker_shape::{MarkerImage, TextMask, MARKER_DARK, MARKER_GREEN};
+pub use privacy::{
+    local_input_blocked, start_privacy_shield, PrivacyScreenText, PrivacyShield, ShieldSignal,
+    ShieldSignalFn,
+};
 
 #[cfg(windows)]
 pub use win::{
