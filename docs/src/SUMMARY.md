@@ -55,6 +55,7 @@
   - [الأمان والخصوصية](user-guide/ar/security-privacy.md)
   - [سطر الأوامر](user-guide/ar/command-line.md)
   - [حل المشكلات](user-guide/ar/troubleshooting.md)
+  - [أسئلة شائعة](user-guide/ar/faq.md)
 
 # Security
 
