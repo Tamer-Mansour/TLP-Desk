@@ -447,6 +447,23 @@ fn v4_samples() -> Vec<Message> {
             width: 30,
         },
         Message::WhiteboardClear,
+        // --- device info ---
+        Message::DeviceInfoRequest,
+        Message::DeviceInfo(DeviceInfo {
+            os: "Windows 11 Pro".into(),
+            version: "10.0.26100".into(),
+            cpu: "AMD Ryzen 7".into(),
+            cores: 16,
+            ram_bytes: 32 << 30,
+            disks: vec![DiskInfo {
+                mount: r"C:\".into(),
+                label: "النظام".into(),
+                total_bytes: 1 << 40,
+                free_bytes: 1 << 39,
+            }],
+            uptime_s: 86_400,
+            hostname: "مكتب-1".into(),
+        }),
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -511,6 +528,7 @@ fn v4_variants_are_appended_in_order() {
         (Message::SelectAllMonitors, 36),
         (Message::TunnelOpened { id: 0 }, 38),
         (Message::WhiteboardClear, 41),
+        (Message::DeviceInfoRequest, 42),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];
     for (m, i) in expected {

@@ -214,6 +214,12 @@ pub enum Message {
     },
     /// Either direction: erase every stroke. Needs `WHITEBOARD`. (v4)
     WhiteboardClear,
+
+    // --- device info ---
+    /// Viewer -> host: ask for [`Message::DeviceInfo`]. Needs `VIEW`. (v4)
+    DeviceInfoRequest,
+    /// Host -> viewer: system information for the device-info panel. (v4)
+    DeviceInfo(DeviceInfo),
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -263,6 +269,8 @@ impl Message {
             M::TunnelOpened { .. } => Permissions::NONE,
             M::TunnelOpen { .. } | M::TunnelClose { .. } => Permissions::TUNNEL,
             M::WhiteboardStroke { .. } | M::WhiteboardClear => Permissions::WHITEBOARD,
+            M::DeviceInfo(_) => Permissions::NONE,
+            M::DeviceInfoRequest => Permissions::VIEW,
             // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }
@@ -636,4 +644,32 @@ pub struct QualitySettings {
     pub fps: u32,
     /// `None` = adaptive bitrate.
     pub bitrate_kbps: Option<u32>,
+}
+
+/// One disk in [`DeviceInfo`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiskInfo {
+    /// Mount point / drive (`C:\`).
+    pub mount: String,
+    /// Volume label, may be empty.
+    pub label: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+/// Host system information.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceInfo {
+    /// e.g. "Windows 11 Pro".
+    pub os: String,
+    /// OS version/build, e.g. "10.0.26100".
+    pub version: String,
+    /// CPU brand string.
+    pub cpu: String,
+    /// Logical processors.
+    pub cores: u32,
+    pub ram_bytes: u64,
+    pub disks: Vec<DiskInfo>,
+    pub uptime_s: u64,
+    pub hostname: String,
 }
