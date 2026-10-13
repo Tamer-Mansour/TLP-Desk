@@ -105,7 +105,7 @@ connection.
 
 - `send(&Message)` / `recv()` on the control stream (priority 10).
 - `send_video(VideoFrame) -> VideoSendStatus` (host): opens **one unidirectional stream per frame**
-  (priority 0) in a spawned task. A frame stays *in flight* until the viewer has acknowledged all
+  (header `StreamKind::Video`, id = `seq`; priority 5) in a spawned task. A frame stays *in flight* until the viewer has acknowledged all
   its bytes. Non-key frames are `Dropped` when 3 or more are in flight or a keyframe is pending;
   keyframes are dropped only at 6 or more.
 - `recv_video()` (viewer): a reader task accepts each uni stream in its own task, reads the frame
@@ -115,6 +115,25 @@ connection.
 - `close(ByeReason)` sends `Bye`, waits up to 500 ms, closes with code 0.
 - `peer()` → `PeerInfo { addr, device_id, fingerprint, name }` (`name` is self-reported, not
   authenticated). `rtt()`, `role()`, `initial_permissions()`, `video_in_flight()`, `closed()`.
+
+### Side streams (v4)
+
+Every non-control stream starts with a 9-byte `StreamHeader` (`kind`, `id`). A router task reads
+the header (the peer has 10 s to send it) and hands the stream to the right place: video frames to
+the decoder queue, everything else to a **per-kind queue** of up to 64 streams.
+
+- `open_uni(kind, id)` / `open_bi(kind, id)` — open a side stream and write its header; then write
+  the payload and `finish()` (or `reset()` to abort).
+- `accept_side_stream(kind) -> SideStream { kind, id, send: Option<SendStream>, recv }` — wait for
+  the next stream of that kind from the peer. Each kind has its own queue, so the file, tunnel,
+  audio and clipboard features can wait concurrently; only one task should accept a given kind.
+- **Permission checks are the caller's job**: a feature that receives, say, `FileData` without the
+  `FILES` permission must refuse it with `recv.stop(STREAM_REFUSED.into())`.
+- Unknown kinds, malformed headers, full queues and kinds nobody accepts are refused with
+  `STREAM_REFUSED` (`STOP_SENDING` code 1).
+- `stream_priority(kind)` — QUIC send priority, higher first: control 10, audio 6, video 5,
+  clipboard 2, tunnel 1, file data −10. A multi-gigabyte copy therefore never delays input or
+  video.
 
 Close codes: `0` normal, `1` rejected, `2` protocol error. See
 [ADR 0001](../../adr/0001-quic-stream-per-video-frame.md) for the per-frame stream design.
@@ -180,7 +199,11 @@ the wrong secret), `HostAuthFailed` (viewer: host's MAC was wrong), `RateLimited
   `password_auth_right_and_wrong`, `host_with_different_key_than_dialed_id_is_rejected`,
   `tofu_reports_host_key_for_known_hosts`, `peer_outside_allow_list_is_refused`,
   `repeated_wrong_codes_trigger_lockout`,
-  `second_endpoint_on_a_taken_port_fails_with_addr_in_use`.
+  `second_endpoint_on_a_taken_port_fails_with_addr_in_use`, `side_streams_of_every_kind_work_both_ways`,
+  `side_stream_kinds_have_separate_queues`, `unknown_stream_kind_is_refused`, and the ignored
+  benchmark `bulk_side_stream_throughput` (moves several GB over loopback; target ≥ 1 GB/s on one
+  stream — run with
+  `cargo test --release -p tlp-desk-net --test session -- --ignored --nocapture bulk_side_stream_throughput`).
 - `tests/discovery.rs`: `broadcast_fallback_discovers_peer_and_expires_it`, and
   `mdns_advertise_and_browse` — **ignored** in CI because it needs a multicast-capable network
   adapter:
