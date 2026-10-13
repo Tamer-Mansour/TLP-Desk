@@ -40,6 +40,7 @@
   - [0007 egui with a bidi pass](adr/0007-egui-with-bidi-workaround.md)
   - [0008 Inno Setup instead of MSI](adr/0008-inno-setup-instead-of-msi.md)
   - [0009 Rename to TLP-Desk](adr/0009-rename-to-tlp-desk.md)
+  - [0010 Local input priority](adr/0010-local-input-priority.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
