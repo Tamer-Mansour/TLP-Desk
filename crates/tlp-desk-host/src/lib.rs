@@ -39,6 +39,7 @@ mod cursor;
 mod input;
 mod pipeline;
 mod priority;
+mod unattended;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
@@ -48,7 +49,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tlp_desk_capture::{CaptureError, MonitorInfo, ScreenCapturer};
 use tlp_desk_codec::{CodecError, EncoderConfig, VideoEncoder};
 use tlp_desk_crypto::{
-    DeviceId, Fingerprint, OneTimeCode, PasswordVerifier, RateLimitConfig, RateLimiter,
+    DeviceId, Fingerprint, OneTimeCode, PasswordVerifier, RateLimitConfig, RateLimiter, TicketStore,
 };
 use tlp_desk_input::{
     InputError, InputEvent, InputInjector, LocalActivity, MonitorRect, PointerMarker,
@@ -63,6 +64,10 @@ use tokio::task::JoinHandle;
 
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
+pub use unattended::{SystemPower, UnattendedEvent, UnattendedFeature, WindowsPower};
+
+/// [`Feature::name`] of [`UnattendedFeature`] (to match its [`HostEvent::Feature`] events).
+pub const UNATTENDED_FEATURE: &str = unattended::FEATURE_NAME;
 
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
 pub type CapturerFactory =
@@ -128,6 +133,9 @@ pub struct HostConfig {
     pub one_time_code: OneTimeCode,
     /// Unattended-access password verifier; `None` = password access disabled.
     pub password: Option<PasswordVerifier>,
+    /// Reconnect tickets (restart and reconnect): the same store must be given to the
+    /// [`UnattendedFeature`] that issues them. None = ticket logins are refused.
+    pub reconnect_tickets: Option<TicketStore>,
     /// Name announced in discovery.
     pub device_name: String,
     /// Announce this host on the LAN (mDNS + broadcast). The advertisement is filled in from
@@ -162,6 +170,7 @@ impl Default for HostConfig {
             allow_one_time_code: true,
             one_time_code: OneTimeCode::new(),
             password: None,
+            reconnect_tickets: None,
             device_name: default_device_name(),
             advertise: true,
             discovery: DiscoveryConfig::default(),
@@ -187,6 +196,7 @@ impl std::fmt::Debug for HostConfig {
             .field("accept_timeout", &self.accept_timeout)
             .field("allow_one_time_code", &self.allow_one_time_code)
             .field("password", &self.password.is_some())
+            .field("reconnect_tickets", &self.reconnect_tickets.is_some())
             .field("device_name", &self.device_name)
             .field("advertise", &self.advertise)
             .field("local_input_grace", &self.local_input_grace)
@@ -289,6 +299,9 @@ pub type HostEvents = mpsc::UnboundedReceiver<HostEvent>;
 pub enum HostError {
     #[error(transparent)]
     Net(#[from] NetError),
+    /// An OS action (restart, lock) failed; the text says which and why.
+    #[error("system action failed: {0}")]
+    System(String),
 }
 
 enum Decision {
@@ -572,6 +585,10 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
             let res = p
                 .verify_password(&verifier, inner.cfg.default_permissions)
                 .await;
+            finish_auth(inner, peer, kind, res).await;
+        }
+        AuthKind::ReconnectTicket => {
+            let res = unattended::redeem(inner.cfg.reconnect_tickets.as_ref(), p).await;
             finish_auth(inner, peer, kind, res).await;
         }
     }
@@ -913,6 +930,12 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     // Dropping the sender makes the input thread release every key/button and exit.
     drop(input_tx);
     lock(&inner.sessions).remove(&id);
+    unattended::revoke_after_session(
+        inner.cfg.reconnect_tickets.as_ref(),
+        &peer,
+        &reason,
+        inner.shutting_down.load(Ordering::Acquire),
+    );
     tracing::info!(session = id.0, peer = %peer.addr, device_id = %peer.device_id, ?reason, "viewer disconnected");
     inner.emit(HostEvent::SessionEnded { id, peer, reason });
 }
