@@ -18,6 +18,8 @@ site-url = "/TLP-Desk/"
 default-theme = "light"
 preferred-dark-theme = "navy"
 no-section-label = false
+# Turns ```mermaid blocks into diagrams on the website (GitHub renders them natively).
+additional-js = ["theme/mermaid-init.js"]
 
 [output.html.search]
 enable = true
