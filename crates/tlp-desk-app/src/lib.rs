@@ -9,4 +9,5 @@ pub mod i18n;
 pub mod input_map;
 pub mod keygrab;
 pub mod settings;
+pub mod tray;
 pub mod ui;
