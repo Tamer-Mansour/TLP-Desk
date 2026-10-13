@@ -490,6 +490,11 @@ impl Inner {
                 HostEvent::SessionEnded { id, reason, .. } => {
                     self.host_session_ended(id, map_host_end(reason));
                 }
+                // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
+                // their own `backend/<feature>.rs`; match on `event.feature` here.
+                HostEvent::Feature { id, event } => {
+                    tracing::debug!(session = id.0, feature = event.feature, "feature event");
+                }
             }
         }
         tracing::debug!("host event stream ended");
