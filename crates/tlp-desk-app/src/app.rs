@@ -355,6 +355,13 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // Shown by the unattended UI (next commit).
+                BackendEvent::PasswordState(_)
+                | BackendEvent::PasswordChanged(_)
+                | BackendEvent::RemoteRestarting { .. }
+                | BackendEvent::ReconnectAttempt { .. }
+                | BackendEvent::Reconnected { .. }
+                | BackendEvent::ReconnectFailed { .. } => {}
             }
         }
     }

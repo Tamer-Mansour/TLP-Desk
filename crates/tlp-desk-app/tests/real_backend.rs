@@ -11,7 +11,7 @@ use tlp_desk_app::backend::{
     HostProblem, SessionId,
 };
 use tlp_desk_capture::{BgraFrame, CaptureError, CursorState, MonitorInfo, ScreenCapturer};
-use tlp_desk_host::HostConfig;
+use tlp_desk_host::{HostConfig, HostError, SystemPower};
 use tlp_desk_input::{InputError, InputInjector, MonitorRect};
 use tlp_desk_proto::{InputEvent, RejectReason};
 use tlp_desk_viewer::KnownHostsStore;
@@ -68,6 +68,19 @@ impl InputInjector for FakeInjector {
     }
 }
 
+/// Refuses every restart/lock: these tests never touch the machine.
+struct NoPower;
+
+impl SystemPower for NoPower {
+    fn restart(&self) -> Result<(), HostError> {
+        Err(HostError::System("not in tests".into()))
+    }
+
+    fn lock_workstation(&self) -> Result<(), HostError> {
+        Err(HostError::System("not in tests".into()))
+    }
+}
+
 fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
     RealConfig {
         data_dir: dir.to_path_buf(),
@@ -110,6 +123,8 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
             ..HostConfig::default()
         },
         fallback_discovery: false,
+        power: Arc::new(NoPower),
+        system_permissions: false,
     }
 }
 
