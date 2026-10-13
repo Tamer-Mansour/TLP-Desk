@@ -12,6 +12,7 @@ mod codec;
 pub mod device;
 pub mod dsp;
 mod error;
+mod feature;
 pub mod format;
 mod jitter;
 
@@ -22,4 +23,5 @@ pub use device::{
 };
 pub use dsp::Resampler;
 pub use error::AudioError;
+pub use feature::Player;
 pub use jitter::{JitterBuffer, JitterConfig, JitterStats, Playout};
