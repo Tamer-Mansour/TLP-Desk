@@ -46,11 +46,15 @@ No function in this crate contacts anything outside the local network.
 |---|---|
 | keep-alive interval | 4 s |
 | max idle timeout | 15 s |
-| max concurrent uni streams | 32 |
-| max concurrent bidi streams | 4 |
-| stream receive window | 8 MiB |
-| connection receive window | 32 MiB |
-| send window | 8 MiB |
+| max concurrent uni streams | 256 |
+| max concurrent bidi streams | 256 |
+| stream receive window | 16 MiB |
+| connection receive window | 64 MiB |
+| send window | 64 MiB |
+| MTU discovery upper bound | 9000 bytes (jumbo frames where the LAN supports them) |
+
+The windows are sized for bulk file transfers at LAN speed. Video latency does not depend on them:
+video frames are dropped by the in-flight limit and outrank bulk streams in priority.
 
 ## Endpoint (`endpoint.rs`)
 
@@ -137,6 +141,25 @@ the decoder queue, everything else to a **per-kind queue** of up to 64 streams.
 
 Close codes: `0` normal, `1` rejected, `2` protocol error. See
 [ADR 0001](../../adr/0001-quic-stream-per-video-frame.md) for the per-frame stream design.
+
+## Features (`feature.rs`)
+
+The plug-in point for session features (files, clipboard, chat, audio, tunnels, ...), so a
+feature lane adds files instead of editing the host and viewer message loops.
+
+- A feature implements the `Feature` trait and is registered once in a `FeatureSet`
+  (`HostConfig::features` / `ViewerConfig::features`) by the app or CLI.
+- For every session, the host and viewer start a `FeatureDispatch`. It calls `Feature::start`
+  with a `FeatureCtx` — the shared `Arc<Session>`, the role, a `session_key`, a live
+  `watch::Receiver<Permissions>` and an event sink — plus a private inbox.
+- Control messages the core does not handle go to the first feature whose `Feature::handles`
+  returns `true`. On the host this happens only after `Message::required_permissions()` passed.
+- Features open and accept their own side streams and must check `FeatureCtx::allowed(...)`
+  before serving them.
+- `FeatureCtx::emit(name, payload)` sends a `FeatureEvent` to the UI (the host wraps it in
+  `HostEvent::Feature`); the UI downcasts the payload with `FeatureEvent::payload::<T>()`.
+- When the session ends the dispatch is dropped, which closes every inbox — the feature's signal
+  to stop.
 
 ## Allow-list (`allow.rs`)
 
