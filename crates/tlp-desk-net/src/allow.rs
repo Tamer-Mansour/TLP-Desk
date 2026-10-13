@@ -90,8 +90,15 @@ impl Default for AllowList {
 
 impl AllowList {
     pub fn lan_default() -> Self {
-        let v4 = |a, b, c, d, p| Cidr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), p).unwrap();
-        let v6 = |s: &str, p| Cidr::new(IpAddr::V6(s.parse::<Ipv6Addr>().unwrap()), p).unwrap();
+        // Constant, valid prefixes: built directly instead of through the checked `Cidr::new`.
+        let v4 = |a, b, c, d, prefix| Cidr {
+            addr: IpAddr::V4(Ipv4Addr::new(a, b, c, d)),
+            prefix,
+        };
+        let v6 = |addr: Ipv6Addr, prefix| Cidr {
+            addr: IpAddr::V6(addr),
+            prefix,
+        };
         Self {
             ranges: vec![
                 v4(10, 0, 0, 0, 8),
@@ -99,9 +106,9 @@ impl AllowList {
                 v4(192, 168, 0, 0, 16),
                 v4(169, 254, 0, 0, 16),
                 v4(127, 0, 0, 0, 8),
-                v6("fc00::", 7),
-                v6("fe80::", 10),
-                v6("::1", 128),
+                v6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 0), 7),
+                v6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0), 10),
+                v6(Ipv6Addr::LOCALHOST, 128),
             ],
         }
     }
@@ -182,5 +189,31 @@ mod tests {
             .is_allowed(ip("1.1.1.1")));
         assert!("10.0.0.0/33".parse::<Cidr>().is_err());
         assert!("nonsense".parse::<Cidr>().is_err());
+    }
+
+    /// The default ranges are exactly the documented ones, and each is a valid `Cidr`.
+    #[test]
+    fn lan_default_ranges_are_the_documented_ones() {
+        let shown: Vec<String> = AllowList::lan_default()
+            .ranges()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "192.168.0.0/16",
+                "169.254.0.0/16",
+                "127.0.0.0/8",
+                "fc00::/7",
+                "fe80::/10",
+                "::1/128",
+            ]
+        );
+        for r in AllowList::lan_default().ranges() {
+            assert_eq!(r.to_string().parse::<Cidr>().unwrap(), *r);
+        }
     }
 }

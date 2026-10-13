@@ -518,7 +518,7 @@ async fn bcast_recv_loop(
         if !allow.is_allowed(ip) {
             continue;
         }
-        let Some(pkt) = BroadcastPacket::decode(&buf[..n]) else {
+        let Some(pkt) = buf.get(..n).and_then(BroadcastPacket::decode) else {
             continue;
         };
         if pkt.device_id != 0 && Some(pkt.device_id) == me {

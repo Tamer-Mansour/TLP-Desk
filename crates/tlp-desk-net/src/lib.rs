@@ -15,6 +15,16 @@
 //!
 //! No function in this crate contacts anything outside the local network.
 #![forbid(unsafe_code)]
+// Never-crash set (docs/CODE_STYLE.md, "Lints"): every byte here comes from a peer.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable,
+    clippy::indexing_slicing
+)]
 
 mod allow;
 mod discovery;

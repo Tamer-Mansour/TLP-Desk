@@ -77,7 +77,8 @@ impl FramedRecv {
                 return Ok(m);
             }
             match self.recv.read(&mut self.buf).await? {
-                Some(n) => self.dec.push(&self.buf[..n]),
+                // `read` never reports more than the buffer holds.
+                Some(n) => self.dec.push(self.buf.get(..n).unwrap_or_default()),
                 None => return Err(NetError::Closed),
             }
         }
