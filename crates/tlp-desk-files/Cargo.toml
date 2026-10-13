@@ -10,4 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+tlp-desk-proto.workspace = true
 
+[dev-dependencies]
+proptest = "1"
