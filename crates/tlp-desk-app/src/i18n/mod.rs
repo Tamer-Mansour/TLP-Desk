@@ -229,6 +229,31 @@ strings! {
     // --- perf ---
 
     // --- power ---
+    // Port forwarding (TLP-tunnel)
+    PortForwarding => "Port forwarding", "إعادة توجيه المنافذ";
+    TunnelHint => "Open a port on this PC that leads to a service on the remote PC, for example its local web server.", "افتح منفذاً على هذا الجهاز يوصل إلى خدمة على الجهاز البعيد، مثل خادم الويب المحلي فيه.";
+    TunnelLocalPort => "Port on this PC", "المنفذ على هذا الجهاز";
+    TunnelRemoteHost => "Remote address", "العنوان البعيد";
+    TunnelRemoteHostHint => "127.0.0.1 = the remote PC itself", "\u{2066}127.0.0.1\u{2069} تعني الجهاز البعيد نفسه";
+    TunnelRemotePort => "Remote port", "المنفذ البعيد";
+    TunnelAdd => "Start forwarding", "بدء التوجيه";
+    TunnelStop => "Stop", "إيقاف";
+    TunnelLanBind => "Let other devices on my network use this port", "السماح للأجهزة الأخرى على شبكتي باستخدام هذا المنفذ";
+    TunnelLanBindWarning => "Anyone on your network can then reach the remote service through this PC.", "عندها يستطيع أي شخص على شبكتك الوصول إلى الخدمة البعيدة عبر هذا الجهاز.";
+    TunnelNone => "No port is forwarded yet.", "لا يوجد منفذ موجَّه بعد.";
+    TunnelRuleStats => "{open} open, {total} total, sent {sent}, received {received}", "{open} مفتوح، {total} إجمالاً، أُرسل {sent}، استُقبل {received}";
+    TunnelFailedCount => "{n} failed", "{n} فشل";
+    TunnelBadPort => "Enter a port between 1 and 65535.", "أدخل منفذاً بين ١ و٦٥٥٣٥.";
+    TunnelErrNotAllowed => "The other side has not allowed port forwarding.", "لم يسمح الطرف الآخر بإعادة توجيه المنافذ.";
+    TunnelErrRevoked => "The other side stopped port forwarding.", "أوقف الطرف الآخر إعادة توجيه المنافذ.";
+    TunnelErrLocalPort => "This port cannot be opened on this PC: {detail}", "تعذّر فتح هذا المنفذ على هذا الجهاز: {detail}";
+    TunnelErrTargetNotAllowed => "Only addresses on the remote PC's local network can be reached.", "لا يمكن الوصول إلا إلى عناوين الشبكة المحلية للجهاز البعيد.";
+    TunnelErrBadTarget => "Enter the remote address as an IP address, for example 192.168.1.10.", "أدخل العنوان البعيد كعنوان IP، مثل \u{2066}192.168.1.10\u{2069}.";
+    TunnelErrTooMany => "Too many forwarded ports.", "عدد المنافذ الموجَّهة كبير جداً.";
+    TunnelErrNoAnswer => "The other side did not answer.", "لم يُجب الطرف الآخر.";
+    TunnelErrOther => "Port forwarding failed: {detail}", "فشلت إعادة توجيه المنافذ: {detail}";
+    HostTunnelsAllow => "Allow port forwarding", "السماح بإعادة توجيه المنافذ";
+    HostTunnelsActive => "{n} forwarded connections open", "{n} اتصالات موجَّهة مفتوحة";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.
