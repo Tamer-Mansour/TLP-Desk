@@ -24,12 +24,12 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, PostThreadMessageW,
-    RegisterClassExW, SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowPos,
-    ShowWindow, HTTRANSPARENT, HWND_TOPMOST, LWA_ALPHA, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WM_DISPLAYCHANGE,
-    WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_PAINT, WNDCLASSEXW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetWindowDisplayAffinity,
+    PostThreadMessageW, RegisterClassExW, SetLayeredWindowAttributes, SetWindowDisplayAffinity,
+    SetWindowPos, ShowWindow, HTTRANSPARENT, HWND_TOPMOST, LWA_ALPHA, MA_NOACTIVATE,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE,
+    WM_DISPLAYCHANGE, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NCHITTEST, WM_PAINT, WNDCLASSEXW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 use super::WM_SHIELD_REBUILD;
@@ -86,6 +86,17 @@ impl Overlays {
             if let Err(e) = unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) } {
                 return Err(format!(
                     "SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) failed ({e}); \
+                     Windows 10 version 2004 or later is required"
+                ));
+            }
+            // Before Windows 10 2004 the flag may be accepted but treated as WDA_MONITOR (the
+            // window would show up black in capture): read the affinity back to be sure.
+            let mut affinity = 0u32;
+            // SAFETY: `affinity` is a writable u32; `hwnd` is our window.
+            let read = unsafe { GetWindowDisplayAffinity(hwnd, &mut affinity) };
+            if read.is_err() || affinity != WDA_EXCLUDEFROMCAPTURE.0 {
+                return Err(format!(
+                    "the overlay cannot be excluded from screen capture (affinity {affinity:#x}); \
                      Windows 10 version 2004 or later is required"
                 ));
             }
