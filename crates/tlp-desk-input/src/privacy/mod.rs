@@ -148,6 +148,10 @@ pub fn local_input_blocked() -> bool {
     BLOCKING.load(Ordering::Acquire) > 0
 }
 
+/// Serializes tests that create [`BlockingGuard`]s (the count is process-wide).
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Marks physical input as blocked for as long as it lives.
 #[derive(Debug)]
 pub(crate) struct BlockingGuard(());
@@ -235,7 +239,9 @@ mod tests {
 
     #[test]
     fn blocking_guard_counts() {
-        // Other tests in this binary never create guards, so the count is ours.
+        let _serial = TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let a = BlockingGuard::new();
         assert!(local_input_blocked());
         let b = BlockingGuard::new();
