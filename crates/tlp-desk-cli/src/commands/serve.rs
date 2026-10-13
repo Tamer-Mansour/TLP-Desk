@@ -7,6 +7,8 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
+use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
+use tlp_desk_files::fs::{FsConfig, FsFeature};
 use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
 use tlp_desk_net::{Endpoint, EndpointConfig, FeatureSet};
 use tlp_desk_proto::Permissions;
@@ -49,6 +51,9 @@ pub struct ServeArgs {
     /// Do not show the green marker at the pointer while a viewer moves it.
     #[arg(long)]
     pub no_pointer_marker: bool,
+    /// Viewers may also browse, change and download this PC's files (grants "files").
+    #[arg(long)]
+    pub files: bool,
 }
 
 impl ServeArgs {
@@ -64,7 +69,12 @@ impl ServeArgs {
                 Permissions::VIEW
             } else {
                 DEFAULT_PERMISSIONS
-            },
+            }
+            .union(if self.files {
+                Permissions::FILES
+            } else {
+                Permissions::NONE
+            }),
             advertise: !self.no_discovery,
             device_name: self
                 .name
@@ -80,6 +90,10 @@ impl ServeArgs {
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
 fn host_features() -> FeatureSet {
     FeatureSet::new()
+        // Remote file browser; served only to sessions holding FILES.
+        .with(FsFeature::new(FsConfig::default()))
+        // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
+        .with(ClipFilesFeature::new(ClipFilesConfig::default()))
 }
 
 /// Runs `serve` until Ctrl+C.

@@ -84,6 +84,9 @@ impl Exit {
             if let Some(e) = cause.downcast_ref::<CliError>() {
                 return e.exit();
             }
+            if let Some(e) = cause.downcast_ref::<tlp_desk_files::fs::FsClientError>() {
+                return of_fs(e);
+            }
             if let Some(e) = cause.downcast_ref::<ViewerError>() {
                 return of_viewer(e);
             }
@@ -109,6 +112,17 @@ fn of_viewer(e: &ViewerError) -> Exit {
         ViewerError::VersionMismatch { .. } => Exit::VersionMismatch,
         ViewerError::Net(n) => of_net(n).unwrap_or(Exit::Failure),
         ViewerError::KnownHosts(_) => Exit::Failure,
+    }
+}
+
+fn of_fs(e: &tlp_desk_files::fs::FsClientError) -> Exit {
+    use tlp_desk_files::fs::FsClientError as C;
+    match e {
+        C::NoPermission | C::Remote(tlp_desk_proto::FsError::PermissionDenied) => {
+            Exit::PermissionDenied
+        }
+        C::Timeout => Exit::Timeout,
+        _ => Exit::Failure,
     }
 }
 
