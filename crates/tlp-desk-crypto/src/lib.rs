@@ -10,6 +10,17 @@
 //! * [`KnownHosts`]: trust-on-first-use store of peer fingerprints.
 //! * [`PasswordVerifier`]: Argon2id-derived secret for the unattended password (stored at rest).
 #![forbid(unsafe_code)]
+// Never-crash set (docs/CODE_STYLE.md, "Lints"): this crate verifies peer-supplied keys,
+// messages and files from disk.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable,
+    clippy::indexing_slicing
+)]
 
 mod code;
 mod device_id;

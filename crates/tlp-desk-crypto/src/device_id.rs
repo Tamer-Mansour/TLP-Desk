@@ -56,11 +56,13 @@ impl fmt::Debug for Fingerprint {
 impl fmt::Display for Fingerprint {
     /// Colon-separated groups of 4 hex chars, e.g. `ab12:cd34:...` (for "key changed" warnings).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, pair) in self.0.chunks(2).enumerate() {
+        for (i, pair) in self.0.chunks_exact(2).enumerate() {
             if i > 0 {
                 f.write_str(":")?;
             }
-            write!(f, "{:02x}{:02x}", pair[0], pair[1])?;
+            for b in pair {
+                write!(f, "{b:02x}")?;
+            }
         }
         Ok(())
     }
@@ -205,5 +207,17 @@ mod tests {
         assert_eq!(Fingerprint::from_hex(&fp.to_hex()).unwrap(), fp);
         assert!(Fingerprint::from_hex("zz").is_err());
         assert_eq!(fp.to_string().len(), 64 + 15);
+    }
+
+    #[test]
+    fn fingerprint_display_groups_four_hex_digits() {
+        let mut b = [0u8; 32];
+        for (i, x) in b.iter_mut().enumerate() {
+            *x = i as u8;
+        }
+        let s = Fingerprint(b).to_string();
+        assert!(s.starts_with("0001:0203:0405:"), "{s}");
+        assert!(s.ends_with(":1c1d:1e1f"), "{s}");
+        assert_eq!(s.to_lowercase(), s);
     }
 }
