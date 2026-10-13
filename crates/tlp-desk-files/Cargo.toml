@@ -1,0 +1,10 @@
+[package]
+name = "tlp-desk-files"
+description = "File transfer and clipboard sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+

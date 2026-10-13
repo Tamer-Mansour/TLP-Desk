@@ -1,0 +1,21 @@
+[package]
+name = "tlp-desk-crypto"
+description = "Identity keys, device ID, cert pinning, SPAKE2 password auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+x509-parser = "0.16"
+sha2 = "0.10"
+hmac = "0.12"
+spake2 = "0.4"
+rand = "0.8"
+argon2 = "0.5"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

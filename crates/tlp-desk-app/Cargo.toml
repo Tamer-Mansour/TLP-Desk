@@ -1,0 +1,36 @@
+[package]
+name = "tlp-desk-app"
+description = "tlp-desk GUI application (host + viewer)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+tlp-desk-proto.workspace = true
+tlp-desk-crypto.workspace = true
+tlp-desk-net.workspace = true
+tlp-desk-host.workspace = true
+tlp-desk-viewer.workspace = true
+tlp-desk-input.workspace = true
+if-addrs = "0.13"
+raw-window-handle = "0.6"
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+unicode-bidi = "0.3.18"
+serde_json = "1"
+tracing = "0.1"
+sys-locale = "0.3"
+
+[dev-dependencies]
+tlp-desk-capture.workspace = true
+tempfile = "3"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "tlp-desk"
+path = "src/main.rs"

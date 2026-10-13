@@ -1,0 +1,25 @@
+[package]
+name = "tlp-desk-net"
+description = "QUIC transport, mDNS discovery, broadcast fallback, Wake-on-LAN"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tlp-desk-proto.workspace = true
+tlp-desk-crypto.workspace = true
+serde.workspace = true
+postcard.workspace = true
+thiserror.workspace = true
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
+mdns-sd = "0.13"
+socket2 = "0.5"
+if-addrs = "0.13"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

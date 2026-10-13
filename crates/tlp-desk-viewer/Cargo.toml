@@ -1,0 +1,21 @@
+[package]
+name = "tlp-desk-viewer"
+description = "Viewer session logic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tlp-desk-proto.workspace = true
+tlp-desk-crypto.workspace = true
+tlp-desk-net.workspace = true
+tlp-desk-capture.workspace = true
+tlp-desk-codec.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"

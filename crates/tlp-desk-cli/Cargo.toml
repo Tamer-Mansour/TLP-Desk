@@ -1,0 +1,24 @@
+[package]
+name = "tlp-desk-cli"
+description = "Headless tlp-desk CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tlp-desk-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+tlp-desk-proto.workspace = true
+tlp-desk-crypto.workspace = true
+tlp-desk-net.workspace = true
+tlp-desk-host.workspace = true
+tlp-desk-viewer.workspace = true
+clap = { version = "4", features = ["derive"] }
+png = "0.18"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "signal", "io-std", "io-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
