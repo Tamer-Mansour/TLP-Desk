@@ -43,13 +43,32 @@ variants is part of the protocol. The full table, field by field, is in the
 | 0–8 | `Hello`, `AuthRequest`, `AuthResult`, `VideoFrame`, `InputEvent`, `ClipboardData`, `FileChunk`, `Permissions`, `Bye` | v1 |
 | 9 | `RequestKeyframe` | v2 |
 | 10–12 | `HostInputPriority`, `MonitorList`, `SelectMonitor` | v3 |
-| 13–14 | `FsRequest`, `FsResponse` (remote file system: `ListDir`, `Stat`, `Roots`, `MakeDir`, `Rename`, `Delete`) | v4 |
+| 13–14 | `FsRequest`, `FsResponse` — remote file system | v4 |
+| 15–21 | `TransferOffer`, `TransferAccept`, `TransferReject`, `TransferProgress`, `TransferCancel`, `TransferDone`, `TransferError` — file transfer | v4 |
+| 22–23 | `ClipboardFiles`, `ClipboardHtml` | v4 |
+| 24 | `ChatMessage` | v4 |
+| 25 | `AudioControl` | v4 |
+| 26–31 | `SendCtrlAltDel`, `RestartRemote`, `ReconnectTicket`, `PrivacyMode`, `DesktopState`, `LockWorkstation` — session and system control | v4 |
+| 32–36 | `SetQuality`, `ViewerFeedback`, `LatencyProbe`, `LatencyEcho`, `SelectAllMonitors` — quality and latency | v4 |
+| 37–39 | `TunnelOpen`, `TunnelOpened`, `TunnelClose` — TCP port forwarding | v4 |
+| 40–41 | `WhiteboardStroke`, `WhiteboardClear` | v4 |
+| 42–43 | `DeviceInfoRequest`, `DeviceInfo` | v4 |
+
+`AuthRequest` also gained `ReconnectTicket { token }` (index 4) in v4.
+
+> **Defined is not implemented.** Protocol v4 reserves the wire format for most of the roadmap
+> (M2–M4) up front so feature lanes can work in parallel without bumping the version again. As of
+> this writing only the v1–v3 messages are acted on by the host and viewer; the endpoint answers
+> `AuthRequest::ReconnectTicket` with `Rejected(NotAllowed)` (test
+> `reconnect_ticket_is_refused_for_now`), and the other v4 messages have no handler yet.
 
 `Message::required_permissions()` returns the permission the host requires before it acts on an
-incoming message: nothing for handshake and informational messages, `VIEW` for
-`RequestKeyframe` / `SelectMonitor`, `CONTROL` for `InputEvent` (the host additionally checks
-`KEYBOARD` per key event), `CLIPBOARD` for `ClipboardData`, `FILES` for `FileChunk`, `FsRequest`
-and `FsResponse`.
+incoming message from the viewer — for example `VIEW` for `RequestKeyframe` / `SelectMonitor`,
+`CONTROL` for `InputEvent` (the host additionally checks `KEYBOARD` per key event), `CLIPBOARD`
+for `ClipboardData`, `FILES` for `FsRequest` and the transfer messages, `CLIPBOARD | FILES` for
+`ClipboardFiles`, `CHAT`, `AUDIO`, `SYSTEM`, `RESTART`, `PRIVACY_MODE`, `TUNNEL` and
+`WHITEBOARD` for their features. The authoritative mapping is the `match` in `messages.rs` and the
+test `v4_permissions_gate_feature_messages`.
 
 ### Permissions
 
@@ -82,9 +101,9 @@ From protocol v4 on, every QUIC stream other than the control stream is meant to
 Unknown kinds decode to `ProtoError::UnknownStreamKind`.
 
 > **Status:** the header types exist and are tested, but `tlp-desk-net` does not write or read
-> them yet — video streams on the wire still carry a bare framed `VideoFrame`. Some doc comments
-> in `stream.rs` refer to messages that are planned but not yet defined (`TunnelOpen`,
-> `ClipboardHtml`, `TransferOffer`).
+> them yet — video streams on the wire still carry a bare framed `VideoFrame`. When the transport
+> adopts the header, video and side streams will both start with it, as `docs/protocol.md`
+> specifies.
 
 ### Errors
 
