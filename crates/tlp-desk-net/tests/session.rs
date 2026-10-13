@@ -234,7 +234,11 @@ async fn frames_flow_on_control_and_video_streams() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+// Current-thread runtime on purpose: `send_video` is synchronous, so no frame can be sent and
+// acknowledged between the calls of the burst below. On a multi-thread runtime a fast machine
+// (or large flow-control windows) could ack each frame before the next is offered, and the
+// test would flake.
+#[tokio::test]
 async fn host_drops_video_instead_of_queueing() {
     let p = pair();
     let (h, _v) = connect_accept(&p).await;
