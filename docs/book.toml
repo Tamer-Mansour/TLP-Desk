@@ -1,0 +1,25 @@
+[book]
+title = "TLP-Desk"
+description = "Free, open-source, LAN-only remote desktop for Windows, written in Rust."
+authors = ["TLP-Desk contributors"]
+language = "en"
+src = "src"
+
+[build]
+# Keep build output out of the source tree; /target is already git-ignored.
+build-dir = "../target/book"
+# Fail instead of silently creating empty pages for broken SUMMARY entries.
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/Tamer-Mansour/TLP-Desk"
+edit-url-template = "https://github.com/Tamer-Mansour/TLP-Desk/edit/TLP-Desk/docs/{path}"
+site-url = "/TLP-Desk/"
+default-theme = "light"
+preferred-dark-theme = "navy"
+no-section-label = false
+# Turns ```mermaid blocks into diagrams on the website (GitHub renders them natively).
+additional-js = ["theme/mermaid-init.js"]
+
+[output.html.search]
+enable = true

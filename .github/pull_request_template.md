@@ -17,6 +17,7 @@
 - [ ] `cargo test --workspace` (new tests: name them here)
 - [ ] Manual test (machines / Windows version / what was checked), if the change is visible or needs hardware
 - [ ] Arabic checked: text shows, stores and travels correctly in Arabic (RTL layout, shaping, UTF-16 paths)
+- [ ] UI changed → ran `scripts/update-readme-media.ps1` and committed the `docs/media/` changes (or: no visible UI change)
 
 ## Protocol
 
