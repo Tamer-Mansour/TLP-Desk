@@ -403,7 +403,10 @@ fn address_book_hooks_read_known_hosts_and_the_neighbour_cache() {
     );
     assert_eq!(peer.backend.pinned_fingerprint(DeviceId(123_456_789)), None);
     // Loopback never has a neighbour-cache entry; the lookup is read-only.
-    assert_eq!(peer.backend.neighbor_mac("127.0.0.1".parse().unwrap()), None);
+    assert_eq!(
+        peer.backend.neighbor_mac("127.0.0.1".parse().unwrap()),
+        None
+    );
 }
 
 #[test]
