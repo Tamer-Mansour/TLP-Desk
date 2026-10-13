@@ -36,6 +36,7 @@
   - [0003 Identity key and device ID](adr/0003-ecdsa-identity-and-device-id.md)
   - [0004 Pinning and trust on first use](adr/0004-tofu-and-fingerprint-pinning.md)
   - [0005 postcard framing](adr/0005-postcard-framing.md)
+  - [0006 OpenH264 first](adr/0006-openh264-first.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference
