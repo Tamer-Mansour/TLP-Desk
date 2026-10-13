@@ -21,6 +21,7 @@
 
 pub mod fake;
 pub mod real;
+pub mod tunnels;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
@@ -360,6 +361,23 @@ pub enum BackendEvent {
     // --- perf: quality presets, latency overlay, all monitors (TLP-perf) ---
 
     // --- power: WOL, recording, tunnels, whiteboard, connection log, device info (TLP-power) ---
+    /// Viewer side: the session's active port forwarding rules (full replacement; sent on
+    /// change and about once per second while bytes move).
+    Tunnels {
+        session: SessionId,
+        rules: Vec<tunnels::TunnelRow>,
+    },
+    /// Viewer side: a rule could not be added, or the host closed one (e.g. revoked).
+    TunnelProblem {
+        session: SessionId,
+        problem: tunnels::TunnelProblem,
+    },
+    /// Host side: whether a connected viewer may forward ports, and its open tunnels.
+    HostTunnels {
+        session: SessionId,
+        allowed: bool,
+        tunnels: Vec<tunnels::HostTunnelRow>,
+    },
 }
 
 /// Why this device cannot act as a host.
@@ -437,6 +455,31 @@ pub trait Backend: Send + Sync {
     // --- perf (TLP-perf) ---
 
     // --- power (TLP-power) ---
+    /// Viewer side: start forwarding a local port to `host:port` on the remote side. The
+    /// rule appears in [`BackendEvent::Tunnels`], or a [`BackendEvent::TunnelProblem`] says
+    /// why not.
+    fn add_tunnel(&self, session: SessionId, request: tunnels::TunnelRequest) {
+        tracing::debug!(
+            session = session.0,
+            ?request,
+            "port forwarding not supported"
+        );
+    }
+
+    /// Viewer side: stop a forwarding rule.
+    fn stop_tunnel(&self, session: SessionId, id: u64) {
+        tracing::debug!(session = session.0, id, "port forwarding not supported");
+    }
+
+    /// Host side: allow or forbid port forwarding for a connected viewer (live; forbidding
+    /// closes its tunnels). Confirmed by [`BackendEvent::HostTunnels`].
+    fn allow_tunnels(&self, session: SessionId, allowed: bool) {
+        tracing::debug!(
+            session = session.0,
+            allowed,
+            "port forwarding not supported"
+        );
+    }
 }
 
 #[cfg(test)]

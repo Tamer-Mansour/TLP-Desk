@@ -22,25 +22,26 @@ use std::time::Duration;
 
 use tlp_desk_crypto::{Fingerprint, HostKey, Identity};
 use tlp_desk_host::{
-    EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, RequestId as HostRequestId,
-    SessionId as HostSessionId,
+    EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, HostTunnels,
+    RequestId as HostRequestId, SessionId as HostSessionId, TunnelHostConfig, TUNNEL_FEATURE,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
     NetError, DEFAULT_PORT,
 };
-use tlp_desk_proto::{InputEvent, RejectReason};
+use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 use tlp_desk_viewer::{
-    AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, KnownHostsStore,
-    PixelFormat, Viewer, ViewerConfig, ViewerError, ViewerEvent, ViewerEvents, ViewerSession,
+    AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, ForwardSpec,
+    KnownHostsStore, PixelFormat, TunnelId, TunnelViewerConfig, Viewer, ViewerConfig, ViewerError,
+    ViewerEvent, ViewerEvents, ViewerSession, ViewerTunnels,
 };
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
 use super::{
-    AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
-    EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
-    RequestId, SessionId, SessionStats, VideoImage,
+    tunnels, AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId,
+    DiscoveredDevice, EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo,
+    PeerInfo, RepaintFn, RequestId, SessionId, SessionStats, VideoImage,
 };
 
 /// How often host sessions are reconciled with [`Host::sessions`] and LAN addresses re-read.
@@ -102,6 +103,9 @@ struct Inner {
     own_id: DeviceId,
     bridges: Bridges,
     state: Mutex<State>,
+    /// Port forwarding (TLP-tunnel): viewer rules and tunnels into this device.
+    tunnels: Arc<ViewerTunnels>,
+    host_tunnels: Arc<HostTunnels>,
 }
 
 #[derive(Default)]
@@ -306,13 +310,16 @@ impl RealBackend {
             }
         }
 
+        let host_tunnels = HostTunnels::new(TunnelHostConfig::default());
+        let tunnels = ViewerTunnels::new(TunnelViewerConfig::default());
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
-            let host_cfg = HostConfig {
+            let mut host_cfg = HostConfig {
                 device_name: device_name.clone(),
                 ..cfg.host.clone()
             };
+            host_cfg.features.push(host_tunnels.clone());
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
                 Ok((h, ev)) => {
                     host = Some(h);
@@ -352,13 +359,14 @@ impl RealBackend {
                 }
                 repaint();
             });
-            let vcfg = ViewerConfig {
+            let mut vcfg = ViewerConfig {
                 known_hosts: cfg.known_hosts.clone(),
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
                 ..ViewerConfig::default()
             };
+            vcfg.features.push(tunnels.clone());
             match Viewer::new(ep.clone(), vcfg) {
                 Ok(v) => Some(v),
                 Err(e) => {
@@ -383,6 +391,8 @@ impl RealBackend {
             own_id,
             bridges,
             state: Mutex::default(),
+            tunnels,
+            host_tunnels,
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -486,12 +496,34 @@ impl Inner {
                     self.update_local(|l| l.one_time_code = code);
                 }
                 HostEvent::SessionStarted(v) => self.host_session_started(v.id, &v.peer),
-                HostEvent::PermissionsChanged { .. } => {}
+                HostEvent::PermissionsChanged { id, permissions } => {
+                    // Port forwarding (TLP-tunnel): the banner shows whether it is allowed.
+                    if let Some(session) = self.app_host_session(id) {
+                        self.emit(BackendEvent::HostTunnels {
+                            session,
+                            allowed: permissions.contains(Permissions::TUNNEL),
+                            tunnels: self
+                                .host_tunnels
+                                .tunnels(id)
+                                .iter()
+                                .map(tunnels::HostTunnelRow::from)
+                                .collect(),
+                        });
+                    }
+                }
                 HostEvent::SessionEnded { id, reason, .. } => {
                     self.host_session_ended(id, map_host_end(reason));
                 }
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
+                HostEvent::Feature { id, event } if event.feature == TUNNEL_FEATURE => {
+                    let allowed = self.host_allows(id, Permissions::TUNNEL);
+                    if let Some(session) = self.app_host_session(id) {
+                        if let Some(ev) = tunnels::host_event(session, allowed, &event) {
+                            self.emit(ev);
+                        }
+                    }
+                }
                 HostEvent::Feature { id, event } => {
                     tracing::debug!(session = id.0, feature = event.feature, "feature event");
                 }
@@ -514,6 +546,24 @@ impl Inner {
             session,
             peer: app_peer(peer),
         });
+    }
+
+    /// The app's id for a host-side session.
+    fn app_host_session(&self, id: HostSessionId) -> Option<SessionId> {
+        self.state()
+            .host_sessions
+            .iter()
+            .find(|(_, h)| **h == id)
+            .map(|(k, _)| *k)
+    }
+
+    /// Whether a host-side session currently holds `perm`.
+    fn host_allows(&self, id: HostSessionId, perm: Permissions) -> bool {
+        self.host.as_ref().is_some_and(|h| {
+            h.sessions()
+                .iter()
+                .any(|v| v.id == id && v.permissions.contains(perm))
+        })
     }
 
     fn host_session_ended(&self, id: HostSessionId, reason: EndReason) {
@@ -748,6 +798,11 @@ impl Inner {
                 }
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
+                ViewerEvent::Feature(event) if event.feature == TUNNEL_FEATURE => {
+                    if let Some(ev) = tunnels::viewer_event(session, &event) {
+                        self.emit(ev);
+                    }
+                }
                 ViewerEvent::Feature(event) => {
                     tracing::debug!(
                         session = session.0,
@@ -854,6 +909,67 @@ impl Backend for RealBackend {
         if let Some(s) = s {
             s.select_monitor(index);
         }
+    }
+
+    // --- power: port forwarding (TLP-tunnel) ---
+
+    fn add_tunnel(&self, session: SessionId, request: tunnels::TunnelRequest) {
+        let Some(s) = self.inner.state().viewer_sessions.get(&session).cloned() else {
+            return;
+        };
+        let mut spec =
+            ForwardSpec::local(request.local_port, request.target_host, request.target_port);
+        if request.lan_bind {
+            // IPv4 wildcard: LAN clients are IPv4 in practice (an IPv6 socket on Windows is
+            // IPv6-only by default).
+            spec.bind = SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                request.local_port,
+            );
+            spec.allow_lan_bind = true;
+        }
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            // Success shows up as a `Tunnels` event from the feature.
+            if let Err(e) = me.tunnels.add(s.feature_key(), spec).await {
+                tracing::info!(session = session.0, %e, "port forwarding not started");
+                me.emit(BackendEvent::TunnelProblem {
+                    session,
+                    problem: tunnels::TunnelProblem::from(&e),
+                });
+            }
+        });
+    }
+
+    fn stop_tunnel(&self, session: SessionId, id: u64) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            let _guard = self.inner.rt.enter();
+            self.inner.tunnels.stop(s.feature_key(), TunnelId(id));
+        }
+    }
+
+    fn allow_tunnels(&self, session: SessionId, allowed: bool) {
+        let Some(id) = self.inner.state().host_sessions.get(&session).copied() else {
+            return;
+        };
+        let Some(host) = &self.inner.host else {
+            return;
+        };
+        let Some(current) = host.sessions().into_iter().find(|v| v.id == id) else {
+            return;
+        };
+        let perms = if allowed {
+            current.permissions | Permissions::TUNNEL
+        } else {
+            current.permissions.difference(Permissions::TUNNEL)
+        };
+        tracing::info!(
+            session = session.0,
+            allowed,
+            "host user changed port forwarding"
+        );
+        host.set_permissions(id, perms); // confirmed by PermissionsChanged -> HostTunnels
     }
 
     fn disconnect(&self, session: SessionId) {

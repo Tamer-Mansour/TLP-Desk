@@ -50,6 +50,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Port forwarding window (TLP-tunnel).
+    pub tunnels: super::tunnels::TunnelsPanel,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -89,6 +91,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            tunnels: Default::default(),
         }
     }
 
@@ -186,6 +189,16 @@ impl ViewerSession {
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        // Clicks in the floating port forwarding window are not remote input. (Typing there is
+        // not either: keys go to the remote PC only while the remote view has keyboard focus.)
+        let window = self
+            .tunnels
+            .window(&ctx, tx, backend, self.id, self.permissions);
+        let over_window = window.is_some_and(|r| {
+            ctx.input(|i| i.pointer.hover_pos())
+                .is_some_and(|p| r.expand(4.0).contains(p))
+        });
+        let modal_open = modal_open || over_window;
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
@@ -296,6 +309,7 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    self.tunnels.toolbar_button(ui, tx);
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
                         self.release_all(backend);

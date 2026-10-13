@@ -1,6 +1,6 @@
 //! Top-level eframe application: owns UI state, drains backend events, routes screens.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use eframe::egui::{self, Id, RichText};
@@ -15,6 +15,7 @@ use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
 use crate::ui::icons::{self, Icon};
 use crate::ui::session::ViewerSession;
+use crate::ui::tunnels::{self, HostTunnelState};
 use crate::ui::{theme, widgets};
 
 /// Which full-window screen is shown when no viewer session is active.
@@ -99,6 +100,8 @@ pub struct App {
     hwnd: Option<isize>,
     pub incoming: VecDeque<(RequestId, PeerInfo)>,
     pub host_sessions: Vec<(SessionId, PeerInfo)>,
+    /// Port forwarding state per incoming session (TLP-tunnel).
+    pub host_tunnels: HashMap<SessionId, HostTunnelState>,
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
@@ -141,6 +144,7 @@ impl App {
             hwnd: keygrab::window_handle(cc),
             incoming: VecDeque::new(),
             host_sessions: Vec::new(),
+            host_tunnels: HashMap::new(),
             session: None,
             notice: None,
         };
@@ -327,6 +331,7 @@ impl App {
                 }
                 BackendEvent::SessionEnded { session, reason } => {
                     self.host_sessions.retain(|(id, _)| *id != session);
+                    self.host_tunnels.remove(&session);
                     if self.session.as_ref().is_some_and(|s| s.id == session) {
                         self.session = None;
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
@@ -355,6 +360,28 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- power: port forwarding (TLP-tunnel) ---
+                BackendEvent::Tunnels { session, rules } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.tunnels.rules = rules;
+                    }
+                }
+                BackendEvent::TunnelProblem { session, problem } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.tunnels.problem = Some(problem);
+                        s.tunnels.open = true;
+                    }
+                }
+                BackendEvent::HostTunnels {
+                    session,
+                    allowed,
+                    tunnels,
+                } => {
+                    if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_tunnels
+                            .insert(session, HostTunnelState { allowed, tunnels });
+                    }
+                }
             }
         }
     }
@@ -392,6 +419,13 @@ impl App {
                             if ui.add(end_button).clicked() {
                                 end = Some(*session);
                             }
+                            tunnels::host_banner_controls(
+                                ui,
+                                tx,
+                                self.backend.as_ref(),
+                                *session,
+                                self.host_tunnels.get(session),
+                            );
                         });
                     });
                 }
