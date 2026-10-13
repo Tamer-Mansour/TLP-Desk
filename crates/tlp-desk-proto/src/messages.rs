@@ -151,6 +151,34 @@ pub enum Message {
     },
     /// Viewer -> host: lock the host workstation. Needs `SYSTEM`. (v4)
     LockWorkstation,
+
+    // --- quality / performance ---
+    /// Viewer -> host: change capture/encode parameters. (v4)
+    SetQuality(QualitySettings),
+    /// Viewer -> host, about once per second: decoder health for adaptive bitrate. (v4)
+    ViewerFeedback {
+        /// Average decode time per frame over the last second, microseconds.
+        decode_us: u32,
+        /// Frames the viewer dropped (queue overflow, decode errors) in the last second.
+        frames_dropped: u32,
+        /// QUIC smoothed RTT as seen by the viewer, microseconds.
+        rtt_us: u32,
+    },
+    /// Viewer -> host: latency probe, answered by [`Message::LatencyEcho`]. (v4)
+    LatencyProbe {
+        /// Viewer clock (microseconds since the viewer's session start).
+        t_viewer_us: u64,
+    },
+    /// Host -> viewer: echo of [`Message::LatencyProbe`] plus the capture timestamp (same clock
+    /// as `VideoFrame::timestamp_us`) of the newest frame captured when the probe arrived. (v4)
+    LatencyEcho {
+        t_viewer_us: u64,
+        t_host_capture_us: u64,
+    },
+    /// Viewer -> host: stream all monitors as one picture of the whole virtual desktop.
+    /// `SelectMonitor` returns to one monitor; `MonitorList::active` is `u32::MAX` while all
+    /// monitors are shown. (v4)
+    SelectAllMonitors,
     // FEATURE HOOK: new messages go here, at the very end only (bump PROTOCOL_VERSION).
 }
 
@@ -192,6 +220,11 @@ impl Message {
             M::SendCtrlAltDel | M::LockWorkstation => Permissions::SYSTEM,
             M::RestartRemote { .. } => Permissions::RESTART,
             M::PrivacyMode { .. } => Permissions::PRIVACY_MODE,
+            M::LatencyEcho { .. } => Permissions::NONE,
+            M::SetQuality(_)
+            | M::ViewerFeedback { .. }
+            | M::LatencyProbe { .. }
+            | M::SelectAllMonitors => Permissions::VIEW,
             // FEATURE HOOK: permission of newly appended messages (the match is exhaustive).
         }
     }
@@ -541,4 +574,28 @@ pub struct TransferOffer {
     /// `Download` only: `(item index, byte offset)` the viewer already has (resume). For
     /// uploads the host answers with offsets in `Message::TransferAccept::resume` instead.
     pub resume: Vec<(u32, u64)>,
+}
+
+/// Encoder preset chosen in the viewer toolbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QualityPreset {
+    /// Lowest latency and bandwidth.
+    Speed,
+    Balanced,
+    /// Best picture.
+    Quality,
+    /// Use the explicit fields of [`QualitySettings`].
+    Custom,
+}
+
+/// Capture/encode parameters requested by the viewer. Zero means "host default" for
+/// `max_width`, `max_height` and `fps`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualitySettings {
+    pub preset: QualityPreset,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub fps: u32,
+    /// `None` = adaptive bitrate.
+    pub bitrate_kbps: Option<u32>,
 }

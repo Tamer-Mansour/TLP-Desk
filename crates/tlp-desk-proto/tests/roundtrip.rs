@@ -395,6 +395,34 @@ fn v4_samples() -> Vec<Message> {
             locked: false,
         },
         Message::LockWorkstation,
+        // --- quality / performance ---
+        Message::SetQuality(QualitySettings {
+            preset: QualityPreset::Custom,
+            max_width: 2560,
+            max_height: 1440,
+            fps: 60,
+            bitrate_kbps: Some(20_000),
+        }),
+        Message::SetQuality(QualitySettings {
+            preset: QualityPreset::Speed,
+            max_width: 0,
+            max_height: 0,
+            fps: 0,
+            bitrate_kbps: None,
+        }),
+        Message::ViewerFeedback {
+            decode_us: 2_900,
+            frames_dropped: 3,
+            rtt_us: 450,
+        },
+        Message::LatencyProbe {
+            t_viewer_us: 123_456_789,
+        },
+        Message::LatencyEcho {
+            t_viewer_us: 123_456_789,
+            t_host_capture_us: 987_654_321,
+        },
+        Message::SelectAllMonitors,
         // FEATURE HOOK: samples of newly appended messages go here.
     ]
 }
@@ -456,6 +484,7 @@ fn v4_variants_are_appended_in_order() {
         ),
         (Message::SendCtrlAltDel, 26),
         (Message::LockWorkstation, 31),
+        (Message::SelectAllMonitors, 36),
         // FEATURE HOOK: pin the index of every newly appended message here.
     ];
     for (m, i) in expected {
