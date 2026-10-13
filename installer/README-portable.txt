@@ -41,7 +41,8 @@ COMMAND LINE (optional)
 
 Settings: %APPDATA%\TLP-Desk\settings.json
 Identity key and known hosts: %ProgramData%\TLP-Desk\ (or %LOCALAPPDATA%\TLP-Desk\)
-Fonts: see the licenses folder (SIL Open Font License, Ubuntu Font Licence, MIT, Hack).
+Fonts and icons: see the licenses folder (SIL Open Font License, Ubuntu Font Licence, MIT,
+Hack; tlp-icons MIT, Lucide ISC) and THIRD_PARTY_NOTICES.txt there.
 
 
 TLP-Desk — نسخة محمولة (ويندوز 10/11، 64 بت)
@@ -84,4 +85,4 @@ TLP-Desk تطبيق مجاني للتحكم بالحاسوب عن بُعد دا�
   TLP-Desk.exe --lang ar                               الواجهة بالعربية
   TLP-Desk-cli.exe --help                              أداة بلا واجهة للبرامج النصية
 
-الخطوط المضمّنة: راجع مجلد licenses.
+الخطوط والأيقونات المضمّنة: راجع مجلد licenses.

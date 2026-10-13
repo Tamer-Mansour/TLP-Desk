@@ -43,7 +43,8 @@ YOUR DATA AND UNINSTALLING
 "Windows protected your PC": the setup file is not code-signed, so SmartScreen may warn
 the first time. Click "More info" then "Run anyway".
 
-Fonts: see the licenses folder (SIL Open Font License, Ubuntu Font Licence, MIT, Hack).
+Fonts and icons: see the licenses folder (SIL Open Font License, Ubuntu Font Licence, MIT,
+Hack; tlp-icons MIT, Lucide ISC) and THIRD_PARTY_NOTICES.txt there.
 
 
 TLP-Desk — النسخة المثبّتة (ويندوز 10/11، 64 بت)
@@ -91,4 +92,4 @@ TLP-Desk تطبيق مجاني للتحكم بالحاسوب عن بُعد دا�
 «حمى Windows جهاز الكمبيوتر الخاص بك»: ملف التثبيت غير موقّع رقمياً، لذا قد يحذّرك
 SmartScreen في المرة الأولى. اضغط «مزيد من المعلومات» ثم «تشغيل على أي حال».
 
-الخطوط المضمّنة: راجع مجلد licenses.
+الخطوط والأيقونات المضمّنة: راجع مجلد licenses.

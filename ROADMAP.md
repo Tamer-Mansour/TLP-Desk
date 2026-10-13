@@ -35,6 +35,7 @@ until it works in Arabic. Check these per milestone as features land.
 
 **Layout & language (M1)**
 - [x] Full RTL mirroring in Arabic: layouts, toolbars, lists, dialogs, alignment, icons with direction (back/forward arrows)
+      _(icons: tlp-icons set in `ui::icons`, directional ones mirrored; evidence: `icons::tests::rtl_mirroring_flips_the_image`, `directional_icons_are_flagged`, `image_dir_mirrors_only_directional_icons_in_rtl`; en/ar screenshots of home, settings, session, incoming dialog)_
 - [x] Every user-facing string in the i18n table with Arabic + English; test fails on a missing key
       _(evidence: missing translation is a compile error; `every_key_has_english_and_arabic`)_
 - [x] Language auto-detected from Windows UI language on first run; switchable live in Settings, persisted
