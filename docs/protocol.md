@@ -1,7 +1,20 @@
 # tlp-desk wire protocol
 
-Status: **draft**, `PROTOCOL_VERSION = 3`. Source of truth: `crates/tlp-desk-proto` (messages),
+Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-proto` (messages),
 `crates/tlp-desk-net` (transport, discovery) and `crates/tlp-desk-crypto` (keys, PAKE).
+
+### Changes in v4
+
+- Every QUIC stream other than the control stream now starts with a 9-byte stream header
+  (`kind: u8` + `id: u64` LE, see *Streams*); video frames use kind `Video` with `id = seq`.
+  Feature data (file bytes, tunnels, audio, large clipboard payloads) travels on typed side streams.
+- Appended `Message` variants 13-43 for remote files, file transfer, clipboard files/HTML, chat,
+  audio, session/system control (M3), quality and latency, all-monitors view, TCP tunnels,
+  whiteboard and device info (see the table and *Features (v4)*).
+- Appended `AuthRequest::ReconnectTicket { token }` (index 4).
+- New permission bits 8-11: `CHAT`, `TUNNEL`, `WHITEBOARD`, `SYSTEM`.
+- The host enforces `Message::required_permissions()` for every message from the viewer.
+- Appended only; all v1-v3 variants keep their indices.
 
 ### Changes in v3
 
@@ -92,6 +105,7 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `AuthResult::Spake2Reply { spake2_msg }` | host → viewer | Host's SPAKE2 half |
 | `AuthRequest::KeyConfirm { mac }` | viewer → host | Viewer's SPAKE2 key confirmation (v2) |
 | `AuthResult::KeyConfirm { mac }` | host → viewer | Host's SPAKE2 key confirmation (v2) |
+| `AuthRequest::ReconnectTicket { token }` | viewer → host | Re-authorize with a single-use ticket (v4; refused until implemented) |
 | `AuthResult::Accepted { permissions }` | host → viewer | Session authorized |
 | `AuthResult::Rejected { reason }` | host → viewer | `UserDeclined`, `WrongCredentials`, `RateLimited`, `NotAllowed`, `VersionMismatch` |
 | `VideoFrame { seq, timestamp_us, width, height, codec, keyframe, data }` | host → viewer (one uni stream per frame) | One encoded frame, H.264 Annex-B |
@@ -104,7 +118,37 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `HostInputPriority { local_active }` | host → viewer | The host user is using their own mouse/keyboard; viewer input is dropped until `false` (v3) |
 | `MonitorList { monitors: [MonitorDesc], active }` | host → viewer | Host monitors and the streamed one (v3) |
 | `SelectMonitor { index }` | viewer → host | Switch the streamed/controlled monitor (v3) |
-
+| `FsRequest { req_id: u64, op: FsOp }` | viewer → host (either) | Remote file-system operation (v4, `FILES`) |
+| `FsResponse { req_id: u64, result: Result<FsReply, FsError> }` | host → viewer (either) | Answer to `FsRequest` (v4) |
+| `TransferOffer(TransferOffer)` | viewer → host | Start an upload or download (v4, `FILES`) |
+| `TransferAccept { id: u64, resume: Vec<(u32, u64)> }` | host → viewer | Offer accepted; upload resume points (v4) |
+| `TransferReject { id: u64, error: FsError }` | host → viewer | Offer refused (v4) |
+| `TransferProgress { id: u64, bytes_done: u64 }` | receiver → sender | Bytes written so far (v4) |
+| `TransferCancel { id: u64 }` | both | Abort a transfer (v4) |
+| `TransferDone { id: u64, item: u32, blake3: [u8; 32] }` | sender → receiver | Item fully sent; hash to verify (v4) |
+| `TransferError { id: u64, item: Option<u32>, error: FsError }` | both | Transfer or item failed (v4) |
+| `ClipboardFiles { transfer_id: u64, items: Vec<TransferItem> }` | both | Files copied; pasted later via a transfer (v4, `CLIPBOARD`+`FILES`) |
+| `ClipboardHtml { html: String, alt_text: String }` | both | HTML clipboard + plain text (v4, `CLIPBOARD`) |
+| `ChatMessage { id: u64, text: String, sent_unix_ms: u64 }` | both | Chat (v4, `CHAT`) |
+| `AudioControl { enabled: bool, sample_rate: u32, channels: u8 }` | both | Start/stop system audio; format (v4, `AUDIO`) |
+| `SendCtrlAltDel` | viewer → host | Secure attention sequence (v4, `SYSTEM`) |
+| `RestartRemote { reconnect: bool }` | viewer → host | Restart the host PC (v4, `RESTART`) |
+| `ReconnectTicket { token: Vec<u8>, expires_unix_ms: u64 }` | host → viewer | Single-use re-auth ticket (v4) |
+| `PrivacyMode { enabled: bool }` | both | Blank host screen + block local input / actual state (v4, `PRIVACY_MODE`) |
+| `DesktopState { secure_desktop: bool, locked: bool }` | host → viewer | Secure desktop / lock state (v4) |
+| `LockWorkstation` | viewer → host | Lock the host (v4, `SYSTEM`) |
+| `SetQuality(QualitySettings)` | viewer → host | Preset, size cap, fps, bitrate (v4, `VIEW`) |
+| `ViewerFeedback { decode_us: u32, frames_dropped: u32, rtt_us: u32 }` | viewer → host | Adaptive-bitrate input, ~1/s (v4) |
+| `LatencyProbe { t_viewer_us: u64 }` | viewer → host | Latency overlay probe (v4) |
+| `LatencyEcho { t_viewer_us: u64, t_host_capture_us: u64 }` | host → viewer | Probe echo (v4) |
+| `SelectAllMonitors` | viewer → host | Stream the whole virtual desktop (v4) |
+| `TunnelOpen { id: u64, target_port: u16, target_host: Option<String> }` | viewer → host | TCP port forwarding (v4, `TUNNEL`) |
+| `TunnelOpened { id: u64 }` | host → viewer | Tunnel allowed (v4) |
+| `TunnelClose { id: u64, error: Option<String> }` | both | Tunnel closed / refused (v4, `TUNNEL`) |
+| `WhiteboardStroke { id: u64, points: Vec<(u16, u16)>, color_rgba: u32, width: u16 }` | both | Draw on the streamed monitor (v4, `WHITEBOARD`) |
+| `WhiteboardClear` | both | Erase all strokes (v4, `WHITEBOARD`) |
+| `DeviceInfoRequest` | viewer → host | Ask for system info (v4) |
+| `DeviceInfo(DeviceInfo)` | host → viewer | OS, CPU, RAM, disks, uptime (v4) |
 `MonitorDesc { index: u32, name: String, width: u32, height: u32, primary: bool, x: i32, y: i32 }`
 (physical pixels on the host virtual desktop).
 
@@ -151,6 +195,15 @@ coordinates are always normalized over the currently streamed monitor.
 | 5 | `AUDIO` |
 | 6 | `RESTART` |
 | 7 | `PRIVACY_MODE` |
+| 8 | `CHAT` (v4) |
+| 9 | `TUNNEL` (v4) |
+| 10 | `WHITEBOARD` (v4) |
+| 11 | `SYSTEM`: Ctrl+Alt+Del, lock workstation (v4) |
+
+The host checks `Message::required_permissions()` before acting on any message from the viewer
+(e.g. `FsRequest` needs `FILES`, `ClipboardFiles` needs `CLIPBOARD` and `FILES`); messages that lack
+a permission are dropped (requests get a `PermissionDenied` answer where the message has one).
+Side streams are checked by the feature that accepts them.
 
 ## Session flow
 
