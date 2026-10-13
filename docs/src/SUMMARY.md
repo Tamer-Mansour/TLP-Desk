@@ -14,6 +14,7 @@
   - [tlp-desk-audio](dev/crates/audio.md)
   - [tlp-desk-files](dev/crates/files.md)
   - [tlp-desk-host](dev/crates/host.md)
+  - [tlp-desk-viewer](dev/crates/viewer.md)
 
 # Reference
 
