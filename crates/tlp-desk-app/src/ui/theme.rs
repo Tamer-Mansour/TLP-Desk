@@ -65,6 +65,7 @@ pub fn font_definitions() -> FontDefinitions {
 /// Install fonts and the visual style for both themes.
 pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(font_definitions());
+    super::icons::install(ctx);
 
     ctx.all_styles_mut(|style| {
         style.text_styles = [
