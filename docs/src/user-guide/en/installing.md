@@ -50,8 +50,9 @@ Installing a newer version over an older one keeps your device ID and settings.
    leave **Public networks** unticked, and click **Allow**. See
    [First run and the firewall](first-run.md) if you clicked Cancel by mistake.
 
-The portable version keeps its data in the same places as the installed one, so you can switch
-between them without changing your device ID.
+The portable version uses the same data folders as the installed one, so on the same Windows
+account switching between them normally keeps your device ID. (If `%ProgramData%` cannot be written,
+the portable version falls back to `%LOCALAPPDATA%\TLP-Desk`, which gives that account its own ID.)
 
 ## Set your network to Private
 
