@@ -32,6 +32,11 @@ jobs:
         with:
           tool: mdbook@0.5.4
 
+      # User-guide pages show the generated screenshots as ../../media/<file>.png: copy
+      # docs/media (the only tracked copy) into the book source; docs/src/media is git-ignored.
+      - name: Copy README media into the book
+        run: cp -r docs/media docs/src/media
+
       # book.toml writes to target/book (git-ignored) and fails on missing pages.
       - name: Build
         run: mdbook build docs
