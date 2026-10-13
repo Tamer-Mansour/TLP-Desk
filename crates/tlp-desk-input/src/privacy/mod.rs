@@ -41,6 +41,10 @@
 mod escape;
 mod filter;
 
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -149,7 +153,7 @@ pub fn local_input_blocked() -> bool {
 pub(crate) struct BlockingGuard(());
 
 impl BlockingGuard {
-    #[allow(dead_code)] // used by the Windows shield
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn new() -> Self {
         BLOCKING.fetch_add(1, Ordering::AcqRel);
         Self(())
@@ -174,8 +178,15 @@ pub fn is_normal_desktop(name: Option<&str>) -> bool {
 pub fn start_privacy_shield(
     on_signal: ShieldSignalFn,
 ) -> Result<Box<dyn PrivacyShield>, InputError> {
-    let _ = on_signal;
-    Err(InputError::Unsupported)
+    #[cfg(windows)]
+    {
+        Ok(Box::new(windows::WindowsPrivacyShield::new(on_signal)))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = on_signal;
+        Err(InputError::Unsupported)
+    }
 }
 
 #[cfg(test)]
