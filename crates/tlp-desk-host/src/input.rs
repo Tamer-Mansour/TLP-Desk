@@ -5,7 +5,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tlp_desk_input::{InputEvent, InputInjector, LocalActivity, MonitorRect, PointerMarker};
+use tlp_desk_input::{
+    InputError, InputEvent, InputInjector, LocalActivity, MonitorRect, PointerMarker,
+};
 use tokio::sync::{mpsc, watch};
 
 use crate::priority::{LocalInput, PriorityGate};
@@ -26,12 +28,18 @@ pub(crate) struct InputCtx {
     pub label: String,
     /// Local priority changes, for the control loop to forward to the viewer.
     pub priority: mpsc::UnboundedSender<bool>,
+    /// The OS refused injected input (elevated or secure foreground window); rate limited.
+    pub blocked: mpsc::UnboundedSender<()>,
 }
+
+/// Minimum time between two "input is blocked" notices.
+const BLOCKED_NOTICE_EVERY: Duration = Duration::from_secs(10);
 
 struct Injection {
     factory: InjectorFactory,
     injector: Option<Box<dyn InputInjector>>,
     current: Option<MonitorRect>,
+    last_blocked_notice: Option<Instant>,
 }
 
 impl Injection {
@@ -62,15 +70,27 @@ impl Injection {
         }
     }
 
-    fn inject(&mut self, ev: &InputEvent) {
+    /// Injects one event. Returns true when the OS blocked it and the user has not been told
+    /// recently (UIPI: the foreground window is elevated, or the secure desktop is up).
+    fn inject(&mut self, ev: &InputEvent) -> bool {
         match self.injector.as_mut() {
-            Some(i) => {
-                if let Err(e) = i.inject(ev) {
-                    tracing::debug!(%e, ?ev, "input injection failed");
+            Some(i) => match i.inject(ev) {
+                Ok(()) => {}
+                Err(InputError::Blocked(why)) => {
+                    let due = self
+                        .last_blocked_notice
+                        .is_none_or(|t| t.elapsed() >= BLOCKED_NOTICE_EVERY);
+                    if due {
+                        self.last_blocked_notice = Some(Instant::now());
+                        tracing::warn!(%why, "remote input blocked by the OS; an elevated window may be in front (needs the TLP-Desk service)");
+                        return true;
+                    }
                 }
-            }
+                Err(e) => tracing::debug!(%e, ?ev, "input injection failed"),
+            },
             None => tracing::trace!(?ev, "input dropped: no injector yet"),
         }
+        false
     }
 
     fn release_all(&mut self) {
@@ -99,11 +119,13 @@ pub(crate) fn run(ctx: InputCtx) {
         marker_factory,
         label,
         priority,
+        blocked,
     } = ctx;
     let mut inj = Injection {
         factory,
         injector: None,
         current: None,
+        last_blocked_notice: None,
     };
     let mut gate = PriorityGate::new(grace);
     let mut activity: Option<Arc<dyn LocalActivity>> = None;
@@ -157,7 +179,9 @@ pub(crate) fn run(ctx: InputCtx) {
         }
         if let Some(ev) = ev {
             inj.sync_rect(*rect.borrow_and_update());
-            inj.inject(&ev);
+            if inj.inject(&ev) {
+                let _ = blocked.send(());
+            }
             if !marker_tried && matches!(ev, InputEvent::MouseMove { .. }) {
                 marker_tried = true;
                 if let Some(f) = &marker_factory {
@@ -225,6 +249,10 @@ mod tests {
     impl InputInjector for RecInjector {
         fn inject(&mut self, event: &InputEvent) -> Result<(), InputError> {
             self.0.lock().unwrap().push(format!("{event:?}"));
+            // Scancode 0xFF stands for "the foreground window is elevated" (UIPI).
+            if matches!(event, InputEvent::Key { scancode: 0xFF, .. }) {
+                return Err(InputError::Blocked("uipi".into()));
+            }
             Ok(())
         }
     }
@@ -241,6 +269,7 @@ mod tests {
         log: Log,
         local: Arc<FakeLocal>,
         prio: mpsc::UnboundedReceiver<bool>,
+        blocked: mpsc::UnboundedReceiver<()>,
         thread: std::thread::JoinHandle<()>,
         _rect: watch::Sender<Option<MonitorRect>>,
     }
@@ -251,6 +280,7 @@ mod tests {
         let (tx, events) = std::sync::mpsc::channel();
         let (rect_tx, rect) = watch::channel(Some(MonitorRect::new(0, 0, 100, 100)));
         let (ptx, prio) = mpsc::unbounded_channel();
+        let (btx, blocked) = mpsc::unbounded_channel();
         let ctx = InputCtx {
             factory: {
                 let log = log.clone();
@@ -272,6 +302,7 @@ mod tests {
             }),
             label: "viewer".into(),
             priority: ptx,
+            blocked: btx,
         };
         let thread = std::thread::spawn(move || run(ctx));
         Rig {
@@ -279,6 +310,7 @@ mod tests {
             log,
             local,
             prio,
+            blocked,
             thread,
             _rect: rect_tx,
         }
@@ -393,6 +425,27 @@ mod tests {
         assert!(
             !log.iter().any(|l| l == "MouseMove { x: 3, y: 3 }"),
             "{log:?}"
+        );
+    }
+
+    /// A UIPI-blocked injection is reported to the control loop, once per notice window.
+    #[test]
+    fn blocked_injection_is_reported_rate_limited() {
+        let mut r = rig(Duration::ZERO);
+        let blocked_key = |down| InputEvent::Key {
+            scancode: 0xFF,
+            extended: false,
+            down,
+        };
+        r.tx.send(blocked_key(true)).unwrap();
+        r.tx.send(blocked_key(false)).unwrap();
+        wait_for(&r.log, &format!("{:?}", blocked_key(false)));
+        drop(r.tx);
+        r.thread.join().unwrap();
+        assert_eq!(r.blocked.try_recv(), Ok(()));
+        assert!(
+            r.blocked.try_recv().is_err(),
+            "second failure is rate limited"
         );
     }
 }
