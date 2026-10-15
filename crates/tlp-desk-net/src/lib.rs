@@ -13,6 +13,8 @@
 //! * [`ChatFeature`]: chat between the viewer and the host user (both roles).
 //! * [`Discovery`]: mDNS `_tlpdesk._udp.local.` + broadcast fallback on UDP 47401.
 //! * [`send_wake_on_lan`].
+//! * Port forwarding helpers: [`pipe_tcp`] (TCP <-> tunnel stream) and [`resolve_target`]
+//!   (LAN-only target check).
 //!
 //! No function in this crate contacts anything outside the local network.
 #![forbid(unsafe_code)]
@@ -25,6 +27,7 @@ mod error;
 mod feature;
 mod session;
 mod tls;
+mod tunnel;
 mod wol;
 
 pub use allow::{normalize, AllowList, BadCidr, Cidr};
@@ -50,6 +53,10 @@ pub use session::{
 };
 pub use tlp_desk_proto::{StreamHeader, StreamKind};
 pub use tls::{Pin, ALPN};
+pub use tunnel::{
+    close_reason, pipe_tcp, resolve_target, sanitize_close_text, PipeEnd, TargetError,
+    TunnelCounters, MAX_CLOSE_TEXT, MAX_TARGET_HOST_LEN, TUNNEL_BUF,
+};
 pub use wol::{magic_packet, parse_mac, send_wake_on_lan, WOL_PORT};
 
 /// QUIC (session) UDP port.

@@ -14,6 +14,7 @@ use tlp_desk_host::{CancelReason, ConnectedViewer, EndReason as HostEnd, Incomin
 use tlp_desk_net::{AuthKind, DiscoveredDevice, PeerInfo};
 use tlp_desk_proto::{Permissions, RejectReason};
 use tlp_desk_viewer::{EndReason as ViewerEnd, MonitorDesc, ViewerStats};
+use tlp_desk_viewer::{ForwardSpec, TunnelCloseReason, TunnelId, TunnelStatus, ViewerError};
 
 /// Language of the human-readable output.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
@@ -431,6 +432,139 @@ pub fn selecting_monitor(index: u32) -> String {
     t(
         format!("Switching to monitor {index}..."),
         format!("جارٍ التبديل إلى الشاشة {index}..."),
+    )
+}
+
+// --- tunnels: port forwarding (TLP-tunnel) ---
+
+pub fn tunnels_allowed() -> &'static str {
+    t(
+        "Port forwarding is ALLOWED for viewers (--allow-tunnels): they can reach services on \
+         this PC and its local network.",
+        "إعادة توجيه المنافذ مسموحة للمشاهدين (--allow-tunnels): يمكنهم الوصول إلى الخدمات على \
+         هذا الجهاز وشبكته المحلية.",
+    )
+}
+
+pub fn tunnel_waiting_permission() -> &'static str {
+    t(
+        "The host has not allowed port forwarding yet. Waiting until the host user grants it \
+         (Ctrl+C to stop)...",
+        "لم يسمح المضيف بإعادة توجيه المنافذ بعد. بانتظار أن يمنحها مستخدم المضيف \
+         (Ctrl+C للإيقاف)...",
+    )
+}
+
+pub fn forward_running() -> &'static str {
+    t(
+        "Forwarding. Press Ctrl+C to stop.",
+        "إعادة التوجيه تعمل. اضغط Ctrl+C للإيقاف.",
+    )
+}
+
+pub fn lan_bind_warning(bind: std::net::SocketAddr) -> String {
+    t(
+        format!(
+            "WARNING: listening on {bind}: other devices on your network can use this tunnel too."
+        ),
+        format!("تحذير: الاستماع على {bind}: يمكن للأجهزة الأخرى على شبكتك استخدام هذا النفق أيضًا."),
+    )
+}
+
+pub fn lan_bind_needs_flag(bind: std::net::SocketAddr) -> String {
+    t(
+        format!(
+            "{bind} is not a loopback address: other devices could use the tunnel. Add \
+             --bind-lan to confirm."
+        ),
+        format!(
+            "{bind} ليس عنوانًا محليًا (loopback): قد تستخدم أجهزة أخرى النفق. أضف --bind-lan \
+             للتأكيد."
+        ),
+    )
+}
+
+pub fn forward_started(s: &TunnelStatus) -> String {
+    t(
+        format!(
+            "Forwarding {} -> {} on the host (rule {})",
+            s.local,
+            s.target_display(),
+            s.id
+        ),
+        format!(
+            "إعادة توجيه {} -> {} على المضيف (القاعدة {})",
+            s.local,
+            s.target_display(),
+            s.id
+        ),
+    )
+}
+
+pub fn forward_failed(spec: &ForwardSpec, e: &ViewerError) -> String {
+    t(
+        format!("Cannot forward {spec}: {e}"),
+        format!("تعذّرت إعادة توجيه {spec}: {e}"),
+    )
+}
+
+pub fn forward_closed(id: TunnelId, reason: &TunnelCloseReason) -> String {
+    t(
+        format!("Rule {id} closed by the host: {reason}"),
+        format!("أغلق المضيف القاعدة {id}: {reason}"),
+    )
+}
+
+pub fn forward_stats(list: &[TunnelStatus]) -> String {
+    let mut out = String::new();
+    for s in list {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let (from, to) = (s.local, s.target_display());
+        out.push_str(&t(
+            format!(
+                "  {from} -> {to}: {} open, {} total, {} failed, sent {} B, received {} B",
+                s.active, s.connections, s.failed, s.bytes_sent, s.bytes_received
+            ),
+            format!(
+                "  {from} -> {to}: {} مفتوح، {} إجمالًا، {} فاشل، أُرسل {} بايت، استُقبل {} بايت",
+                s.active, s.connections, s.failed, s.bytes_sent, s.bytes_received
+            ),
+        ));
+    }
+    out
+}
+
+pub fn host_tunnels(list: &[tlp_desk_host::HostTunnelInfo]) -> String {
+    if list.is_empty() {
+        return t(
+            "Port forwarding: no tunnel open.",
+            "إعادة توجيه المنافذ: لا يوجد نفق مفتوح.",
+        )
+        .into();
+    }
+    let mut out = String::from(t("Port forwarding:", "إعادة توجيه المنافذ:"));
+    for tn in list {
+        out.push_str(&t(
+            format!(
+                "\n  tunnel {} -> {}: {} open, {} total, {} failed",
+                tn.id, tn.target, tn.active, tn.connections, tn.failed
+            ),
+            format!(
+                "\n  النفق {} -> {}: {} مفتوح، {} إجمالًا، {} فاشل",
+                tn.id, tn.target, tn.active, tn.connections, tn.failed
+            ),
+        ));
+    }
+    out
+}
+
+pub fn host_tunnel_refused(target_host: Option<&str>, port: u16, reason: &str) -> String {
+    let host = target_host.unwrap_or("localhost");
+    t(
+        format!("Refused port forwarding to {host:?}:{port} ({reason})"),
+        format!("رُفضت إعادة التوجيه إلى {host:?}:{port} ({reason})"),
     )
 }
 

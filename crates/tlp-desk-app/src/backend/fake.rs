@@ -24,6 +24,7 @@ use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
 use super::chat::{ChatLine, ChatSendError};
+use super::tunnels::{TunnelProblem, TunnelRequest, TunnelRow};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, LocalInfo, MonitorDesc, PeerInfo, RepaintFn,
@@ -78,6 +79,8 @@ struct State {
     /// The simulated "reinstalled" host at 192.168.1.66 has a changed key until forgotten.
     key_changed: bool,
     rng: u64,
+    /// Simulated port forwarding rules per viewer session (TLP-tunnel).
+    tunnels: HashMap<SessionId, Vec<TunnelRow>>,
 }
 
 /// Address of the simulated host whose key changed.
@@ -130,6 +133,7 @@ impl FakeBackend {
                 requests: HashMap::new(),
                 key_changed: true,
                 rng,
+                tunnels: HashMap::new(),
             }),
         });
         inner.spawn_discovery();
@@ -648,7 +652,83 @@ impl Backend for FakeBackend {
         });
     }
 
+    // --- power: port forwarding (TLP-tunnel), simulated: rules appear, no traffic ---
+
+    fn add_tunnel(&self, session: SessionId, request: TunnelRequest) {
+        let event = {
+            let mut st = self.inner.state();
+            if !st.sessions.contains_key(&session) {
+                return;
+            }
+            let target_ip = request
+                .target_host
+                .as_deref()
+                .map_or(Some(IpAddr::V4(Ipv4Addr::LOCALHOST)), |h| h.parse().ok());
+            let rules = st.tunnels.entry(session).or_default();
+            let problem = match target_ip {
+                None => Some(TunnelProblem::BadTarget),
+                Some(ip) if !is_lan(ip) => Some(TunnelProblem::TargetNotAllowed),
+                Some(_) if rules.iter().any(|r| r.local.port() == request.local_port) => {
+                    Some(TunnelProblem::LocalPort("address in use (fake)".into()))
+                }
+                Some(_) => None,
+            };
+            match (problem, target_ip) {
+                (Some(problem), _) => BackendEvent::TunnelProblem { session, problem },
+                (None, ip) => {
+                    let bind = if request.lan_bind {
+                        Ipv4Addr::UNSPECIFIED
+                    } else {
+                        Ipv4Addr::LOCALHOST
+                    };
+                    let target = match ip {
+                        Some(ip) if request.target_host.is_some() => {
+                            std::net::SocketAddr::new(ip, request.target_port).to_string()
+                        }
+                        _ => format!("localhost:{}", request.target_port),
+                    };
+                    rules.push(TunnelRow {
+                        id: self.inner.next_id(),
+                        local: std::net::SocketAddr::new(IpAddr::V4(bind), request.local_port),
+                        target,
+                        active: 0,
+                        connections: 0,
+                        failed: 0,
+                        bytes_sent: 0,
+                        bytes_received: 0,
+                    });
+                    BackendEvent::Tunnels {
+                        session,
+                        rules: rules.clone(),
+                    }
+                }
+            }
+        };
+        self.inner.emit(event);
+    }
+
+    fn stop_tunnel(&self, session: SessionId, id: u64) {
+        let rules = {
+            let mut st = self.inner.state();
+            let Some(rules) = st.tunnels.get_mut(&session) else {
+                return;
+            };
+            rules.retain(|r| r.id != id);
+            rules.clone()
+        };
+        self.inner.emit(BackendEvent::Tunnels { session, rules });
+    }
+
+    fn allow_tunnels(&self, session: SessionId, allowed: bool) {
+        self.inner.emit(BackendEvent::HostTunnels {
+            session,
+            allowed,
+            tunnels: Vec::new(),
+        });
+    }
+
     fn disconnect(&self, session: SessionId) {
+        self.inner.state().tunnels.remove(&session);
         let removed = self.inner.state().sessions.remove(&session);
         if let Some(ctl) = removed {
             if let Some(task) = ctl.task {

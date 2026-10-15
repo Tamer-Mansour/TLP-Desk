@@ -5,7 +5,7 @@
 
 use tlp_desk_net::NetError;
 use tlp_desk_proto::RejectReason;
-use tlp_desk_viewer::ViewerError;
+use tlp_desk_viewer::{TunnelCloseReason, ViewerError};
 
 /// Why the CLI stopped. `as u8` is the process exit code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +114,18 @@ fn of_viewer(e: &ViewerError) -> Exit {
         }
         ViewerError::VersionMismatch { .. } => Exit::VersionMismatch,
         ViewerError::Net(n) => of_net(n).unwrap_or(Exit::Failure),
+        // --- tunnels (TLP-tunnel) ---
+        ViewerError::TunnelNotAllowed => Exit::PermissionDenied,
+        ViewerError::TunnelRefused(r) => match r {
+            TunnelCloseReason::TargetNotAllowed
+            | TunnelCloseReason::PermissionDenied
+            | TunnelCloseReason::PermissionRevoked => Exit::PermissionDenied,
+            TunnelCloseReason::NoAnswer => Exit::Timeout,
+            _ => Exit::Failure,
+        },
+        ViewerError::TunnelSpec(_) | ViewerError::TunnelLanBind(_) => Exit::Usage,
+        ViewerError::TunnelBind { .. } | ViewerError::TunnelLimit => Exit::Failure,
+        ViewerError::SessionEnded => Exit::Unreachable,
         ViewerError::KnownHosts(_)
         | ViewerError::RecordingIo(_)
         | ViewerError::DiskFull { .. }

@@ -10,7 +10,10 @@ use serde_json::json;
 use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
 use tlp_desk_files::fs::{FsConfig, FsFeature};
 use tlp_desk_files::{FileTransfer, TransferConfig, TransferEvent};
-use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
+use tlp_desk_host::{
+    Host, HostConfig, HostEvent, HostTunnelEvent, HostTunnels, RequestId, TunnelHostConfig,
+    DEFAULT_PERMISSIONS,
+};
 use tlp_desk_net::{ChatEvent, ChatFeature, Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
 use tlp_desk_proto::Permissions;
 use tlp_desk_proto::TransferDirection;
@@ -53,6 +56,10 @@ pub struct ServeArgs {
     /// Do not show the green marker at the pointer while a viewer moves it.
     #[arg(long)]
     pub no_pointer_marker: bool,
+    /// Let viewers forward TCP ports to services on this PC and its LAN (TUNNEL permission;
+    /// off by default).
+    #[arg(long)]
+    pub allow_tunnels: bool,
     /// Sync this PC's clipboard with viewers (grants the clipboard permission).
     #[arg(long)]
     pub clipboard: bool,
@@ -85,6 +92,11 @@ impl ServeArgs {
                 Permissions::FILES
             } else {
                 Permissions::NONE
+            })
+            .union(if self.allow_tunnels {
+                Permissions::TUNNEL
+            } else {
+                Permissions::NONE
             }),
             advertise: !self.no_discovery,
             device_name: self
@@ -108,7 +120,9 @@ fn host_features(args: &ServeArgs) -> FeatureSet {
         // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
         .with(ClipFilesFeature::new(ClipFilesConfig::default()))
         // Chat: received messages are printed; the CLI host does not reply (TLP-chat).
-        .with(ChatFeature::new());
+        .with(ChatFeature::new())
+        // Port forwarding; served only to sessions holding TUNNEL.
+        .with(HostTunnels::new(TunnelHostConfig::default()));
     if args.clipboard {
         // Text, HTML and images; served only to sessions holding CLIPBOARD.
         set.push(tlp_desk_files::ClipboardFeature::new(
@@ -146,6 +160,55 @@ fn transfer_event(out: Output, event: &FeatureEvent) {
             }),
         ),
         _ => {}
+    }
+}
+
+/// Prints changes to a session's port-forwarding tunnels and refused targets.
+fn tunnel_event(
+    out: Output,
+    id: tlp_desk_host::SessionId,
+    event: &HostTunnelEvent,
+    shape_seen: &mut Vec<(u64, usize)>,
+) {
+    match event {
+        HostTunnelEvent::Changed(list) => {
+            let shape: Vec<_> = list.iter().map(|t| (t.id, t.active)).collect();
+            if shape != *shape_seen {
+                let tunnels: Vec<_> = list
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "tunnel": t.id,
+                            "target": t.target.to_string(),
+                            "active": t.active,
+                            "connections": t.connections,
+                            "failed": t.failed,
+                        })
+                    })
+                    .collect();
+                out.event(
+                    text::host_tunnels(list),
+                    &json!({ "type": "tunnels", "session": id.0, "tunnels": tunnels }),
+                );
+                *shape_seen = shape;
+            }
+        }
+        HostTunnelEvent::Refused {
+            id: tunnel,
+            target_host,
+            target_port,
+            reason,
+        } => out.event(
+            text::host_tunnel_refused(target_host.as_deref(), *target_port, reason),
+            &json!({
+                "type": "tunnel_refused",
+                "session": id.0,
+                "tunnel": tunnel,
+                "target_host": target_host,
+                "target_port": target_port,
+                "reason": reason,
+            }),
+        ),
     }
 }
 
@@ -193,7 +256,13 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
     if auto_accept {
         eprintln!("{}", text::auto_accept());
     }
+    if args.allow_tunnels {
+        eprintln!("{}", text::tunnels_allowed());
+    }
 
+    // Open tunnels per session as (id, active connections): counters alone change every
+    // second, only changes of this shape are printed.
+    let mut tunnel_shape: Vec<(u64, usize)> = Vec::new();
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
@@ -259,7 +328,9 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                     ),
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
                     HostEvent::Feature { id, event } => {
-                        if let Some((line, value)) = super::clip_send::event_line(&event) {
+                        if let Some(t) = event.payload::<HostTunnelEvent>() {
+                            tunnel_event(out, id, t, &mut tunnel_shape);
+                        } else if let Some((line, value)) = super::clip_send::event_line(&event) {
                             out.event(line, &value);
                         } else if let Some(ChatEvent::Received(m)) = event.payload::<ChatEvent>() {
                             let name = host

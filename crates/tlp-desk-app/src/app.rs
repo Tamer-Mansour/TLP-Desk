@@ -21,6 +21,7 @@ use crate::ui::chat::{self as chat_ui, ChatState};
 use crate::ui::icons::{self, Icon};
 use crate::ui::recordings::{self, RecordState, RecordingsUi};
 use crate::ui::session::ViewerSession;
+use crate::ui::tunnels::{self, HostTunnelState};
 use crate::ui::{theme, widgets};
 
 /// Which full-window screen is shown when no viewer session is active.
@@ -105,6 +106,8 @@ pub struct App {
     hwnd: Option<isize>,
     pub incoming: VecDeque<(RequestId, PeerInfo)>,
     pub host_sessions: Vec<(SessionId, PeerInfo)>,
+    /// Port forwarding state per incoming session (TLP-tunnel).
+    pub host_tunnels: HashMap<SessionId, HostTunnelState>,
     /// Host side: chat with each connected viewer (window opens when the viewer writes).
     pub host_chats: HashMap<SessionId, ChatState>,
     /// When the OS last refused a remote viewer's input (elevated window in front).
@@ -155,6 +158,7 @@ impl App {
             hwnd: keygrab::window_handle(cc),
             incoming: VecDeque::new(),
             host_sessions: Vec::new(),
+            host_tunnels: HashMap::new(),
             host_chats: HashMap::new(),
             host_input_blocked: None,
             session: None,
@@ -348,6 +352,7 @@ impl App {
                 }
                 BackendEvent::SessionEnded { session, reason } => {
                     self.host_sessions.retain(|(id, _)| *id != session);
+                    self.host_tunnels.remove(&session);
                     self.host_chats.remove(&session);
                     if self.session.as_ref().is_some_and(|s| s.id == session) {
                         self.session = None;
@@ -382,6 +387,28 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- power: port forwarding (TLP-tunnel) ---
+                BackendEvent::Tunnels { session, rules } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.tunnels.rules = rules;
+                    }
+                }
+                BackendEvent::TunnelProblem { session, problem } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.tunnels.problem = Some(problem);
+                        s.tunnels.open = true;
+                    }
+                }
+                BackendEvent::HostTunnels {
+                    session,
+                    allowed,
+                    tunnels,
+                } => {
+                    if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_tunnels
+                            .insert(session, HostTunnelState { allowed, tunnels });
+                    }
+                }
                 // whiteboard (TLP-whiteboard)
                 BackendEvent::WhiteboardRemote { session, op } => {
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
@@ -527,6 +554,13 @@ impl App {
                             if ui.add(end_button).clicked() {
                                 end = Some(*session);
                             }
+                            tunnels::host_banner_controls(
+                                ui,
+                                tx,
+                                self.backend.as_ref(),
+                                *session,
+                                self.host_tunnels.get(session),
+                            );
                             // chat (TLP-chat)
                             if let Some(chat) = self.host_chats.get(session) {
                                 if chat_ui::chat_toggle(ui, tx, chat) {

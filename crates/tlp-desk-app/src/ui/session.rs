@@ -61,6 +61,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Port forwarding window (TLP-tunnel).
+    pub tunnels: super::tunnels::TunnelsPanel,
     /// Draw-on-screen state (TLP-whiteboard).
     pub whiteboard: WhiteboardUi,
     /// Session recording (TLP-recording), driven by the backend's recording events.
@@ -115,6 +117,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            tunnels: Default::default(),
             whiteboard: WhiteboardUi::new(),
             recording: Default::default(),
             chat: ChatState::new(permissions.contains(Permissions::CHAT)),
@@ -249,6 +252,16 @@ impl ViewerSession {
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        // Clicks in the floating port forwarding window are not remote input. (Typing there is
+        // not either: keys go to the remote PC only while the remote view has keyboard focus.)
+        let window = self
+            .tunnels
+            .window(&ctx, tx, backend, self.id, self.permissions);
+        let over_window = window.is_some_and(|r| {
+            ctx.input(|i| i.pointer.hover_pos())
+                .is_some_and(|p| r.expand(4.0).contains(p))
+        });
+        let modal_open = modal_open || over_window;
         self.files.ui(ui, tx, backend, self.permissions);
         let modal_open = modal_open || self.files.modal_open() || self.files.owns_keyboard();
         self.transfers_ui(ui, tx, backend);
@@ -402,6 +415,7 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    self.tunnels.toolbar_button(ui, tx);
                     let wb_allowed = self.permissions.contains(Permissions::WHITEBOARD);
                     if self.whiteboard.toggle_button(ui, tx, wb_allowed) == Some(true) {
                         // Drawing takes the pointer: nothing may stay pressed on the remote PC.

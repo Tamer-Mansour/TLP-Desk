@@ -357,6 +357,19 @@ key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited l
   `TunnelOpened { id }` or `TunnelClose { id, error }`. Each local TCP connection accepted by the
   viewer becomes one `StreamKind::Tunnel` bidi stream (stream id = tunnel id), opened by the viewer;
   the host connects to the target for each stream and copies bytes both ways.
+  - **Targets**: `target_host` must be an IP literal (IPv6 optionally in brackets) or
+    `localhost`, and inside the host's allow-list (default: loopback, RFC 1918, link-local,
+    IPv6 ULA). Host names are never resolved, so no DNS query leaves the LAN; unspecified,
+    multicast and broadcast addresses are refused.
+  - **Close reasons**: the host fills `TunnelClose::error` with one of `target-not-allowed`,
+    `bad-target`, `too-many-tunnels`, `duplicate-id`, `permission-denied`,
+    `permission-revoked` (sent for every open tunnel when `TUNNEL` is revoked). Receivers
+    treat other text as free text (control characters stripped, at most 200 characters).
+  - **Half-close**: TCP EOF finishes the stream's send direction; a finished stream shuts down
+    the TCP write half; the other direction keeps flowing.
+  - **Refusal / abort**: a tunnel stream for an unknown or closed tunnel, beyond the host's
+    connection limit, without `TUNNEL`, or whose target cannot be reached is stopped/reset
+    with `STREAM_REFUSED`; aborted (idle, revoked) connections are reset the same way.
 - **Whiteboard** (`WHITEBOARD`): `WhiteboardStroke { id, points, color_rgba, width }` with points
   normalized to `0..=65535` over the streamed monitor, `color_rgba = 0xRRGGBBAA`, width in 1/10000
   of the monitor height; `WhiteboardClear` erases all.

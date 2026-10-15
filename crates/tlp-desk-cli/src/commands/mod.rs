@@ -8,6 +8,7 @@ pub mod chat;
 pub mod clip_send;
 pub mod common;
 pub mod connect;
+pub mod forward;
 pub mod get_file;
 pub mod id;
 pub mod list;
@@ -70,6 +71,9 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// Viewer: forward local TCP ports to services on (or next to) the host until Ctrl+C,
+    /// e.g. `forward 192.168.1.20 8080:127.0.0.1:80`. The host must allow port forwarding.
+    Forward(forward::ForwardArgs),
     /// Viewer: send one chat message to a host and print the replies.
     Chat(chat::ChatArgs),
     /// Viewer: put text on the host's clipboard (this PC's clipboard is not touched).
@@ -113,6 +117,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::Forward(a) => forward::run(&ctx, a).await,
         Cmd::Chat(a) => chat::run(&ctx, a).await,
         Cmd::ClipSend(a) => clip_send::run(&ctx, a).await,
         Cmd::Ls(a) => ls::run(&ctx, a).await,
