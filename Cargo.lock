@@ -4053,6 +4053,7 @@ dependencies = [
  "png",
  "serde_json",
  "tlp-desk-crypto",
+ "tlp-desk-files",
  "tlp-desk-host",
  "tlp-desk-net",
  "tlp-desk-proto",
