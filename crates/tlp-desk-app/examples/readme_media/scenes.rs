@@ -104,6 +104,11 @@ pub const SCENES: &[Scene] = &[
         about: "viewer session while recording: red indicator with the elapsed time",
         setup: recording,
     },
+    Scene {
+        name: "whiteboard",
+        about: "viewer session in drawing mode: tools bar and a few strokes on the remote screen",
+        setup: whiteboard,
+    },
 ];
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
@@ -292,6 +297,55 @@ fn recording(app: &mut App, lang: Lang) {
             .checked_sub(Duration::from_secs(12 * 60 + 34))
             .unwrap_or_else(std::time::Instant::now);
         s.recording = tlp_desk_app::ui::recordings::RecordState::On { since };
+    }
+}
+
+fn whiteboard(app: &mut App, lang: Lang) {
+    use tlp_desk_input::whiteboard::{Rgba, Stroke, WhiteboardOp};
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        s.whiteboard.set_active(true);
+        let now = std::time::Instant::now();
+        // A red circle around something, and a blue arrow pointing at it.
+        let circle: Vec<(u16, u16)> = (0..=36u32)
+            .map(|i| {
+                let a = f64::from(i) * std::f64::consts::TAU / 36.0;
+                (
+                    (30_000.0 + 7_000.0 * a.cos()) as u16,
+                    (26_000.0 + 9_000.0 * a.sin()) as u16,
+                )
+            })
+            .collect();
+        let strokes = [
+            (1, circle, Rgba::new(0xE5, 0x39, 0x35, 0xFF), 90),
+            (
+                2,
+                vec![(48_000, 12_000), (40_500, 21_000)],
+                Rgba::new(0x1E, 0x88, 0xE5, 0xFF),
+                90,
+            ),
+            (
+                3,
+                vec![(40_500, 21_000), (43_500, 20_300)],
+                Rgba::new(0x1E, 0x88, 0xE5, 0xFF),
+                90,
+            ),
+            (
+                4,
+                vec![(40_500, 21_000), (41_300, 17_800)],
+                Rgba::new(0x1E, 0x88, 0xE5, 0xFF),
+                90,
+            ),
+        ];
+        for (id, points, color, width) in strokes {
+            let stroke = Stroke {
+                id,
+                points,
+                color,
+                width,
+            };
+            s.whiteboard.remote(&WhiteboardOp::Stroke(stroke), now);
+        }
     }
 }
 
