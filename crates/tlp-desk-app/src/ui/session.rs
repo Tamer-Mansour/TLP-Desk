@@ -483,7 +483,7 @@ impl ViewerSession {
         order.sort_by_key(|m| (m.x, m.y, m.index));
         for (n, m) in order.iter().enumerate() {
             let label = tx.n(&(n + 1).to_string());
-            let res = tx.digits(&format!("{}Ã—{}", m.width, m.height));
+            let res = tx.digits(&format!("{}×{}", m.width, m.height));
             let mut tip = tx.f(
                 S::ScreenTooltip,
                 &[("n", &tx.digits(&(n + 1).to_string())), ("res", &res)],
@@ -599,7 +599,7 @@ impl ViewerSession {
         }
         lines.push((
             S::StatResolution,
-            tx.digits(&format!("{}Ã—{}", self.frame_size[0], self.frame_size[1])),
+            tx.digits(&format!("{}×{}", self.frame_size[0], self.frame_size[1])),
         ));
         lines.push((
             S::StatDuration,
@@ -1065,7 +1065,7 @@ mod tests {
         rig.take();
         rig.frame(vec![
             egui_key(egui::Key::H, true),
-            egui::Event::Text("Ù…Ø±Ø­Ø¨Ø§ hi".into()),
+            egui::Event::Text("مرحبا hi".into()),
             egui_key(egui::Key::H, false),
             egui_key(egui::Key::Backspace, true),
             egui_key(egui::Key::Backspace, false),
@@ -1215,15 +1215,15 @@ mod tests {
         assert!(backend.1.lock().unwrap().is_empty());
     }
 
-    /// The resolution value keeps its WÃ—H order inside the Arabic overlay line: it is displayed
-    /// exactly like the standalone number `tx.n("1024Ã—768")` (Arabic-Indic digit runs are
+    /// The resolution value keeps its W×H order inside the Arabic overlay line: it is displayed
+    /// exactly like the standalone number `tx.n("1024×768")` (Arabic-Indic digit runs are
     /// pre-reversed for egui, which draws Arabic-font runs right to left).
     #[test]
     fn arabic_overlay_keeps_resolution_order() {
         let frames = FrameSlot::new();
         let peer = PeerInfo {
             device_id: DeviceId(2),
-            name: "Ø­Ø§Ø³ÙˆØ¨-Ø§Ù„Ù…ÙƒØªØ¨".into(),
+            name: "حاسوب-المكتب".into(),
             address: "192.168.1.2".parse().unwrap(),
         };
         let mut session = ViewerSession::new(SessionId(1), peer, Permissions::ALL, frames);
@@ -1231,7 +1231,7 @@ mod tests {
         for digits in [DigitStyle::Western, DigitStyle::ArabicIndic] {
             for lang in [Lang::Ar, Lang::En] {
                 let tx = Tx::new(lang, digits);
-                let want = tx.n("1024Ã—768");
+                let want = tx.n("1024×768");
                 let lines = session.stat_lines(tx);
                 assert!(
                     lines[0].contains(&want),
@@ -1242,8 +1242,8 @@ mod tests {
         }
         // And the standalone form is W first for Western digits.
         assert_eq!(
-            Tx::new(Lang::Ar, DigitStyle::Western).n("1024Ã—768"),
-            "1024Ã—768"
+            Tx::new(Lang::Ar, DigitStyle::Western).n("1024×768"),
+            "1024×768"
         );
     }
 

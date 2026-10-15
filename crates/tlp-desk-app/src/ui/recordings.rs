@@ -59,9 +59,10 @@ pub fn record_toggle(ui: &mut egui::Ui, tx: Tx, state: RecordState) -> Option<bo
             let stop = ui.add(button).on_hover_text(tx.t(S::RecStop)).clicked();
             theme::status_dot(ui, red);
             let elapsed = format::duration(since.elapsed(), DigitStyle::Western);
-            let text = tx.f(S::RecActive, &[("time", &tx.digits(&elapsed))]);
-            ui.label(RichText::new(text).color(red).strong())
-                .on_hover_text(tx.t(S::RecStop));
+            let time = tx.digits(&elapsed);
+            // Only the clock is shown (the toolbar is tight); the tooltip has the full text.
+            ui.label(RichText::new(&time).color(red).strong())
+                .on_hover_text(tx.f(S::RecActive, &[("time", &time)]));
             // Keep the clock ticking without new frames.
             ui.ctx().request_repaint_after(Duration::from_millis(500));
             stop.then_some(false)
