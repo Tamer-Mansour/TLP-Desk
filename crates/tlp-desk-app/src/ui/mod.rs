@@ -2,6 +2,7 @@
 
 pub mod chat;
 pub mod clipboard;
+pub mod connection_log;
 pub mod device_info;
 pub mod file_browser;
 pub mod home;

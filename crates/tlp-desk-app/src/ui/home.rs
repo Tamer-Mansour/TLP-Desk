@@ -13,6 +13,8 @@ enum Action {
     ConnectAddress,
     NewCode,
     OpenSettings,
+    /// connection log (TLP-settings-tray)
+    OpenConnectionLog,
     SetLang(Lang),
     /// recording (TLP-recording)
     OpenRecordings,
@@ -73,6 +75,18 @@ fn top_bar(ui: &mut egui::Ui, tx: Tx, actions: &mut Vec<Action>, show_settings_b
                     {
                         actions.push(Action::OpenRecordings);
                     }
+                    // connection log (TLP-settings-tray)
+                    if show_settings_button
+                        && ui
+                            .add(icons::icon_text_button(
+                                tx,
+                                Icon::Log,
+                                tx.t(S::ConnectionLog),
+                            ))
+                            .clicked()
+                    {
+                        actions.push(Action::OpenConnectionLog);
+                    }
                 });
             });
         });
@@ -104,6 +118,7 @@ impl App {
                 Action::ConnectAddress => self.connect_from_address(),
                 Action::NewCode => self.backend.refresh_one_time_code(),
                 Action::OpenSettings => self.screen = Screen::Settings,
+                Action::OpenConnectionLog => self.open_connection_log(),
                 Action::SetLang(l) => self.set_lang(ui.ctx(), l),
                 Action::OpenRecordings => {
                     self.recordings.open = true;

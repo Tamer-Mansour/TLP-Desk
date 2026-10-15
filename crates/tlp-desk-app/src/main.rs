@@ -109,7 +109,12 @@ fn main() -> anyhow::Result<()> {
                 };
                 backend::real::RealBackend::start_with(&rt, repaint, cfg)
             };
-            Ok(Box::new(App::new(cc, backend, events, settings, start)))
+            #[cfg_attr(not(windows), allow(unused_mut))]
+            let mut app = App::new(cc, backend, events, settings, start);
+            // Notification-area icon: only the real GUI creates one (never tests or media).
+            #[cfg(windows)]
+            app.enable_tray(&cc.egui_ctx);
+            Ok(Box::new(app))
         }),
     )
     .map_err(|e| anyhow::anyhow!("GUI failed: {e}"))?;

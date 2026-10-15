@@ -9,6 +9,8 @@ mod allow_list;
 mod incoming;
 mod startup;
 
+pub(crate) use incoming::PERMISSION_LABELS;
+
 use eframe::egui::{self, RichText};
 
 use super::icons::{self, Icon};
@@ -28,6 +30,8 @@ pub struct SettingsUi {
     pub pending_public: Option<String>,
     /// The last start-with-Windows change failed (display-ready).
     pub autostart_error: Option<String>,
+    /// Scroll the screen to this offset on the next frame (README media only).
+    pub scroll_offset: Option<f32>,
 }
 
 /// A checkbox whose label sits on the reading side (RTL-aware); returns `true` if toggled.
@@ -66,31 +70,33 @@ impl App {
                     ui.label(RichText::new(tx.t(S::Settings)).heading().strong());
                 });
                 ui.add_space(10.0);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        theme::column(ui, tx.rtl(), |ui| {
-                            ui.set_max_width(620.0_f32.min(ui.available_width()));
-                            self.appearance_card(ui);
-                            ui.add_space(12.0);
-                            self.device_card_settings(ui);
-                            ui.add_space(12.0);
-                            self.incoming_card(ui);
-                            ui.add_space(12.0);
-                            self.allow_list_card(ui);
-                            ui.add_space(12.0);
-                            self.quality_card(ui);
-                            ui.add_space(12.0);
-                            self.startup_card(ui);
-                            ui.add_space(12.0);
-                            crate::ui::clipboard::settings_card(
-                                ui,
-                                tx,
-                                &mut self.settings,
-                                self.backend.as_ref(),
-                            );
-                        });
+                let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                if let Some(y) = self.settings_ui.scroll_offset.take() {
+                    area = area.vertical_scroll_offset(y);
+                }
+                area.show(ui, |ui| {
+                    theme::column(ui, tx.rtl(), |ui| {
+                        ui.set_max_width(620.0_f32.min(ui.available_width()));
+                        self.appearance_card(ui);
+                        ui.add_space(12.0);
+                        self.device_card_settings(ui);
+                        ui.add_space(12.0);
+                        self.incoming_card(ui);
+                        ui.add_space(12.0);
+                        self.allow_list_card(ui);
+                        ui.add_space(12.0);
+                        self.quality_card(ui);
+                        ui.add_space(12.0);
+                        self.startup_card(ui);
+                        ui.add_space(12.0);
+                        crate::ui::clipboard::settings_card(
+                            ui,
+                            tx,
+                            &mut self.settings,
+                            self.backend.as_ref(),
+                        );
                     });
+                });
             });
         if back {
             self.screen = Screen::Home;

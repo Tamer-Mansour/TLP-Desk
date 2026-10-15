@@ -5,11 +5,13 @@
 //!   incoming requests do (pure, tested).
 //! * [`system`]: the real icon (`tray-icon`), created only by the running GUI, never in tests.
 
+pub mod glue;
 pub mod model;
 pub mod shell;
 #[cfg(windows)]
 pub mod system;
 
+pub use glue::TrayState;
 pub use model::{TrayAction, TrayEntry};
 pub use shell::{Shell, WindowCmd, WindowMode};
 #[cfg(windows)]
