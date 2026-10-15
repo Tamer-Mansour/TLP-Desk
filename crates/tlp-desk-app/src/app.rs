@@ -355,6 +355,12 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- device info (TLP-cli-devinfo) ---
+                BackendEvent::DeviceInfo { session, info } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.device_info.set_info(info);
+                    }
+                }
             }
         }
     }

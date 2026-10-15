@@ -50,6 +50,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Remote device-info window (toolbar button).
+    pub device_info: super::device_info::DeviceInfoPanel,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -89,6 +91,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            device_info: Default::default(),
         }
     }
 
@@ -183,6 +186,7 @@ impl ViewerSession {
         let ctx = ui.ctx().clone();
         self.update_texture(&ctx);
         self.toolbar(ui, tx, backend);
+        self.device_info.window(&ctx, tx, backend, self.id);
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
@@ -296,6 +300,7 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    self.device_info.toolbar_button(ui, tx, backend, self.id);
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
                         self.release_all(backend);
