@@ -53,6 +53,10 @@ As long as anyone is connected to your PC, a coloured bar stays at the top of th
 - The banner is shown on every screen of TLP-Desk, even while you are yourself connected to another
   PC.
 - TLP-Desk also comes to the front when a session starts, so a connection never goes unnoticed.
+- If you minimise TLP-Desk or send it to the notification area, a small always-on-top banner with
+  the same text and an **End session** button stays on screen while anyone is connected. It does
+  not take keyboard focus when it appears. It is visible to the viewer too (it is deliberately not
+  hidden from screen capture), so they can see that you see them.
 
 ## While someone controls your PC
 
