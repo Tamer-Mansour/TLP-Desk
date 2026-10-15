@@ -248,24 +248,14 @@ mod tests {
     struct Recorder(Mutex<Vec<String>>);
 
     impl TransferStarter for Recorder {
-        fn upload(
-            &self,
-            _: u64,
-            local: Vec<PathBuf>,
-            remote_dir: String,
-        ) -> StartFuture<'_> {
+        fn upload(&self, _: u64, local: Vec<PathBuf>, remote_dir: String) -> StartFuture<'_> {
             self.0
                 .lock()
                 .unwrap()
                 .push(format!("up {local:?} -> {remote_dir}"));
             Box::pin(async { Ok(1) })
         }
-        fn download(
-            &self,
-            _: u64,
-            remote: Vec<String>,
-            local_dir: PathBuf,
-        ) -> StartFuture<'_> {
+        fn download(&self, _: u64, remote: Vec<String>, local_dir: PathBuf) -> StartFuture<'_> {
             self.0
                 .lock()
                 .unwrap()

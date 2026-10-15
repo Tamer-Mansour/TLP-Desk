@@ -71,6 +71,8 @@ pub struct FileBrowser {
     offset_s: i32,
     /// Language of the last frame (for messages produced between frames).
     tx: Tx,
+    /// The last click landed inside the panel: keys belong to it, not to the remote view.
+    keyboard: bool,
 }
 
 impl FileBrowser {
@@ -85,7 +87,33 @@ impl FileBrowser {
             remote_clipboard: None,
             offset_s: local_offset_s(),
             tx: Tx::new(crate::i18n::Lang::En, crate::i18n::DigitStyle::Western),
+            keyboard: false,
         }
+    }
+
+    /// Opens the browser with both panes in a fixed state, without any request: `(folder,
+    /// entries, selected name)` for this PC, then for the remote PC. Used by the README media
+    /// scenes, which must not touch the disk or the network.
+    pub fn show_fixture(
+        &mut self,
+        local: (&str, Vec<tlp_desk_proto::FsEntry>, &str),
+        remote: (&str, Vec<tlp_desk_proto::FsEntry>, &str),
+    ) {
+        for (pane, (path, entries, selected)) in self.panes.iter_mut().zip([local, remote]) {
+            pane.path = Some(path.to_owned());
+            pane.entries = entries;
+            pane.requested = true;
+            pane.loading = None;
+            pane.error = None;
+            pane.click(selected, false, false);
+        }
+        self.open = true;
+    }
+
+    /// Whether keys belong to the browser (it was clicked last). The remote view must then
+    /// neither capture nor forward them until the user clicks it again.
+    pub fn owns_keyboard(&self) -> bool {
+        self.open && self.keyboard
     }
 
     /// Whether a browser dialog is open (the remote view must not take input then).
@@ -161,7 +189,7 @@ impl FileBrowser {
         }
         let mut actions: Vec<(usize, PaneAction)> = Vec::new();
         let mut drop_into: Option<(usize, DragFiles)> = None;
-        egui::Panel::bottom("file-browser")
+        let panel = egui::Panel::bottom("file-browser")
             .resizable(true)
             .default_size(320.0)
             .min_size(180.0)
@@ -209,6 +237,11 @@ impl FileBrowser {
                     }
                 });
             });
+        let rect = panel.response.rect;
+        let pressed = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()));
+        if let Some(pos) = pressed.flatten() {
+            self.keyboard = rect.contains(pos);
+        }
         for (i, a) in actions {
             self.apply(i, a, tx, backend);
         }
@@ -343,13 +376,8 @@ impl FileBrowser {
             } else {
                 (Icon::Download, S::FsDownload)
             };
-            if ui
-                .add_enabled(
-                    !sel.is_empty(),
-                    icons::icon_text_button(tx, icon, tx.t(key)),
-                )
-                .clicked()
-            {
+            // Icon only: the pane is narrow, and the tooltip names the direction.
+            if tool(ui, !sel.is_empty(), icon, key) {
                 acts.push(PaneAction::CopyToOther(sel));
             }
         });
@@ -822,7 +850,12 @@ mod tests {
             frame(&ctx, &mut fb, tx, &b);
             let (side, op, id) = b.ops.lock().unwrap().last().cloned().unwrap();
             assert_eq!(side, FsSide::Remote(SessionId(5)));
-            assert_eq!(op, FsOp::ListDir { path: "C:\\".into() });
+            assert_eq!(
+                op,
+                FsOp::ListDir {
+                    path: "C:\\".into()
+                }
+            );
             fb.on_result(
                 side,
                 id,
@@ -848,9 +881,17 @@ mod tests {
         fb.panes[LOCAL].requested = true;
         fb.panes[REMOTE].requested = true;
 
-        fb.apply(LOCAL, PaneAction::Delete(vec!["أ.txt".into(), "ب".into()]), tx, &b);
+        fb.apply(
+            LOCAL,
+            PaneAction::Delete(vec!["أ.txt".into(), "ب".into()]),
+            tx,
+            &b,
+        );
         assert!(matches!(fb.dialog, Some(Dialog::ConfirmDelete { .. })));
-        assert!(b.ops.lock().unwrap().is_empty(), "nothing deleted before confirming");
+        assert!(
+            b.ops.lock().unwrap().is_empty(),
+            "nothing deleted before confirming"
+        );
         let d = fb.dialog.take().unwrap();
         fb.submit(d, &b);
         let ops: Vec<FsOp> = b.ops.lock().unwrap().iter().map(|o| o.1.clone()).collect();
@@ -921,7 +962,12 @@ mod tests {
         fb.panes[LOCAL].path = Some("C:\\src".into());
         fb.panes[REMOTE].path = Some("D:\\وجهة".into());
         fb.apply(LOCAL, PaneAction::CopyToOther(vec!["a.txt".into()]), tx, &b);
-        fb.apply(REMOTE, PaneAction::CopyToOther(vec!["ملف.bin".into()]), tx, &b);
+        fb.apply(
+            REMOTE,
+            PaneAction::CopyToOther(vec!["ملف.bin".into()]),
+            tx,
+            &b,
+        );
         let t = b.transfers.lock().unwrap().clone();
         assert_eq!(
             t,
@@ -954,7 +1000,13 @@ mod tests {
             assert!(!failure_text(tx, &f).trim().is_empty(), "{f:?}");
         }
         let mut fb = FileBrowser::new(SessionId(1));
-        fb.on_notice(tx, &FilesNotice::TransferStarted { count: 3, upload: true });
+        fb.on_notice(
+            tx,
+            &FilesNotice::TransferStarted {
+                count: 3,
+                upload: true,
+            },
+        );
         assert!(fb.notice.as_deref().unwrap_or_default().contains('3'));
     }
 }

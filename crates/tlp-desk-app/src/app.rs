@@ -385,6 +385,13 @@ impl App {
                     let tx = self.tx;
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
                         s.files.on_notice(tx, &notice);
+                        // Progress of the copy shows in the transfer list.
+                        if matches!(
+                            notice,
+                            crate::backend::files::FilesNotice::TransferStarted { .. }
+                        ) {
+                            s.transfers.open = true;
+                        }
                     }
                 }
                 BackendEvent::Transfer { session, view } => {

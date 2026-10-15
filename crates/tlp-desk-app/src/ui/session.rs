@@ -230,7 +230,7 @@ impl ViewerSession {
             self.priority_banner(ui, tx);
         }
         self.files.ui(ui, tx, backend, self.permissions);
-        let modal_open = modal_open || self.files.modal_open();
+        let modal_open = modal_open || self.files.modal_open() || self.files.owns_keyboard();
         self.transfers_ui(ui, tx, backend);
 
         egui::CentralPanel::default()
