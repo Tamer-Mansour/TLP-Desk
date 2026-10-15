@@ -13,6 +13,18 @@ pub trait LocalActivity: Send + Sync {
     /// synthesized by software (including our own `SendInput`) never counts.
     fn last_physical_input(&self) -> Option<Instant>;
 
+    /// Like [`last_physical_input`](Self::last_physical_input) for the keyboard only. Hosts use
+    /// it so that a local mouse does not stop remote typing. Defaults to any input.
+    fn last_physical_keyboard(&self) -> Option<Instant> {
+        self.last_physical_input()
+    }
+
+    /// Like [`last_physical_input`](Self::last_physical_input) for the mouse only. Defaults to
+    /// any input.
+    fn last_physical_pointer(&self) -> Option<Instant> {
+        self.last_physical_input()
+    }
+
     /// Whether physical local input happened within `within` before now.
     fn is_local_active(&self, within: Duration) -> bool {
         self.last_physical_input()
@@ -20,12 +32,31 @@ pub trait LocalActivity: Send + Sync {
     }
 }
 
-/// Lock-free timestamp of the last physical input.
+/// One lock-free "last seen" timestamp.
+#[derive(Debug, Default)]
+struct Stamp(AtomicU64);
+
+impl Stamp {
+    fn record(&self, base: Instant, now: Instant) {
+        let nanos = now.saturating_duration_since(base).as_nanos();
+        let v = u64::try_from(nanos).unwrap_or(u64::MAX - 1) + 1;
+        self.0.fetch_max(v, Ordering::Relaxed);
+    }
+
+    fn get(&self, base: Instant) -> Option<Instant> {
+        match self.0.load(Ordering::Relaxed) {
+            0 => None,
+            v => Some(base + Duration::from_nanos(v - 1)),
+        }
+    }
+}
+
+/// Lock-free timestamps of the last physical keyboard and pointer input.
 #[derive(Debug)]
 pub struct ActivityStamp {
     base: Instant,
-    /// Nanoseconds since `base` plus one; 0 = never.
-    last: AtomicU64,
+    keyboard: Stamp,
+    pointer: Stamp,
 }
 
 impl Default for ActivityStamp {
@@ -38,33 +69,53 @@ impl ActivityStamp {
     pub fn new() -> Self {
         Self {
             base: Instant::now(),
-            last: AtomicU64::new(0),
+            keyboard: Stamp::default(),
+            pointer: Stamp::default(),
         }
     }
 
-    /// Records one input event seen at `now`. Injected events (`LLMHF_INJECTED` /
-    /// `LLKHF_INJECTED` and their lower-integrity variants) are ignored: they are our own
-    /// `SendInput` calls or another program's, not the person at the keyboard.
+    /// Records one input event of unknown kind (counts as both keyboard and pointer).
+    /// Injected events (`LLMHF_INJECTED` / `LLKHF_INJECTED` and their lower-integrity
+    /// variants) are ignored: they are our own `SendInput` calls or another program's, not
+    /// the person at the keyboard.
     pub fn record(&self, injected: bool, now: Instant) {
-        if injected {
-            return;
-        }
-        let nanos = now.saturating_duration_since(self.base).as_nanos();
-        let v = u64::try_from(nanos).unwrap_or(u64::MAX - 1) + 1;
-        self.last.fetch_max(v, Ordering::Relaxed);
+        self.record_keyboard(injected, now);
+        self.record_pointer(injected, now);
     }
 
-    pub fn last(&self) -> Option<Instant> {
-        match self.last.load(Ordering::Relaxed) {
-            0 => None,
-            v => Some(self.base + Duration::from_nanos(v - 1)),
+    /// Records a keyboard event; injected ones are ignored.
+    pub fn record_keyboard(&self, injected: bool, now: Instant) {
+        if !injected {
+            self.keyboard.record(self.base, now);
         }
+    }
+
+    /// Records a mouse event; injected ones are ignored.
+    pub fn record_pointer(&self, injected: bool, now: Instant) {
+        if !injected {
+            self.pointer.record(self.base, now);
+        }
+    }
+
+    /// Latest physical input of either kind.
+    pub fn last(&self) -> Option<Instant> {
+        self.keyboard
+            .get(self.base)
+            .max(self.pointer.get(self.base))
     }
 }
 
 impl LocalActivity for ActivityStamp {
     fn last_physical_input(&self) -> Option<Instant> {
         self.last()
+    }
+
+    fn last_physical_keyboard(&self) -> Option<Instant> {
+        self.keyboard.get(self.base)
+    }
+
+    fn last_physical_pointer(&self) -> Option<Instant> {
+        self.pointer.get(self.base)
     }
 }
 
@@ -84,6 +135,24 @@ mod tests {
         // A later injected event does not move the stamp.
         s.record(true, t + Duration::from_secs(1));
         assert_eq!(s.last_physical_input(), Some(t));
+    }
+
+    #[test]
+    fn keyboard_and_pointer_are_tracked_apart() {
+        let s = ActivityStamp::new();
+        let t = Instant::now() + Duration::from_millis(5);
+        s.record_pointer(false, t);
+        assert_eq!(s.last_physical_pointer(), Some(t));
+        assert_eq!(s.last_physical_keyboard(), None);
+        s.record_keyboard(true, t + Duration::from_secs(1));
+        assert_eq!(
+            s.last_physical_keyboard(),
+            None,
+            "injected keys never count"
+        );
+        s.record_keyboard(false, t + Duration::from_secs(2));
+        assert_eq!(s.last_physical_input(), Some(t + Duration::from_secs(2)));
+        assert_eq!(s.last_physical_pointer(), Some(t));
     }
 
     #[test]
