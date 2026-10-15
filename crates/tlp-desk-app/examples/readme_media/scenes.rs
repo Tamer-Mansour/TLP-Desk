@@ -109,6 +109,11 @@ pub const SCENES: &[Scene] = &[
         about: "viewer session in drawing mode: tools bar and a few strokes on the remote screen",
         setup: whiteboard,
     },
+    Scene {
+        name: "tunnels",
+        about: "viewer session with the port forwarding window: two rules with connection counts",
+        setup: tunnels,
+    },
 ];
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
@@ -346,6 +351,36 @@ fn whiteboard(app: &mut App, lang: Lang) {
             };
             s.whiteboard.remote(&WhiteboardOp::Stroke(stroke), now);
         }
+    }
+}
+
+fn tunnels(app: &mut App, lang: Lang) {
+    use tlp_desk_app::backend::tunnels::TunnelRow;
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        s.tunnels.open = true;
+        s.tunnels.rules = vec![
+            TunnelRow {
+                id: 1,
+                local: std::net::SocketAddr::from(([127, 0, 0, 1], 8080)),
+                target: "localhost:80".to_owned(),
+                active: 3,
+                connections: 42,
+                failed: 0,
+                bytes_sent: 18_400,
+                bytes_received: 6_300_000,
+            },
+            TunnelRow {
+                id: 2,
+                local: std::net::SocketAddr::from(([127, 0, 0, 1], 5433)),
+                target: "192.168.1.20:5432".to_owned(),
+                active: 1,
+                connections: 5,
+                failed: 1,
+                bytes_sent: 92_000,
+                bytes_received: 410_000,
+            },
+        ];
     }
 }
 

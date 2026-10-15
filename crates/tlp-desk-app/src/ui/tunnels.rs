@@ -227,7 +227,7 @@ impl TunnelsPanel {
                         );
                         // Addresses are always laid out left to right.
                         ui.label(
-                            RichText::new(tx.n(&format!("{} → {}", r.local, r.target))).strong(),
+                            RichText::new(tx.n(&format!("{} -> {}", r.local, r.target))).strong(),
                         );
                         theme::row_end(ui, tx.rtl(), |ui| {
                             let b = icons::icon_text_button(tx, Icon::Stop, tx.t(S::TunnelStop));
