@@ -26,8 +26,8 @@ pub mod files;
 pub mod files_bridge;
 pub mod files_fake;
 pub mod real;
-pub mod tunnels;
 pub mod recording;
+pub mod tunnels;
 pub mod whiteboard;
 
 use std::fmt;

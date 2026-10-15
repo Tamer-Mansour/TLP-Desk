@@ -23,8 +23,8 @@ use tlp_desk_proto::{InputEvent, Permissions};
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
-use super::tunnels::{TunnelProblem, TunnelRequest, TunnelRow};
 use super::chat::{ChatLine, ChatSendError};
+use super::tunnels::{TunnelProblem, TunnelRequest, TunnelRow};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, LocalInfo, MonitorDesc, PeerInfo, RepaintFn,
