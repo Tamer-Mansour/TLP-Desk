@@ -1,7 +1,7 @@
 //! Stable process exit codes, so scripts and agents can branch on *why* a command failed.
 //!
 //! The numbers are part of the CLI's public contract: never renumber, only append. The same
-//! table is printed by `--help` ([`HELP_TABLE`]) and documented in `docs/cli.md`.
+//! table is printed by `--help` ([`HELP_TABLE`]) and documented in `docs/src/dev/crates/cli.md`.
 
 use tlp_desk_net::NetError;
 use tlp_desk_proto::RejectReason;
