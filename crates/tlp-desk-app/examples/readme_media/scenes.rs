@@ -10,11 +10,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use tlp_desk_app::app::{App, KeyWarning, Pending, Screen};
+use tlp_desk_app::backend::chat::ChatLine;
 use tlp_desk_app::backend::fake::{fake_monitors, test_pattern_frame};
 use tlp_desk_app::backend::{
     AttemptId, ConnectTarget, DeviceId, FrameSlot, RequestId, SessionId, SessionStats,
 };
 use tlp_desk_app::i18n::{DigitStyle, Lang, Tx};
+use tlp_desk_app::ui::chat::ChatState;
 use tlp_desk_app::ui::session::ViewerSession;
 use tlp_desk_proto::Permissions;
 
@@ -82,8 +84,17 @@ pub const SCENES: &[Scene] = &[
         about: "loud warning when a host's key changed",
         setup: key_changed,
     },
+    Scene {
+        name: "chat",
+        about: "viewer session with the chat panel: Arabic and English messages",
+        setup: chat,
+    },
+    Scene {
+        name: "host-chat",
+        about: "host side: chat window that opened when the viewer wrote",
+        setup: host_chat,
+    },
 ];
-
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
     SCENES.iter().find(|s| s.name == name)
@@ -185,4 +196,47 @@ fn key_changed(app: &mut App, lang: Lang) {
         previous: "3f9a 1c07 e2b4 58d1".into(),
         presented: "b70e 44a2 9c13 0f6e".into(),
     });
+}
+
+/// A short conversation mixing Arabic and English in both directions (fixed times). On the
+/// host side (`host`) the authors are swapped.
+fn conversation(host: bool) -> ChatState {
+    let mut chat = ChatState::new(true);
+    chat.set_open(true);
+    let lines = [
+        (
+            false,
+            "مرحباً! هل ترى ملف report-2026.pdf على الشاشة؟",
+            (10, 41),
+        ),
+        (true, "Yes, opening it now.", (10, 42)),
+        (false, "Thanks 👍 page 3 please", (10, 42)),
+        (true, "تم، الصفحة 3 جاهزة الآن.", (10, 43)),
+    ];
+    for (id, (mine, text, hm)) in (1..).zip(lines) {
+        let line = ChatLine {
+            id,
+            mine: mine != host,
+            text: text.into(),
+            at_unix_ms: 0,
+        };
+        chat.push_at(line, hm);
+    }
+    chat
+}
+
+fn chat(app: &mut App, lang: Lang) {
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        s.chat = conversation(false);
+        s.chat.draft = match lang {
+            Lang::En => "One more question…".into(),
+            Lang::Ar => "سؤال أخير…".into(),
+        };
+    }
+}
+
+fn host_chat(app: &mut App, lang: Lang) {
+    host_banner(app, lang);
+    app.host_chats.insert(SessionId(2), conversation(true));
 }

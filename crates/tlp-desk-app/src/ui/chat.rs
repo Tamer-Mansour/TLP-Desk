@@ -112,12 +112,19 @@ impl ChatState {
 
     /// Adds a sent or received message.
     pub fn push(&mut self, line: ChatLine) {
+        let hm = local_hm(line.at_unix_ms);
+        self.push_at(line, hm);
+    }
+
+    /// [`ChatState::push`] with an explicit local (hour, minute), for screenshots that must not
+    /// depend on the time zone.
+    pub fn push_at(&mut self, line: ChatLine, hm: (u8, u8)) {
         if !line.mine && !self.open {
             self.unread = self.unread.saturating_add(1);
         }
         self.items.push_back(ChatItem {
             text: display_text(&line.text),
-            hm: local_hm(line.at_unix_ms),
+            hm,
             line,
             wrap: None,
         });
