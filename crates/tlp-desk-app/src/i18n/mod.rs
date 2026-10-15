@@ -213,6 +213,34 @@ strings! {
     // to your section avoids merge conflicts between parallel branches.
     // =======================================================================================
     // --- files ---
+    CloseTransfers => "Hide the transfer list", "إخفاء قائمة النقل";
+    FilesPanelTitle => "File transfer", "نقل الملفات";
+    SendFiles => "Send files…", "إرسال ملفات…";
+    SendFolder => "Send folder…", "إرسال مجلد…";
+    DropToSend => "Drop to send to {name}", "أفلت الملفات لإرسالها إلى {name}";
+    NoTransfers => "No transfers yet. Drag files onto the window or use the buttons.", "لا توجد عمليات نقل بعد. اسحب الملفات إلى النافذة أو استخدم الأزرار.";
+    TransferPreparing => "Preparing…", "جارٍ التحضير…";
+    TransferPaused => "Paused", "متوقف مؤقتاً";
+    TransferDone => "Done", "اكتمل";
+    TransferDoneFailures => "Done, {n} file(s) failed", "اكتمل، وتعذّر نقل {n} ملف";
+    TransferCancelled => "Cancelled", "أُلغي";
+    TransferLost => "Connection lost", "انقطع الاتصال";
+    TransferFailed => "Failed: {reason}", "فشل: {reason}";
+    TransferFiles => "{done} of {total} files", "{done} من {total} ملف";
+    TransferRate => "{size}/s", "{size}/ث";
+    TransferEta => "{time} left", "المتبقي {time}";
+    TransferRetry => "Retry (continues where it stopped)", "إعادة المحاولة (تكمل من حيث توقفت)";
+    TransferCancel => "Cancel transfer", "إلغاء النقل";
+    OpenFolder => "Open folder", "فتح المجلد";
+    ClearFinished => "Clear finished", "مسح المنتهية";
+    FilesNotAllowed => "The host has not allowed file transfer for this session.", "لم يسمح المضيف بنقل الملفات في هذه الجلسة.";
+    FailNoSpace => "not enough free disk space", "لا توجد مساحة كافية على القرص";
+    FailDeclined => "the other side declined", "رفض الطرف الآخر";
+    FailHash => "data was corrupted in transit", "تلفت البيانات أثناء النقل";
+    FailPath => "invalid file name or path", "اسم الملف أو مساره غير صالح";
+    FailPermission => "not allowed", "غير مسموح";
+    FailNotFound => "file not found", "الملف غير موجود";
+    FailBusy => "file is in use", "الملف قيد الاستخدام";
 
     // --- clipboard ---
 

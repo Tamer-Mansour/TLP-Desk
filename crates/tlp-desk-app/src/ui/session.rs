@@ -10,6 +10,7 @@ use eframe::egui::{
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
 use super::icons::{self, Icon};
+use super::transfers::{self, TransferPanel};
 use super::{theme, widgets};
 use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, SessionStats};
 use crate::i18n::{format, ltr_isolate, Tx, S};
@@ -52,6 +53,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// File transfer queue (lane files-transfer).
+    pub transfers: TransferPanel,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -92,6 +95,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            transfers: TransferPanel::new(),
         }
     }
 
@@ -195,6 +199,7 @@ impl ViewerSession {
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        self.transfers_ui(ui, tx, backend);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
@@ -240,6 +245,29 @@ impl ViewerSession {
                 }
                 self.handle_input(ui, backend, &resp, image_rect, visible, modal_open);
             });
+    }
+
+    /// File transfer panel, drag and drop of files onto the window, and applying the panel's
+    /// requests to the backend.
+    fn transfers_ui(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
+        let allowed = self.permissions.contains(Permissions::FILES);
+        let ctx = ui.ctx().clone();
+        TransferPanel::drop_overlay(&ctx, tx, &self.peer.name, allowed);
+        let dropped = TransferPanel::take_dropped(&ctx);
+        if !dropped.is_empty() {
+            self.transfers.open = true;
+            if allowed {
+                backend.send_files(self.id, dropped);
+            }
+        }
+        for action in self.transfers.ui(ui, tx, allowed) {
+            match action {
+                transfers::Action::Send(paths) => backend.send_files(self.id, paths),
+                transfers::Action::Cancel(id) => backend.cancel_transfer(self.id, id),
+                transfers::Action::Retry(id) => backend.retry_transfer(self.id, id),
+                transfers::Action::OpenFolder(dir) => transfers::open_folder(&dir),
+            }
+        }
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
@@ -304,6 +332,17 @@ impl ViewerSession {
                         .clicked()
                     {
                         self.show_stats = !self.show_stats;
+                    }
+                    if icons::icon_toggle(
+                        ui,
+                        tx,
+                        self.transfers.open,
+                        Icon::Upload,
+                        tx.t(S::FilesPanelTitle),
+                    )
+                    .clicked()
+                    {
+                        self.transfers.open = !self.transfers.open;
                     }
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.

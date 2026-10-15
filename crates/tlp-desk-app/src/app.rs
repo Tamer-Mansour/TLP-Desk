@@ -355,6 +355,16 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                BackendEvent::Transfer { session, view } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.update(view);
+                    }
+                }
+                BackendEvent::TransferNotStarted { session, error } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.not_started(error);
+                    }
+                }
             }
         }
     }
