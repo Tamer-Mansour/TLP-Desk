@@ -14,7 +14,6 @@
 | [Ctrl+Alt+Del والقفل](ctrl-alt-del.md) | M3 |
 | [وضع الخصوصية](privacy-mode.md) | M3 |
 | [التشغيل عبر الشبكة (Wake-on-LAN)](wake-on-lan.md) | M4 |
-| [معلومات الجهاز البعيد](device-info.md) | M4 |
 
 ## الصلاحيات
 

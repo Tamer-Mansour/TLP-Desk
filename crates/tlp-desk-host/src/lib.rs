@@ -36,6 +36,7 @@
 #![forbid(unsafe_code)]
 
 mod cursor;
+mod device_info;
 mod input;
 mod pipeline;
 mod priority;
@@ -64,6 +65,10 @@ use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
+pub use device_info::{
+    limit as limit_device_info, DeviceInfoFeature, DeviceInfoServed, DeviceInfoSource,
+    SystemInfoSource, DEVICE_INFO_FEATURE,
+};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 pub use tunnel::{HostTunnelEvent, HostTunnelInfo, HostTunnels, TunnelHostConfig, TUNNEL_FEATURE};
 

@@ -10,7 +10,9 @@ pub mod common;
 pub mod connect;
 pub mod forward;
 pub mod get_file;
+pub mod help;
 pub mod id;
+pub mod info;
 pub mod list;
 pub mod ls;
 pub mod mkdir;
@@ -20,6 +22,7 @@ pub mod rm;
 pub mod send_file;
 pub mod serve;
 pub mod typing;
+pub mod wol;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
 
 use std::path::PathBuf;
@@ -71,6 +74,11 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// Viewer: show a host's OS, CPU, RAM, disks, uptime and name (needs VIEW).
+    Info(info::InfoArgs),
+    /// Wake a sleeping PC on the LAN (Wake-on-LAN) by MAC address or alias.
+    #[command(visible_alias = "exec-wol")]
+    Wol(wol::WolArgs),
     /// Viewer: forward local TCP ports to services on (or next to) the host until Ctrl+C,
     /// e.g. `forward 192.168.1.20 8080:127.0.0.1:80`. The host must allow port forwarding.
     Forward(forward::ForwardArgs),
@@ -117,6 +125,8 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::Info(a) => info::run(&ctx, a).await,
+        Cmd::Wol(a) => wol::run(&ctx, a),
         Cmd::Forward(a) => forward::run(&ctx, a).await,
         Cmd::Chat(a) => chat::run(&ctx, a).await,
         Cmd::ClipSend(a) => clip_send::run(&ctx, a).await,
@@ -269,6 +279,42 @@ mod tests {
     }
 
     #[test]
+    fn info_parses_target_auth_and_timeout() {
+        let Cmd::Info(i) = parse(&[
+            "--json",
+            "info",
+            "مكتب-المحاسبة",
+            "--code",
+            "654321",
+            "--timeout",
+            "3",
+        ])
+        .unwrap()
+        .cmd
+        else {
+            panic!("not info")
+        };
+        assert_eq!(i.dial.target, "مكتب-المحاسبة");
+        assert_eq!(i.dial.auth.code.as_deref(), Some("654321"));
+        assert_eq!(i.timeout, 3);
+        assert!(parse(&["info"]).is_err());
+    }
+
+    #[test]
+    fn wol_and_its_alias_parse() {
+        for name in ["wol", "exec-wol"] {
+            let Cmd::Wol(w) = parse(&[name, "01:23:45:67:89:ab", "--to", "192.168.1.255"])
+                .unwrap()
+                .cmd
+            else {
+                panic!("not wol")
+            };
+            assert_eq!(w.target, "01:23:45:67:89:ab");
+            assert_eq!(w.to.as_deref(), Some("192.168.1.255"));
+        }
+    }
+
+    #[test]
     fn file_commands_parse_with_arabic_paths() {
         let Cmd::Ls(l) = parse(&["ls", "10.0.0.2", "C:\\Users\\مستخدم", "--code", "123456"])
             .unwrap()
@@ -324,6 +370,70 @@ mod tests {
         assert_eq!(crate::exit::Exit::of(&e), crate::exit::Exit::Failure);
         let ar = text::with_lang(text::Lang::Ar, || text::error_line(&e));
         assert!(ar.contains("غير موجود"), "{ar}");
+    }
+
+    #[test]
+    fn every_subcommand_parses_and_is_listed_here() {
+        // One valid command line per subcommand; a new command must add its row (so every
+        // lane's command is parse-tested and appears in the Arabic help too).
+        let samples: &[&[&str]] = &[
+            &["id"],
+            &["list", "--json"],
+            &["serve", "--name", "مكتب"],
+            &["connect", "123456789", "--code", "042917"],
+            &["info", "123456789", "--code", "042917"],
+            &["wol", "01:23:45:67:89:ab"],
+            &["exec-wol", "مكتب"],
+            &[
+                "forward",
+                "10.0.0.2",
+                "8080:127.0.0.1:80",
+                "--code",
+                "123456",
+            ],
+            &["chat", "10.0.0.2", "مرحبا", "--code", "123456"],
+            &["clip-send", "10.0.0.2", "نص", "--code", "123456"],
+            &["ls", "10.0.0.2", "--code", "123456"],
+            &["mkdir", "10.0.0.2", "D:/x", "--code", "123456"],
+            &["rm", "10.0.0.2", "D:/x", "--code", "123456"],
+            &["mv", "10.0.0.2", "D:/a", "D:/b", "--code", "123456"],
+            &[
+                "send-file",
+                "10.0.0.2",
+                "a.txt",
+                "--to",
+                "D:/",
+                "--code",
+                "123456",
+            ],
+            &["get-file", "10.0.0.2", "D:/a.txt", "--code", "123456"],
+        ];
+        let mut covered = std::collections::BTreeSet::new();
+        for argv in samples {
+            let cli = parse(argv).unwrap_or_else(|e| panic!("{argv:?}: {e}"));
+            let _ = cli;
+            let name = if argv[0] == "exec-wol" {
+                "wol"
+            } else {
+                argv[0]
+            };
+            covered.insert(name);
+        }
+        for sub in Cli::command().get_subcommands() {
+            assert!(
+                covered.contains(sub.get_name()),
+                "add a sample command line for `{}`",
+                sub.get_name()
+            );
+        }
+    }
+
+    #[test]
+    fn password_flag_is_rejected_for_every_dialing_command() {
+        for cmd in ["connect", "info", "chat", "ls"] {
+            let r = parse(&[cmd, "10.0.0.2", "--password=hunter2"]);
+            assert!(r.is_err(), "{cmd} must not take --password");
+        }
     }
 
     #[test]

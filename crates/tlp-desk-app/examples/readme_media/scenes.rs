@@ -114,6 +114,11 @@ pub const SCENES: &[Scene] = &[
         about: "viewer session with the port forwarding window: two rules with connection counts",
         setup: tunnels,
     },
+    Scene {
+        name: "device-info",
+        about: "viewer session with the device info window: system, memory, uptime and disk bars",
+        setup: device_info,
+    },
 ];
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
@@ -381,6 +386,15 @@ fn tunnels(app: &mut App, lang: Lang) {
                 bytes_received: 410_000,
             },
         ];
+    }
+}
+
+fn device_info(app: &mut App, lang: Lang) {
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        s.device_info.open = true;
+        s.device_info
+            .set_info(tlp_desk_app::backend::device_info::fake_info());
     }
 }
 

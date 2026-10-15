@@ -391,10 +391,10 @@ impl RealBackend {
         if let Some((ep, true)) = &endpoint {
             let mut host_cfg = HostConfig {
                 device_name: device_name.clone(),
-                features: super::clipboard::register(
+                features: super::device_info::with_host_feature(super::clipboard::register(
                     fsb.register(cfg.host.features.clone().with(files.clone())),
                     &clipboard,
-                ),
+                )),
                 ..cfg.host.clone()
             };
             host_cfg.features.push(host_tunnels.clone());
@@ -446,14 +446,14 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
-                features: super::clipboard::register(
+                features: super::device_info::with_viewer_feature(super::clipboard::register(
                     fsb.register(
                         FeatureSet::new()
                             .with(files.clone())
                             .with(whiteboard::viewer_feature()),
                     ),
                     &clipboard,
-                ),
+                )),
                 ..ViewerConfig::default()
             };
             vcfg.features.push(tunnels.clone());
@@ -1003,6 +1003,13 @@ impl Inner {
                         self.emit(ev);
                     }
                 }
+                ViewerEvent::Feature(event)
+                    if event.feature == tlp_desk_viewer::DEVICE_INFO_FEATURE =>
+                {
+                    if let Some(ev) = super::device_info::map_viewer_event(session, &event) {
+                        self.emit(ev);
+                    }
+                }
                 ViewerEvent::Feature(event) => {
                     if let Some(op) = whiteboard::remote_op(&event) {
                         self.emit(BackendEvent::WhiteboardRemote { session, op });
@@ -1125,6 +1132,13 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn request_device_info(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            tlp_desk_viewer::request_device_info(&s);
         }
     }
 

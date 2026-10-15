@@ -727,6 +727,23 @@ impl Backend for FakeBackend {
         });
     }
 
+    fn request_device_info(&self, session: SessionId) {
+        if !self.inner.state().sessions.contains_key(&session) {
+            return;
+        }
+        let inner = self.inner.clone();
+        self.inner.rt.spawn(async move {
+            // A short delay so the "asking…" state is visible, like a real round trip.
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            if inner.state().sessions.contains_key(&session) {
+                inner.emit(BackendEvent::DeviceInfo {
+                    session,
+                    info: super::device_info::fake_info(),
+                });
+            }
+        });
+    }
+
     fn disconnect(&self, session: SessionId) {
         self.inner.state().tunnels.remove(&session);
         let removed = self.inner.state().sessions.remove(&session);

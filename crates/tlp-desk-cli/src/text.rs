@@ -105,7 +105,25 @@ pub fn error_line(err: &anyhow::Error) -> String {
             format!("خطأ: {}", fs_error(fs)),
         );
     }
-    t(format!("error: {err:#}"), format!("خطأ: {err:#}"))
+    use crate::exit::CliError;
+    let cli = err.chain().find_map(|c| c.downcast_ref::<CliError>());
+    let detail = match cli {
+        Some(CliError::Interrupted) => t("interrupted".into(), "أُوقف بـ Ctrl+C".into()),
+        Some(CliError::Timeout(s)) => {
+            t(format!("no answer within {s} s"), format!("لا رد خلال {s} ث"))
+        }
+        Some(CliError::PermissionDenied(p)) => t(
+            format!("the session lacks the {p} permission"),
+            format!("الجلسة لا تملك صلاحية {p}"),
+        ),
+        Some(CliError::SessionEnded(r)) => t(
+            format!("the session ended: {r}"),
+            format!("انتهت الجلسة: {r}"),
+        ),
+        Some(CliError::NotFound(n)) => t(format!("{n} was not found"), format!("لم يُعثر على {n}")),
+        None => format!("{err:#}"),
+    };
+    t(format!("error: {detail}"), format!("خطأ: {detail}"))
 }
 
 pub fn identity(id: DeviceId, fp: &Fingerprint, dir: &str) -> String {
@@ -432,6 +450,111 @@ pub fn selecting_monitor(index: u32) -> String {
     t(
         format!("Switching to monitor {index}..."),
         format!("جارٍ التبديل إلى الشاشة {index}..."),
+    )
+}
+
+pub fn wol_sent(mac: &str, to: &str) -> String {
+    t(
+        format!("Wake-on-LAN packet for {mac} sent ({to})."),
+        format!("أُرسلت حزمة التشغيل عن بُعد إلى {mac} ({to})."),
+    )
+}
+
+// --- device info ---
+
+/// `bytes` in binary units with one decimal (`16.0 GiB` / `16.0 غ.ب`).
+pub fn bytes(bytes: u64) -> String {
+    let units = t(
+        ["B", "KiB", "MiB", "GiB", "TiB", "PiB"],
+        ["بايت", "ك.ب", "م.ب", "غ.ب", "ت.ب", "ب.ب"],
+    );
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < units.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    let name = units.get(unit).copied().unwrap_or_default();
+    if unit == 0 {
+        format!("{bytes} {name}")
+    } else {
+        format!("{value:.1} {name}")
+    }
+}
+
+/// An uptime like `3 d 4 h 5 min` / `3 ي 4 س 5 د`.
+pub fn uptime(secs: u64) -> String {
+    let (d, h, m) = (secs / 86_400, secs % 86_400 / 3600, secs % 3600 / 60);
+    let (ud, uh, um) = t(("d", "h", "min"), ("ي", "س", "د"));
+    if d > 0 {
+        format!("{d} {ud} {h} {uh} {m} {um}")
+    } else if h > 0 {
+        format!("{h} {uh} {m} {um}")
+    } else {
+        format!("{m} {um}")
+    }
+}
+
+/// The device-info block printed by `info`.
+pub fn device_info(info: &tlp_desk_viewer::DeviceInfo) -> String {
+    let (host, os, cpu, ram, up, disks, free_of) = t(
+        (
+            "Computer",
+            "System",
+            "Processor",
+            "Memory",
+            "Up for",
+            "Disks",
+            "free of",
+        ),
+        (
+            "الحاسوب",
+            "النظام",
+            "المعالج",
+            "الذاكرة",
+            "مدة التشغيل",
+            "الأقراص",
+            "متاح من",
+        ),
+    );
+    let threads = t("threads", "مسارات");
+    let mut out = format!(
+        "{host}: {}\n{os}: {} ({})\n{cpu}: {} ({} {threads})\n{ram}: {}\n{up}: {}\n{disks}:",
+        info.hostname,
+        info.os,
+        info.version,
+        info.cpu,
+        info.cores,
+        bytes(info.ram_bytes),
+        uptime(info.uptime_s)
+    );
+    for d in &info.disks {
+        let label = if d.label.is_empty() {
+            String::new()
+        } else {
+            format!(" \"{}\"", d.label)
+        };
+        out.push_str(&format!(
+            "\n  {}{label}  {} {free_of} {}",
+            d.mount,
+            bytes(d.free_bytes),
+            bytes(d.total_bytes)
+        ));
+    }
+    out
+}
+
+pub fn device_info_served(session: u64) -> String {
+    t(
+        format!("Sent device info to viewer session {session}"),
+        format!("أُرسلت معلومات الجهاز إلى جلسة المشاهد {session}"),
+    )
+}
+
+pub fn requesting_device_info() -> &'static str {
+    t(
+        "Asking the host for its device info...",
+        "جارٍ طلب معلومات الجهاز من المضيف...",
     )
 }
 
@@ -774,23 +897,6 @@ pub fn fs_error(e: &tlp_desk_files::fs::FsClientError) -> String {
 
 // --- files-transfer lane: send-file / get-file ---
 
-/// Bytes with a binary unit and ASCII digits (`1.5 GiB`), in both languages.
-pub fn bytes(n: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut v = n as f64;
-    let mut u = 0;
-    while v >= 1024.0 && u + 1 < UNITS.len() {
-        v /= 1024.0;
-        u += 1;
-    }
-    let unit = UNITS.get(u).copied().unwrap_or("B");
-    if u == 0 {
-        format!("{n} {unit}")
-    } else {
-        format!("{v:.1} {unit}")
-    }
-}
-
 /// `1:05` / `1:02:03` for a duration in seconds.
 fn clock(secs: u64) -> String {
     let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
@@ -919,6 +1025,46 @@ mod tests {
             with_lang(Lang::Ar, || permissions(Permissions::NONE)),
             "لا شيء"
         );
+    }
+
+    #[test]
+    fn byte_and_uptime_formatting() {
+        assert_eq!(with_lang(Lang::En, || bytes(512)), "512 B");
+        assert_eq!(with_lang(Lang::En, || bytes(16 << 30)), "16.0 GiB");
+        assert_eq!(with_lang(Lang::Ar, || bytes(1536)), "1.5 ك.ب");
+        assert_eq!(with_lang(Lang::En, || bytes(u64::MAX)), "16384.0 PiB");
+        assert_eq!(with_lang(Lang::En, || uptime(90_061)), "1 d 1 h 1 min");
+        assert_eq!(with_lang(Lang::Ar, || uptime(3_660)), "1 س 1 د");
+        assert_eq!(with_lang(Lang::En, || uptime(59)), "0 min");
+    }
+
+    #[test]
+    fn device_info_block_in_both_languages() {
+        let info = tlp_desk_viewer::DeviceInfo {
+            os: "Windows 11 Pro".into(),
+            version: "10.0.26100".into(),
+            cpu: "Test CPU".into(),
+            cores: 8,
+            ram_bytes: 16 << 30,
+            disks: vec![tlp_desk_viewer::DiskInfo {
+                mount: "C:\\".into(),
+                label: "النظام".into(),
+                total_bytes: 512 << 30,
+                free_bytes: 128 << 30,
+            }],
+            uptime_s: 3600,
+            hostname: "حاسوب-المكتب".into(),
+        };
+        let en = with_lang(Lang::En, || device_info(&info));
+        assert!(en.starts_with("Computer: حاسوب-المكتب\n"), "{en}");
+        assert!(en.contains("Memory: 16.0 GiB"), "{en}");
+        assert!(
+            en.contains("C:\\ \"النظام\"  128.0 GiB free of 512.0 GiB"),
+            "{en}"
+        );
+        let ar = with_lang(Lang::Ar, || device_info(&info));
+        assert!(ar.starts_with("الحاسوب: حاسوب-المكتب\n"), "{ar}");
+        assert!(ar.contains("الذاكرة: 16.0 غ.ب"), "{ar}");
     }
 
     #[test]

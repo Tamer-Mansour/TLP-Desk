@@ -61,6 +61,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Remote device-info window (toolbar button).
+    pub device_info: super::device_info::DeviceInfoPanel,
     /// Port forwarding window (TLP-tunnel).
     pub tunnels: super::tunnels::TunnelsPanel,
     /// Draw-on-screen state (TLP-whiteboard).
@@ -117,6 +119,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            device_info: Default::default(),
             tunnels: Default::default(),
             whiteboard: WhiteboardUi::new(),
             recording: Default::default(),
@@ -246,6 +249,7 @@ impl ViewerSession {
         self.whiteboard
             .update(self.permissions, backend, self.id, Instant::now());
         self.toolbar(ui, tx, backend);
+        self.device_info.window(&ctx, tx, backend, self.id);
         if self.whiteboard.is_active() {
             self.whiteboard.tools_bar(ui, tx, backend, self.id);
         }
@@ -415,6 +419,7 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    self.device_info.toolbar_button(ui, tx, backend, self.id);
                     self.tunnels.toolbar_button(ui, tx);
                     let wb_allowed = self.permissions.contains(Permissions::WHITEBOARD);
                     if self.whiteboard.toggle_button(ui, tx, wb_allowed) == Some(true) {

@@ -22,6 +22,7 @@
 //!   pending [`Viewer::connect`] by dropping its future (or aborting its task).
 #![forbid(unsafe_code)]
 
+mod device_info;
 mod frame;
 pub mod recording;
 mod session;
@@ -38,6 +39,9 @@ use tlp_desk_crypto::{CryptoError, DeviceId, Fingerprint, HostKey, KnownHosts, K
 use tlp_desk_net::{AllowList, DiscoveredDevice, Discovery, Endpoint, NetError, Pin, DEFAULT_PORT};
 use tlp_desk_proto::RejectReason;
 
+pub use device_info::{
+    request_device_info, sanitize as sanitize_device_info, DeviceInfoClient, DEVICE_INFO_FEATURE,
+};
 pub use frame::{DecodedFrame, FrameSlot, PixelFormat};
 pub use recording::{Recording, RecordingConfig, RecordingSummary};
 pub use session::{EndReason, ViewerEvent, ViewerEvents, ViewerSession, ViewerStats};
@@ -45,6 +49,7 @@ pub use tlp_desk_net::{
     AuthMethod, AwaitingAcceptFn, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo,
 };
 pub use tlp_desk_proto::MonitorDesc;
+pub use tlp_desk_proto::{DeviceInfo, DiskInfo};
 pub use tunnel::{
     ForwardSpec, TunnelCloseReason, TunnelEvent, TunnelId, TunnelStatus, TunnelViewerConfig,
     ViewerTunnels, TUNNEL_FEATURE,
