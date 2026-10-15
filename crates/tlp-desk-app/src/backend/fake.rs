@@ -23,6 +23,7 @@ use tlp_desk_proto::{InputEvent, Permissions};
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::chat::{ChatLine, ChatSendError};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, LocalInfo, MonitorDesc, PeerInfo, RepaintFn,
@@ -31,8 +32,8 @@ use super::{
 
 const FPS: u64 = 30;
 
-/// The fake host's monitors.
-fn fake_monitors() -> Vec<MonitorDesc> {
+/// The fake host's monitors (also used by the README media generator).
+pub fn fake_monitors() -> Vec<MonitorDesc> {
     vec![
         MonitorDesc {
             index: 0,
@@ -135,6 +136,13 @@ impl FakeBackend {
         inner.spawn_incoming_request();
         (Arc::new(FakeBackend { inner }), rx)
     }
+}
+
+fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 fn device(id: u32, name: &str, ip: [u8; 4], online: bool) -> DiscoveredDevice {
@@ -311,6 +319,36 @@ impl Inner {
             monitors: fake_monitors(),
             active: 0,
         });
+        self.emit(BackendEvent::ChatAvailability {
+            session,
+            allowed: true,
+        });
+        // The fake remote PC has files copied in Explorer, ready to paste.
+        self.emit(BackendEvent::RemoteClipboardFiles {
+            session,
+            files: Some(super::files_fake::remote_clipboard()),
+        });
+    }
+
+    /// The simulated peer writes `text` to `session` after `delay` (chat, TLP-chat).
+    fn fake_chat_reply(self: &Arc<Self>, session: SessionId, delay: Duration, text: String) {
+        let me = Arc::clone(self);
+        self.rt.spawn(async move {
+            tokio::time::sleep(delay).await;
+            let id = me.next_id();
+            if !me.state().sessions.contains_key(&session) {
+                return;
+            }
+            me.emit(BackendEvent::ChatReceived {
+                session,
+                line: ChatLine {
+                    id,
+                    mine: false,
+                    text,
+                    at_unix_ms: unix_ms_now(),
+                },
+            });
+        });
     }
 
     async fn run_video(
@@ -430,6 +468,52 @@ impl Backend for FakeBackend {
             );
             self.inner
                 .emit(BackendEvent::HostSessionStarted { session, peer });
+            // The simulated viewer writes to the host user, which opens the chat window.
+            self.inner.emit(BackendEvent::ChatAvailability {
+                session,
+                allowed: true,
+            });
+            self.inner.fake_chat_reply(
+                session,
+                Duration::from_secs(3),
+                "مرحباً! هل يمكنني فتح ملف report-2026.pdf؟".into(),
+            );
+        }
+    }
+
+    fn send_chat(&self, session: SessionId, text: &str) -> Result<ChatLine, ChatSendError> {
+        let viewer = match self.inner.state().sessions.get(&session) {
+            Some(ctl) => ctl.task.is_some(),
+            None => return Err(ChatSendError::Unavailable),
+        };
+        if text.trim().is_empty() {
+            return Err(ChatSendError::Empty);
+        }
+        let max = super::chat::max_chat_chars();
+        if text.chars().count() > max {
+            return Err(ChatSendError::TooLong { max });
+        }
+        if viewer {
+            // The simulated host user answers in Arabic, quoting the start of the message.
+            let quote: String = text.chars().take(40).collect();
+            self.inner.fake_chat_reply(
+                session,
+                Duration::from_millis(1200),
+                format!("وصلت رسالتك: «{quote}» ✓"),
+            );
+        }
+        Ok(ChatLine {
+            id: self.inner.next_id(),
+            mine: true,
+            text: text.to_owned(),
+            at_unix_ms: unix_ms_now(),
+        })
+    }
+
+    fn set_chat_allowed(&self, session: SessionId, allowed: bool) {
+        if self.inner.state().sessions.contains_key(&session) {
+            self.inner
+                .emit(BackendEvent::ChatAvailability { session, allowed });
         }
     }
 
@@ -470,6 +554,79 @@ impl Backend for FakeBackend {
     }
 
     fn set_view_only(&self, _session: SessionId, _view_only: bool) {}
+
+    fn fs_request(
+        &self,
+        side: super::files::FsSide,
+        op: super::files::FsOp,
+    ) -> Option<super::files::FsRequestId> {
+        use super::files::{FsFailure, FsSide};
+        let request = super::files::FsRequestId(self.inner.next_id());
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || match side {
+                FsSide::Local => super::files_fake::local_request(&op),
+                FsSide::Remote(_) => super::files_fake::remote_request(&op),
+            })
+            .await
+            .unwrap_or_else(|e| Err(FsFailure::Other(e.to_string())));
+            me.emit(BackendEvent::FsResult {
+                side,
+                request,
+                result,
+            });
+        });
+        Some(request)
+    }
+
+    fn fs_transfer(&self, session: SessionId, request: super::files::TransferRequest) {
+        self.inner.emit(BackendEvent::FilesNotice {
+            session,
+            notice: super::files_fake::transfer_notice(&request),
+        });
+    }
+
+    /// Pretends to send: 100 MB per file at ~50 MB/s, with live progress events.
+    fn send_files(&self, session: SessionId, paths: Vec<std::path::PathBuf>) {
+        use super::files::{TransferDir, TransferId, TransferStatus, TransferView};
+        let inner = Arc::clone(&self.inner);
+        let id = TransferId(inner.next_id.fetch_add(1, Ordering::Relaxed));
+        let label = match paths.as_slice() {
+            [one] => one
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            many => format!("{} items", many.len()),
+        };
+        let files = paths.len().max(1) as u32;
+        let total = u64::from(files) * 100_000_000;
+        self.inner.rt.spawn(async move {
+            let mut view = TransferView {
+                id,
+                dir: TransferDir::Send,
+                label,
+                status: TransferStatus::Running,
+                bytes_done: 0,
+                total_bytes: total,
+                files_done: 0,
+                total_files: files,
+                failed_files: 0,
+                bytes_per_sec: 50_000_000,
+                local_dest: None,
+            };
+            while view.bytes_done < total {
+                inner.emit(BackendEvent::Transfer {
+                    session,
+                    view: view.clone(),
+                });
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                view.bytes_done = (view.bytes_done + 12_500_000).min(total);
+                view.files_done = (view.bytes_done / 100_000_000) as u32;
+            }
+            view.status = TransferStatus::Completed;
+            view.bytes_per_sec = 0;
+            inner.emit(BackendEvent::Transfer { session, view });
+        });
+    }
 
     fn select_monitor(&self, session: SessionId, index: u32) {
         if !fake_monitors().iter().any(|m| m.index == index) {
@@ -522,6 +679,30 @@ impl Backend for FakeBackend {
             files: Vec::new(),
             problem: None,
         });
+    }
+}
+
+/// One frame of the fake remote screen at time `t` seconds, for monitor `monitor` (an index from
+/// [`fake_monitors`], unknown = the primary) with the remote pointer at `cursor` (normalized
+/// `0..=u16::MAX`). A pure function of its arguments, so the README media generator
+/// (`examples/readme_media`) gets byte-identical frames on every run.
+pub fn test_pattern_frame(monitor: u32, t: f32, cursor: (u16, u16)) -> VideoImage {
+    let mons = fake_monitors();
+    let m = mons
+        .iter()
+        .find(|m| m.index == monitor)
+        .or(mons.first())
+        .map_or((1280, 720, 0), |m| (m.width, m.height, m.index));
+    let remote = RemoteState {
+        cursor,
+        monitor: m.2,
+        ..RemoteState::default()
+    };
+    VideoImage {
+        width: m.0,
+        height: m.1,
+        rgba: render_test_pattern(m.0, m.1, t, &remote),
+        seq: 0,
     }
 }
 
@@ -600,6 +781,16 @@ mod tests {
     }
 
     #[test]
+    fn test_pattern_frame_is_deterministic_per_monitor() {
+        let a = test_pattern_frame(1, 2.5, (100, 200));
+        assert_eq!((a.width, a.height), (1024, 768));
+        assert_eq!(a, test_pattern_frame(1, 2.5, (100, 200)));
+        // Unknown monitor index falls back to the primary.
+        let p = test_pattern_frame(9, 0.0, (0, 0));
+        assert_eq!((p.width, p.height), (1280, 720));
+    }
+
+    #[test]
     fn fake_host_switches_monitors() {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -657,6 +848,42 @@ mod tests {
         // Unknown index: nothing happens.
         backend.select_monitor(session, 9);
         backend.disconnect(session);
+    }
+
+    #[test]
+    fn fake_host_user_answers_chat_in_arabic() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (backend, mut rx) = FakeBackend::start(rt.handle(), Arc::new(|| {}));
+        backend.connect(
+            ConnectTarget::Address("192.168.1.30:47400".parse().unwrap()),
+            Some("123456".into()),
+        );
+        let session = rt.block_on(async {
+            loop {
+                if let BackendEvent::SessionStarted { session, .. } = rx.recv().await.unwrap() {
+                    return session;
+                }
+            }
+        });
+        let sent = backend.send_chat(session, "مرحبا").unwrap();
+        assert!(sent.mine);
+        assert_eq!(backend.send_chat(session, " "), Err(ChatSendError::Empty));
+        let reply = rt.block_on(async {
+            loop {
+                if let BackendEvent::ChatReceived { session: s, line } = rx.recv().await.unwrap() {
+                    assert_eq!(s, session);
+                    return line;
+                }
+            }
+        });
+        assert!(!reply.mine && reply.text.contains("مرحبا"), "{reply:?}");
+        assert_eq!(
+            backend.send_chat(SessionId(424242), "x"),
+            Err(ChatSendError::Unavailable)
+        );
     }
 
     #[test]

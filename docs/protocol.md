@@ -1,7 +1,16 @@
 # tlp-desk wire protocol
 
-Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-proto` (messages),
+Status: **draft**, `PROTOCOL_VERSION = 5`. Source of truth: `crates/tlp-desk-proto` (messages),
 `crates/tlp-desk-net` (transport, discovery) and `crates/tlp-desk-crypto` (keys, PAKE).
+
+### Changes in v5
+
+- Appended `ClipboardData::Png { width, height, png }` (index 2 inside `ClipboardData`): a
+  PNG-compressed clipboard image, so a 4K screenshot (33 MB of RGBA) fits well inside the
+  16 MiB frame limit. `ClipboardData::Image` (raw RGBA) stays valid for tiny or legacy images.
+  Receivers check `width * height * 4` against their cap *before* decoding and reject a PNG whose
+  header disagrees with `width`/`height`. Needs `CLIPBOARD`, like the other clipboard messages.
+- Nothing else changed; every v4 index is unchanged.
 
 ### Changes in v4
 
@@ -15,6 +24,14 @@ Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-pro
 - New permission bits 8-11: `CHAT`, `TUNNEL`, `WHITEBOARD`, `SYSTEM`.
 - The host enforces `Message::required_permissions()` for every message from the viewer.
 - Appended only; all v1-v3 variants keep their indices.
+
+**Implementation status (v4).** The v4 wire format is specified ahead of the features so lanes can
+work in parallel. The transport implements stream headers, typed side streams and per-session
+feature dispatch: the host routes every control message its core does not handle to the
+registered feature that claims it, after checking `required_permissions()`. Which features are
+registered (and therefore which v4 messages are actually served) depends on the build; check the
+roadmap for what has landed. The host answers `AuthRequest::ReconnectTicket` with
+`Rejected(NotAllowed)` until unattended access is implemented.
 
 ### Changes in v3
 
@@ -38,8 +55,9 @@ Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-pro
   ALPN `tlp-desk` (version-less on purpose so a version mismatch reaches the `Hello` check).
   No 0-RTT.
 - **Identity**: each install has an ECDSA P-256 key (`identity.key.pem`, PKCS#8) in
-  `%ProgramData%\tlp-desk\`, or the per-user fallback `%LOCALAPPDATA%\tlp-desk\` when ProgramData
-  is not writable. The self-signed X.509 certificate is regenerated from the key on every start;
+  `%ProgramData%\TLP-Desk\`, or the per-user fallback `%LOCALAPPDATA%\TLP-Desk\` when ProgramData
+  is not writable (Windows paths are case-insensitive, so folders created as `tlp-desk` by older
+  builds are the same folders). The self-signed X.509 certificate is regenerated from the key on every start;
   only the key matters.
 - **Fingerprint** = SHA-256 of the DER `SubjectPublicKeyInfo` of the certificate.
 - **Device ID** = `u64::from_be_bytes(fingerprint[0..8]) % 900_000_000 + 100_000_000`
@@ -87,7 +105,8 @@ Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-pro
     clipboard 2, tunnel 1, file data -10. Bulk transfers therefore only use bandwidth that input,
     audio and video leave free, and never add latency to them.
   - **Flow control** (both sides): stream receive window 16 MiB, connection window 64 MiB, send
-    window 64 MiB, up to 256 concurrent uni and 256 bidi streams, MTU discovery up to 9000 bytes.- Keep-alive 4 s, idle timeout 15 s.
+    window 64 MiB, up to 256 concurrent uni and 256 bidi streams, MTU discovery up to 9000 bytes.
+- Keep-alive 4 s, idle timeout 15 s.
 - Application close codes: `0` normal, `1` rejected, `2` protocol error.
 
 ### Why one stream per video frame
@@ -138,6 +157,7 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `VideoFrame { seq, timestamp_us, width, height, codec, keyframe, data }` | host → viewer (one uni stream per frame) | One encoded frame, H.264 Annex-B |
 | `InputEvent` | viewer → host | Mouse/keyboard; see below |
 | `ClipboardData::Text / Image` | both | Clipboard sync (needs `CLIPBOARD`) |
+| `ClipboardData::Png { width, height, png }` | both | PNG-compressed clipboard image (v5, `CLIPBOARD`) |
 | `FileChunk { transfer_id, offset, data, last }` | both | File transfer (needs `FILES`) |
 | `Permissions(u16)` | host → viewer | Live permission update/revocation |
 | `Bye { reason }` | both | Graceful close |
@@ -176,6 +196,7 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `WhiteboardClear` | both | Erase all strokes (v4, `WHITEBOARD`) |
 | `DeviceInfoRequest` | viewer → host | Ask for system info (v4) |
 | `DeviceInfo(DeviceInfo)` | host → viewer | OS, CPU, RAM, disks, uptime (v4) |
+
 `MonitorDesc { index: u32, name: String, width: u32, height: u32, primary: bool, x: i32, y: i32 }`
 (physical pixels on the host virtual desktop).
 
@@ -278,11 +299,14 @@ several streams in parallel.
    `TransferError`.
 
 Directories (`is_dir`) are created by the receiver; modification times are restored.
+
 ### Clipboard
 
 - `ClipboardData::Text / Image` (v1) keep working; text is sent byte-exact (Arabic, RTL marks,
   ZWJ/ZWNJ preserved). Payloads larger than about 1 MiB should go on a `StreamKind::Clipboard` uni
   stream (body = one framed `Message`) instead of the control stream.
+- `ClipboardData::Png { width, height, png }` (v5): images travel PNG-compressed. The decoded
+  RGBA size is capped (64 MiB by default) before allocating.
 - `ClipboardHtml { html, alt_text }`: the `CF_HTML` fragment as UTF-8 plus a plain-text fallback.
 - `ClipboardFiles { transfer_id, items }`: files were copied on one side. Nothing is sent until the
   user pastes on the other side; then the viewer starts a `TransferOffer` with the same id
@@ -338,6 +362,7 @@ key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited l
   of the monitor height; `WhiteboardClear` erases all.
 - **Device info**: `DeviceInfoRequest` → `DeviceInfo { os, version, cpu, cores, ram_bytes, disks:
   Vec<DiskInfo { mount, label, total_bytes, free_bytes }>, uptime_s, hostname }`.
+
 ## Session flow
 
 ```

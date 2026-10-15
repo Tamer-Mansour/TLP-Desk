@@ -86,6 +86,14 @@ impl LocalActivity for LocalActivityMonitor {
     fn last_physical_input(&self) -> Option<Instant> {
         self.stamp.last()
     }
+
+    fn last_physical_keyboard(&self) -> Option<Instant> {
+        self.stamp.last_physical_keyboard()
+    }
+
+    fn last_physical_pointer(&self) -> Option<Instant> {
+        self.stamp.last_physical_pointer()
+    }
 }
 
 impl Drop for LocalActivityMonitor {
@@ -148,11 +156,15 @@ fn hook_thread(stamp: Arc<ActivityStamp>, ready: SyncSender<Result<u32, String>>
     STAMP.with(|s| s.borrow_mut().take());
 }
 
-fn record(injected: bool) {
+fn record(keyboard: bool, injected: bool) {
     let now = Instant::now();
     STAMP.with(|s| {
         if let Some(s) = s.borrow().as_ref() {
-            s.record(injected, now);
+            if keyboard {
+                s.record_keyboard(injected, now);
+            } else {
+                s.record_pointer(injected, now);
+            }
         }
     });
 }
@@ -163,7 +175,10 @@ unsafe extern "system" fn ll_mouse_proc(code: i32, wparam: WPARAM, lparam: LPARA
         // SAFETY: for WH_MOUSE_LL with HC_ACTION, lParam points to an MSLLHOOKSTRUCT valid for
         // the duration of this call; we copy the flags out immediately.
         let flags = unsafe { (*(lparam.0 as *const MSLLHOOKSTRUCT)).flags };
-        record(flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED) != 0);
+        record(
+            false,
+            flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED) != 0,
+        );
     }
     // SAFETY: forwards the unmodified arguments we received, as the hook contract requires.
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
@@ -175,7 +190,10 @@ unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: WPARAM, lparam: LP
         // SAFETY: for WH_KEYBOARD_LL with HC_ACTION, lParam points to a KBDLLHOOKSTRUCT valid
         // for the duration of this call; we copy the flags out immediately.
         let flags = unsafe { (*(lparam.0 as *const KBDLLHOOKSTRUCT)).flags };
-        record(flags.contains(LLKHF_INJECTED) || flags.contains(LLKHF_LOWER_IL_INJECTED));
+        record(
+            true,
+            flags.contains(LLKHF_INJECTED) || flags.contains(LLKHF_LOWER_IL_INJECTED),
+        );
     }
     // SAFETY: forwards the unmodified arguments we received, as the hook contract requires.
     unsafe { CallNextHookEx(None, code, wparam, lparam) }

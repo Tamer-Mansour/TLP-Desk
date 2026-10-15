@@ -8,7 +8,7 @@ extend-exclude = [
     "dist/",
     # Arabic UI strings and translated docs: typos only knows English.
     "**/i18n/ar*",
-    "docs/*-ar.md",
+    "docs/src/user-guide/ar/**",
 ]
 
 [default.extend-words]
