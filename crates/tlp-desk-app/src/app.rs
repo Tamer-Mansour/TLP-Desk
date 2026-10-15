@@ -29,6 +29,8 @@ use crate::ui::{theme, widgets};
 pub enum Screen {
     Home,
     Settings,
+    /// Connection log (TLP-settings-tray).
+    ConnectionLog,
 }
 
 /// A connection attempt in progress.
@@ -115,6 +117,15 @@ pub struct App {
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    // --- TLP-settings-tray ---
+    /// Settings screen editor state.
+    pub settings_ui: crate::ui::settings::SettingsUi,
+    /// "Start with Windows" (the HKCU Run key; a fake in tests).
+    pub autostart: Box<dyn crate::settings::autostart::AutoStart>,
+    /// Notification-area icon and main-window mode.
+    pub tray: crate::tray::TrayState,
+    /// Connection log screen state.
+    pub conn_log: crate::ui::connection_log::ConnLogUi,
     /// Recordings window and playback windows (TLP-recording).
     pub recordings: RecordingsUi,
     /// Recent clipboard activity of host sessions (banner indicator, TLP-clipboard).
@@ -163,9 +174,17 @@ impl App {
             host_input_blocked: None,
             session: None,
             notice: None,
+            settings_ui: Default::default(),
+            autostart: crate::settings::autostart::system(),
+            tray: Default::default(),
+            conn_log: Default::default(),
             recordings: RecordingsUi::default(),
             host_clipboard: Default::default(),
         };
+        // The Run key is the truth for "start with Windows" (it can be removed outside the app).
+        if let Ok(on) = app.autostart.is_enabled() {
+            app.settings.startup.start_with_windows = on;
+        }
         app.backend
             .set_clipboard_default(!app.settings.clipboard_sync_off);
         if let Some(code) = opts.code {
@@ -368,8 +387,13 @@ impl App {
                     }
                 }
                 BackendEvent::IncomingRequest { request, peer } => {
+                    let name = peer.name.clone();
                     self.incoming.push_back((request, peer));
-                    bring_to_front(ctx);
+                    if self.tray.system_present() {
+                        self.tray_incoming_request(ctx, &name);
+                    } else {
+                        bring_to_front(ctx);
+                    }
                 }
                 BackendEvent::IncomingRequestCancelled { request } => {
                     self.incoming.retain(|(r, _)| *r != request);
@@ -830,6 +854,8 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_events(&ctx);
+        self.tray_frame(&ctx);
+        self.banner_window(&ctx);
         self.host_banner(ui);
         if self.session.is_none() {
             self.host_problem_banner(ui);
@@ -853,6 +879,7 @@ impl eframe::App for App {
         match self.screen {
             Screen::Home => self.home_ui(ui),
             Screen::Settings => self.settings_ui(ui),
+            Screen::ConnectionLog => self.connection_log_ui(ui),
         }
     }
 }

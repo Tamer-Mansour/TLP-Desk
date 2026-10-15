@@ -35,6 +35,14 @@ time = { version = "0.3", default-features = false, features = ["std", "local-of
 rfd = { version = "0.15", default-features = false }
 resvg = { version = "0.48", default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+# HKCU Run key for "start with Windows" (settings::autostart). Safe API: this crate stays
+# forbid(unsafe_code).
+windows-registry = "0.6"
+# Notification-area icon + menu (tray::system). No default features: they only add the Linux
+# libappindicator backend (and an MPL-licensed dependency through dirs).
+tray-icon = { version = "0.26", default-features = false }
+
 [dev-dependencies]
 tlp-desk-capture.workspace = true
 # Encodes real H.264 for the playback window tests.

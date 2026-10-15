@@ -332,6 +332,93 @@ strings! {
     // --- privacy ---
 
     // --- settings/ux ---
+    // Settings sections (TLP-settings-tray)
+    SettingsIncoming => "Incoming connections", "الاتصالات الواردة";
+    SettingsAllowList => "Allowed networks", "الشبكات المسموح بها";
+    SettingsQuality => "Picture quality", "جودة الصورة";
+    SettingsStartup => "Start-up and notification area", "بدء التشغيل ومنطقة الإشعارات";
+    IncomingEnabled => "Accept incoming connections", "استقبال الاتصالات الواردة";
+    IncomingPaused => "Incoming connections are paused. Other devices cannot connect to this one.", "الاتصالات الواردة متوقفة مؤقتاً. لا تستطيع الأجهزة الأخرى الاتصال بهذا الجهاز.";
+    DefaultPermissions => "What connected devices may do", "ما يُسمح للأجهزة المتصلة بفعله";
+    DefaultPermissionsHint => "Applies to the next connection. You can take any of these back during a session.", "يُطبَّق على الاتصال التالي، ويمكنك سحب أي منها أثناء الجلسة.";
+    PermView => "See the screen", "رؤية الشاشة";
+    PermControl => "Use the mouse", "استخدام الفأرة";
+    PermKeyboard => "Use the keyboard", "استخدام لوحة المفاتيح";
+    PermClipboard => "Share the clipboard", "مشاركة الحافظة";
+    PermFiles => "Transfer files", "نقل الملفات";
+    PermAudio => "Hear the sound", "سماع الصوت";
+    PermRestart => "Restart this device", "إعادة تشغيل هذا الجهاز";
+    PermPrivacy => "Privacy mode", "وضع الخصوصية";
+    PermChat => "Chat", "المحادثة";
+    PermTunnel => "Port forwarding", "تمرير المنافذ";
+    PermWhiteboard => "Draw on the screen", "الرسم على الشاشة";
+    PermSystem => "Ctrl+Alt+Del and locking", "\u{2066}Ctrl+Alt+Del\u{2069} وقفل الجهاز";
+    AcceptTimeout => "Decline unanswered requests after", "رفض الطلبات التي لم يُرَدّ عليها بعد";
+    UnitSeconds => "s", "ث";
+    AllowOneTimeCode => "Allow connecting with the one-time code", "السماح بالاتصال بالرمز لمرة واحدة";
+    LocalGrace => "Pause remote control after I use my own mouse or keyboard for", "إيقاف التحكم عن بُعد مؤقتاً بعد استخدامي للفأرة أو لوحة المفاتيح لمدة";
+    PointerMarker => "Show where the remote pointer is on this screen", "إظهار موضع مؤشر الطرف البعيد على هذه الشاشة";
+    AllowListHint => "Only devices whose address is inside one of these ranges can connect to this device.", "لا يمكن الاتصال بهذا الجهاز إلا من أجهزة تقع عناوينها ضمن أحد هذه النطاقات.";
+    AllowListPlaceholder => "e.g. 192.168.1.0/24", "مثال: \u{2066}192.168.1.0/24\u{2069}";
+    AllowListAdd => "Add", "إضافة";
+    AllowListRemove => "Remove", "إزالة";
+    AllowListReset => "Restore defaults", "استعادة الافتراضي";
+    AllowListInvalid => "Enter an address or a range such as 192.168.1.0/24.", "أدخل عنواناً أو نطاقاً مثل \u{2066}192.168.1.0/24\u{2069}.";
+    AllowListDuplicate => "This range is already in the list.", "هذا النطاق موجود في القائمة.";
+    AllowListPublic => "{range} includes addresses outside the local network. Add it only if you are sure.", "يتضمن النطاق {range} عناوين خارج الشبكة المحلية. لا تضفه إلا إذا كنت متأكداً.";
+    AllowListAddAnyway => "Add anyway", "إضافة رغم ذلك";
+    AllowListLast => "At least one range is needed. To refuse everyone, turn off incoming connections.", "يلزم نطاق واحد على الأقل. لرفض الجميع أوقف استقبال الاتصالات الواردة.";
+    QualitySpeed => "Speed", "السرعة";
+    QualityBalanced => "Balanced", "متوازن";
+    QualityBest => "Quality", "الجودة";
+    QualityHint => "Used when you connect to another device.", "يُستخدم عند اتصالك بجهاز آخر.";
+    StartWithWindows => "Start TLP-Desk when I sign in to Windows", "تشغيل TLP-Desk عند تسجيل الدخول إلى Windows";
+    StartMinimized => "Start hidden in the notification area", "البدء مخفياً في منطقة الإشعارات";
+    CloseToTray => "Keep running in the notification area when I close the window", "الاستمرار في العمل في منطقة الإشعارات عند إغلاق النافذة";
+    AutostartFailed => "Could not change the start-up setting: {detail}", "تعذّر تغيير إعداد بدء التشغيل: {detail}";
+    // Tray (TLP-settings-tray)
+    TrayOpen => "Open TLP-Desk", "فتح TLP-Desk";
+    TrayCopyId => "Copy ID", "نسخ المعرّف";
+    TrayNewCode => "New one-time code", "رمز جديد لمرة واحدة";
+    TrayQuit => "Quit", "إنهاء";
+    TrayTooltip => "TLP-Desk — ID {id}", "TLP-Desk — المعرّف {id}";
+    TrayTooltipPaused => "TLP-Desk — ID {id} (incoming paused)", "TLP-Desk — المعرّف {id} (الاتصالات الواردة متوقفة)";
+    TrayTooltipRequest => "{name} wants to connect", "يطلب {name} الاتصال";
+    // Host banner (TLP-settings-tray)
+    BannerMore => "and {n} more", "و{n} آخرون";
+    // Connection log (TLP-settings-tray)
+    ConnectionLog => "Connection log", "سجل الاتصالات";
+    LogSearchHint => "Search by name, ID or address", "ابحث بالاسم أو المعرّف أو العنوان";
+    LogFilterAll => "All", "الكل";
+    LogIncoming => "Incoming", "وارد";
+    LogOutgoing => "Outgoing", "صادر";
+    LogFilterRefused => "Refused", "مرفوض";
+    LogExport => "Export CSV", "تصدير \u{2066}CSV\u{2069}";
+    LogExported => "Saved to {path}", "حُفظ في {path}";
+    LogExportFailed => "Could not export: {detail}", "تعذّر التصدير: {detail}";
+    LogEmpty => "No connections yet.", "لا توجد اتصالات بعد.";
+    LogNoMatch => "Nothing matches the search.", "لا توجد نتائج مطابقة.";
+    LogRefresh => "Refresh", "تحديث";
+    LogCount => "Entries: {n}", "عدد السجلات: {n}";
+    LogColTime => "When", "الوقت";
+    LogColDirection => "Direction", "الاتجاه";
+    LogColFingerprint => "Key fingerprint", "بصمة المفتاح";
+    LogColAuth => "Authorized by", "طريقة التفويض";
+    LogColPermissions => "Permissions", "الصلاحيات";
+    LogColEnd => "Ended", "سبب الانتهاء";
+    LogAuthAccept => "Accepted on screen", "قبول على الشاشة";
+    LogAuthPassword => "Password", "كلمة المرور";
+    LogUnknown => "Unknown", "غير معروف";
+    LogEndClosedHere => "Ended on this device", "أُنهيت من هذا الجهاز";
+    LogEndClosedRemotely => "Ended by the other side", "أنهاها الطرف الآخر";
+    LogEndRevoked => "Permission withdrawn", "سُحبت الصلاحية";
+    LogEndError => "Connection lost", "انقطع الاتصال";
+    LogEndAppExit => "TLP-Desk was closed", "أُغلق TLP-Desk";
+    LogEndDeclined => "Declined", "رُفض الطلب";
+    LogEndTimedOut => "Not answered", "لم يُرَدّ على الطلب";
+    LogEndWrongCredentials => "Wrong code or password", "رمز أو كلمة مرور خاطئة";
+    LogEndRateLimited => "Too many attempts", "محاولات كثيرة";
+    LogEndNotAllowed => "Not allowed", "غير مسموح";
 
     // --- perf ---
 

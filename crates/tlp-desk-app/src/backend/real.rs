@@ -25,7 +25,7 @@ use tlp_desk_files::clipfiles::ClipFilesConfig;
 use tlp_desk_files::fs::FsConfig;
 use tlp_desk_files::{FileTransfer, FilesError, TransferConfig, TransferSnapshot, TransferState};
 use tlp_desk_host::{
-    EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, HostTunnels,
+    CancelReason, EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, HostTunnels,
     RequestId as HostRequestId, SessionId as HostSessionId, TunnelHostConfig, WhiteboardHost,
     DEFAULT_PERMISSIONS, TUNNEL_FEATURE,
 };
@@ -53,6 +53,10 @@ use super::{
     DiscoveredDevice, EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo,
     PeerInfo, RepaintFn, RequestId, SessionId, SessionStats, VideoImage, WhiteboardOp,
 };
+// TLP-settings-tray: host settings + connection log.
+use super::settings_tray;
+use crate::connection_log::{log_auth, Direction, LogAuth, LogEnd, LogPeer, LogStore, Recorder};
+use crate::settings::HostSettings;
 
 /// How often host sessions are reconciled with [`Host::sessions`] and LAN addresses re-read.
 const RECONCILE_EVERY: Duration = Duration::from_secs(2);
@@ -73,6 +77,10 @@ pub struct RealConfig {
     pub host: HostConfig,
     /// Start a browse-only discovery when the host (and its discovery) is unavailable.
     pub fallback_discovery: bool,
+    /// User settings for incoming connections (`None` = the `host` template as is).
+    pub host_settings: Option<HostSettings>,
+    /// Folder of the connection log (`None` = do not log; tests never write the real one).
+    pub connection_log: Option<PathBuf>,
     /// Clipboard to sync in sessions (the app passes the system clipboard). `None` = a private
     /// in-memory clipboard, so tests never touch the user's real clipboard.
     pub clipboard: Option<Arc<dyn tlp_desk_files::ClipboardBackend>>,
@@ -97,6 +105,8 @@ impl Default for RealConfig {
                 ..HostConfig::default()
             },
             fallback_discovery: true,
+            host_settings: None,
+            connection_log: None,
             clipboard: None,
             transfer: TransferConfig::default(),
         }
@@ -131,6 +141,8 @@ struct Inner {
     /// File transfer engine shared by host and viewer sessions (lane files-transfer).
     files: Arc<FileTransfer>,
     state: Mutex<State>,
+    /// Connection log (TLP-settings-tray).
+    log: Recorder,
     /// Port forwarding (TLP-tunnel): viewer rules and tunnels into this device.
     tunnels: Arc<ViewerTunnels>,
     host_tunnels: Arc<HostTunnels>,
@@ -151,6 +163,8 @@ struct State {
     /// Remembered keys that failed with `HostKeyChanged`, per attempt.
     changed_keys: HashMap<AttemptId, HostKey>,
     last_devices: Option<Vec<DiscoveredDevice>>,
+    /// Who is behind each open accept prompt (to log declines and timeouts).
+    request_peers: HashMap<HostRequestId, tlp_desk_net::PeerInfo>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -345,12 +359,15 @@ impl RealBackend {
         };
         let mut endpoint = None;
         if let Some(identity) = &identity {
-            let listen_cfg = EndpointConfig {
+            let mut listen_cfg = EndpointConfig {
                 bind: cfg.bind,
                 device_name: device_name.clone(),
                 listen: true,
                 ..EndpointConfig::default()
             };
+            if let Some(s) = &cfg.host_settings {
+                listen_cfg.allow_list = s.effective_allow_list();
+            }
             match bind(listen_cfg, identity) {
                 Ok(ep) => endpoint = Some((Arc::new(ep), true)),
                 Err(e) => {
@@ -401,6 +418,9 @@ impl RealBackend {
             chat.register_host(&mut host_cfg);
             let whiteboard = Arc::new(WhiteboardHost::new());
             host_cfg.features.push(whiteboard.clone());
+            if let Some(s) = &cfg.host_settings {
+                host_cfg = settings_tray::host_config(host_cfg, s);
+            }
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
                 Ok((h, ev)) => {
                     whiteboard.set_monitor_source(h.streamed_monitor_fn());
@@ -484,6 +504,7 @@ impl RealBackend {
             chat,
             files,
             state: Mutex::default(),
+            log: Recorder::new(cfg.connection_log.clone().map(LogStore::new)),
             tunnels,
             host_tunnels,
             recorders: Default::default(),
@@ -634,7 +655,11 @@ impl Inner {
             match ev {
                 HostEvent::IncomingRequest(r) => {
                     let request = RequestId(self.next_id());
-                    self.state().requests.insert(request, r.id);
+                    {
+                        let mut st = self.state();
+                        st.requests.insert(request, r.id);
+                        st.request_peers.insert(r.id, r.peer.clone());
+                    }
                     self.emit(BackendEvent::IncomingRequest {
                         request,
                         peer: app_peer(&r.peer),
@@ -642,6 +667,15 @@ impl Inner {
                 }
                 HostEvent::RequestCancelled { id, reason } => {
                     tracing::info!(?reason, "accept prompt cancelled");
+                    let peer = self.state().request_peers.remove(&id);
+                    if let (Some(peer), CancelReason::TimedOut) = (peer, reason) {
+                        self.log.refused(
+                            Direction::Incoming,
+                            LogPeer::from(&peer),
+                            LogAuth::AcceptPrompt,
+                            LogEnd::TimedOut,
+                        );
+                    }
                     let found = {
                         let mut st = self.state();
                         let key = st.requests.iter().find(|(_, h)| **h == id).map(|(k, _)| *k);
@@ -656,13 +690,29 @@ impl Inner {
                 }
                 HostEvent::AuthFailed { peer, auth, reason } => {
                     tracing::warn!(peer = %peer.addr, device_id = %peer.device_id, ?auth, ?reason, "authentication failed");
+                    self.log.refused(
+                        Direction::Incoming,
+                        LogPeer::from(&peer),
+                        log_auth(auth),
+                        settings_tray::refusal(reason),
+                    );
                 }
                 HostEvent::CodeChanged => {
                     let code = self.current_code();
                     self.update_local(|l| l.one_time_code = code);
                 }
-                HostEvent::SessionStarted(v) => self.host_session_started(v.id, &v.peer),
+                HostEvent::SessionStarted(v) => {
+                    self.log.begin(
+                        Direction::Incoming,
+                        v.id.0,
+                        LogPeer::from(&v.peer),
+                        log_auth(v.auth),
+                        v.permissions,
+                    );
+                    self.host_session_started(v.id, &v.peer);
+                }
                 HostEvent::PermissionsChanged { id, permissions } => {
+                    self.log.permissions(Direction::Incoming, id.0, permissions);
                     // Port forwarding (TLP-tunnel): the banner shows whether it is allowed.
                     if let Some(session) = self.app_host_session(id) {
                         self.emit(BackendEvent::HostTunnels {
@@ -691,6 +741,8 @@ impl Inner {
                     }
                 }
                 HostEvent::SessionEnded { id, reason, .. } => {
+                    let (end, detail) = settings_tray::host_end(&reason);
+                    self.log.end(Direction::Incoming, id.0, end, detail);
                     self.host_session_ended(id, map_host_end(reason));
                 }
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
@@ -876,9 +928,14 @@ impl Inner {
         target: ConnectTarget,
         code: Option<String>,
     ) {
+        let auth = if code.as_deref().is_some_and(|c| !c.trim().is_empty()) {
+            LogAuth::OneTimeCode
+        } else {
+            LogAuth::AcceptPrompt
+        };
         let result = self.dial(attempt, target, code).await;
         match result {
-            Ok((session, events)) => self.session_started(attempt, session, events),
+            Ok((session, events)) => self.session_started(attempt, session, events, auth),
             Err(e) => {
                 tracing::info!(attempt = attempt.0, %e, "connect failed");
                 let error = map_viewer_error(&e);
@@ -934,6 +991,7 @@ impl Inner {
         attempt: AttemptId,
         session: ViewerSession,
         events: ViewerEvents,
+        auth: LogAuth,
     ) {
         let session = Arc::new(session);
         let id = SessionId(self.next_id());
@@ -955,6 +1013,13 @@ impl Inner {
         });
         let peer = app_peer(session.peer());
         tracing::info!(session = id.0, host = %peer.device_id, name = %peer.name, "viewer session started");
+        self.log.begin(
+            Direction::Outgoing,
+            id.0,
+            LogPeer::from(session.peer()),
+            auth,
+            session.permissions(),
+        );
         self.emit(BackendEvent::SessionStarted {
             attempt,
             session: id,
@@ -970,6 +1035,8 @@ impl Inner {
         while let Some(ev) = events.recv().await {
             match ev {
                 ViewerEvent::PermissionsChanged(permissions) => {
+                    self.log
+                        .permissions(Direction::Outgoing, session.0, permissions);
                     self.emit(BackendEvent::PermissionsChanged {
                         session,
                         permissions,
@@ -1034,11 +1101,16 @@ impl Inner {
                     }
                 }
                 ViewerEvent::Ended(r) => {
+                    let (end, detail) = settings_tray::viewer_end(&r);
+                    self.log.end(Direction::Outgoing, session.0, end, detail);
                     reason = map_viewer_end(r);
                     break;
                 }
             }
         }
+        // Stream closed without an `Ended` (no-op if it was already logged).
+        self.log
+            .end(Direction::Outgoing, session.0, LogEnd::Error, None);
         self.state().viewer_sessions.remove(&session);
         lock(&self.bridges).retain(|b| b.session != session);
         self.recorders.stop(session, &self.rt, self.emitter());
@@ -1108,6 +1180,15 @@ impl Backend for RealBackend {
         let Some(id) = self.inner.state().requests.remove(&request) else {
             return;
         };
+        let peer = self.inner.state().request_peers.remove(&id);
+        if let (Some(peer), false) = (peer, accept) {
+            self.inner.log.refused(
+                Direction::Incoming,
+                LogPeer::from(&peer),
+                LogAuth::AcceptPrompt,
+                LogEnd::Declined,
+            );
+        }
         if let Some(h) = &self.inner.host {
             if accept {
                 h.accept(id, None);
@@ -1317,6 +1398,23 @@ impl Backend for RealBackend {
         }
     }
 
+    // --- settings / ux (TLP-settings-tray) ---
+    fn apply_host_settings(&self, settings: &HostSettings) {
+        settings_tray::apply(
+            self.inner.endpoint.as_deref(),
+            self.inner.host.as_ref(),
+            settings,
+        );
+    }
+
+    fn request_quality(&self, session: SessionId, quality: tlp_desk_proto::QualitySettings) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            if !s.send_message(tlp_desk_proto::Message::SetQuality(quality)) {
+                tracing::debug!(session = session.0, "quality request not sent");
+            }
+        }
+    }
     // --- power (TLP-power) ---
     // recording (TLP-recording)
     fn start_recording(&self, session: SessionId) {
@@ -1419,6 +1517,8 @@ impl Drop for RealBackend {
             std::thread::sleep(Duration::from_millis(150));
             ep.close();
         }
+        // Sessions whose end events did not arrive in time are logged as "app closed".
+        self.inner.log.close_all();
     }
 }
 

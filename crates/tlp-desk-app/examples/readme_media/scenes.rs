@@ -85,6 +85,21 @@ pub const SCENES: &[Scene] = &[
         setup: settings,
     },
     Scene {
+        name: "settings-incoming",
+        about: "settings: what connected devices may do, accept timeout, one-time code",
+        setup: settings_incoming,
+    },
+    Scene {
+        name: "settings-network",
+        about: "settings: allowed networks (CIDR list), picture quality, start-up and tray",
+        setup: settings_network,
+    },
+    Scene {
+        name: "connection-log",
+        about: "connection log: Arabic and English peers, refused attempts, search and filter",
+        setup: connection_log,
+    },
+    Scene {
         name: "key-changed",
         about: "loud warning when a host's key changed",
         setup: key_changed,
@@ -241,6 +256,103 @@ fn file_browser(app: &mut App, lang: Lang) {
 fn settings(app: &mut App, lang: Lang) {
     home(app, lang);
     app.screen = Screen::Settings;
+    if lang == Lang::Ar {
+        use_digits(app, DigitStyle::ArabicIndic);
+    }
+}
+
+fn settings_incoming(app: &mut App, lang: Lang) {
+    settings(app, lang);
+    app.settings_ui.scroll_offset = Some(430.0);
+}
+
+fn settings_network(app: &mut App, lang: Lang) {
+    settings(app, lang);
+    app.settings.host.allow_list = vec!["192.168.1.0/24".into(), "10.8.0.0/16".into()];
+    app.settings_ui.scroll_offset = Some(1000.0);
+}
+
+fn connection_log(app: &mut App, lang: Lang) {
+    use tlp_desk_app::connection_log::{Direction, LogAuth, LogEnd, LogEntry};
+    use tlp_desk_app::settings::PermissionSet;
+    use tlp_desk_app::ui::connection_log::ConnLogUi;
+    home(app, lang);
+    let base: u64 = 1_760_000_000_000;
+    let entry = |hours: u64,
+                 name: &str,
+                 id: u32,
+                 addr: &str,
+                 direction: Direction,
+                 auth: LogAuth,
+                 minutes: u64,
+                 end: LogEnd| LogEntry {
+        started_ms: base + hours * 3_600_000,
+        duration_ms: minutes * 60_000,
+        direction,
+        device_id: id,
+        name: name.into(),
+        address: addr.into(),
+        auth,
+        permissions: PermissionSet(
+            Permissions::VIEW | Permissions::CONTROL | Permissions::KEYBOARD | Permissions::FILES,
+        ),
+        end,
+        ..LogEntry::default()
+    };
+    let entries = vec![
+        entry(
+            0,
+            "Office-PC",
+            482_913_057,
+            "192.168.1.20",
+            Direction::Incoming,
+            LogAuth::AcceptPrompt,
+            42,
+            LogEnd::ClosedRemotely,
+        ),
+        entry(
+            5,
+            "حاسوب سارة",
+            731_204_586,
+            "192.168.1.31",
+            Direction::Incoming,
+            LogAuth::OneTimeCode,
+            7,
+            LogEnd::ClosedHere,
+        ),
+        entry(
+            9,
+            "Laptop-Ali",
+            118_004_372,
+            "192.168.1.77",
+            Direction::Incoming,
+            LogAuth::OneTimeCode,
+            0,
+            LogEnd::WrongCredentials,
+        ),
+        entry(
+            26,
+            "خادم المحاسبة",
+            905_551_220,
+            "192.168.1.5",
+            Direction::Outgoing,
+            LogAuth::Password,
+            125,
+            LogEnd::ClosedHere,
+        ),
+        entry(
+            30,
+            "Reception",
+            264_380_911,
+            "192.168.1.44",
+            Direction::Incoming,
+            LogAuth::AcceptPrompt,
+            0,
+            LogEnd::Declined,
+        ),
+    ];
+    app.conn_log = ConnLogUi::with_fixed(entries, time::UtcOffset::UTC);
+    app.screen = Screen::ConnectionLog;
     if lang == Lang::Ar {
         use_digits(app, DigitStyle::ArabicIndic);
     }

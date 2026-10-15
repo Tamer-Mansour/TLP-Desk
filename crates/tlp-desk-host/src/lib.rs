@@ -38,6 +38,7 @@
 mod cursor;
 mod device_info;
 mod input;
+mod live;
 mod pipeline;
 mod priority;
 mod tunnel;
@@ -69,6 +70,7 @@ pub use device_info::{
     limit as limit_device_info, DeviceInfoFeature, DeviceInfoServed, DeviceInfoSource,
     SystemInfoSource, DEVICE_INFO_FEATURE,
 };
+pub use live::LiveOptions;
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 pub use tunnel::{HostTunnelEvent, HostTunnelInfo, HostTunnels, TunnelHostConfig, TUNNEL_FEATURE};
 
@@ -329,6 +331,8 @@ struct SessionCtl {
 struct Inner {
     endpoint: Arc<Endpoint>,
     cfg: HostConfig,
+    /// Options the app may change at runtime ([`Host::set_live_options`]).
+    live: Mutex<LiveOptions>,
     password: Mutex<Option<PasswordVerifier>>,
     events: mpsc::UnboundedSender<HostEvent>,
     next_id: AtomicU64,
@@ -345,6 +349,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 impl Inner {
     fn emit(&self, ev: HostEvent) {
         let _ = self.events.send(ev);
+    }
+
+    fn live(&self) -> LiveOptions {
+        *lock(&self.live)
     }
 
     fn next(&self) -> u64 {
@@ -399,6 +407,7 @@ impl Host {
         let inner = Arc::new(Inner {
             endpoint,
             password: Mutex::new(cfg.password.clone()),
+            live: Mutex::new(LiveOptions::from_config(&cfg)),
             prompt_limiter: Mutex::new(RateLimiter::new(cfg.prompt_rate_limit)),
             cfg,
             events: tx,
@@ -453,6 +462,19 @@ impl Host {
         *lock(&self.inner.password) = verifier;
     }
 
+    /// Replaces the runtime-changeable options (default permissions, accept timeout, one-time
+    /// code on/off, local-input grace, pointer marker). They apply to the next prompt,
+    /// authentication or session; running sessions are not changed.
+    pub fn set_live_options(&self, options: LiveOptions) {
+        tracing::info!(?options, "host options changed");
+        *lock(&self.inner.live) = options;
+    }
+
+    /// The options currently in effect (see [`Host::set_live_options`]).
+    pub fn live_options(&self) -> LiveOptions {
+        self.inner.live()
+    }
+
     /// The running discovery (advertising this host and browsing the LAN), so the viewer side
     /// can list devices without starting a second instance.
     pub fn discovery(&self) -> Option<Arc<Discovery>> {
@@ -472,7 +494,7 @@ impl Host {
     /// The user clicked **Accept**. `None` grants [`HostConfig::default_permissions`].
     /// Returns `false` if the request no longer exists.
     pub fn accept(&self, id: RequestId, permissions: Option<Permissions>) -> bool {
-        let perms = permissions.unwrap_or(self.inner.cfg.default_permissions);
+        let perms = permissions.unwrap_or(self.inner.live().default_permissions);
         match lock(&self.inner.pending).remove(&id) {
             Some(p) => p.decide.send(Decision::Accept(perms)).is_ok(),
             None => false,
@@ -589,14 +611,14 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
     match kind {
         AuthKind::AcceptPrompt => handle_prompt(inner, p).await,
         AuthKind::OneTimeCode => {
-            if !inner.cfg.allow_one_time_code {
+            if !inner.live().allow_one_time_code {
                 tracing::info!(peer = %peer.addr, device_id = %peer.device_id, "one-time code access disabled; rejecting");
                 refuse(&inner, p, RejectReason::NotAllowed).await;
                 return;
             }
             let code = inner.cfg.one_time_code.clone();
             let generation = code.generation();
-            let res = p.verify_code(&code, inner.cfg.default_permissions).await;
+            let res = p.verify_code(&code, inner.live().default_permissions).await;
             if code.generation() != generation {
                 inner.emit(HostEvent::CodeChanged);
             }
@@ -610,7 +632,7 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
                 return;
             };
             let res = p
-                .verify_password(&verifier, inner.cfg.default_permissions)
+                .verify_password(&verifier, inner.live().default_permissions)
                 .await;
             finish_auth(inner, peer, kind, res).await;
         }
@@ -663,7 +685,7 @@ async fn handle_prompt(inner: Arc<Inner>, p: PendingSession) {
         return;
     }
     let id = RequestId(inner.next());
-    let deadline = Instant::now() + inner.cfg.accept_timeout;
+    let deadline = Instant::now() + inner.live().accept_timeout;
     let info = IncomingRequest {
         id,
         peer: peer.clone(),
@@ -794,15 +816,15 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
 
     let (input_tx, input_rx) = std::sync::mpsc::channel::<InputEvent>();
     let (prio_tx, mut prio_rx) = mpsc::unbounded_channel::<bool>();
+    let live = inner.live();
     let (blocked_tx, mut blocked_rx) = mpsc::unbounded_channel::<()>();
     let input_ctx = input::InputCtx {
         factory: inner.cfg.injector_factory.clone(),
         rect: rect_rx,
         events: input_rx,
-        grace: inner.cfg.local_input_grace,
+        grace: live.local_input_grace,
         activity_factory: Some(inner.cfg.local_activity_factory.clone()),
-        marker_factory: inner
-            .cfg
+        marker_factory: live
             .remote_pointer_marker
             .then(|| inner.cfg.pointer_marker_factory.clone()),
         label: if peer.name.trim().is_empty() {

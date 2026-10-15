@@ -1215,6 +1215,47 @@ async fn features_receive_permitted_messages_on_both_sides() {
     session.disconnect();
 }
 
+/// Settings changed while the host runs (`Host::set_live_options`) apply to the next viewer:
+/// code access can be switched off and on, and new sessions get the new default permissions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn live_options_apply_to_the_next_session() {
+    let mut h = harness(false, |_| {}).await;
+    let base = h.host.live_options();
+    h.host.set_live_options(tlp_desk_host::LiveOptions {
+        allow_one_time_code: false,
+        ..base
+    });
+    let err = spawn_connect(
+        &h,
+        AuthMethod::OneTimeCode(h.host.one_time_code().current()),
+    )
+    .await
+    .unwrap()
+    .expect_err("code access switched off");
+    assert!(
+        matches!(err, ViewerError::Rejected(RejectReason::NotAllowed)),
+        "{err:?}"
+    );
+    let _ = host_event(&mut h.events, |e| matches!(e, HostEvent::AuthFailed { .. })).await;
+
+    h.host.set_live_options(tlp_desk_host::LiveOptions {
+        allow_one_time_code: true,
+        default_permissions: Permissions::VIEW,
+        ..base
+    });
+    assert_eq!(h.host.live_options().default_permissions, Permissions::VIEW);
+    let (session, _ev) = spawn_connect(
+        &h,
+        AuthMethod::OneTimeCode(h.host.one_time_code().current()),
+    )
+    .await
+    .unwrap()
+    .expect("code access switched back on");
+    assert_eq!(session.permissions(), Permissions::VIEW);
+    assert_eq!(h.host.sessions()[0].permissions, Permissions::VIEW);
+    session.disconnect();
+}
+
 /// Fake device-info source: fixed Arabic data, counts how often it was asked.
 struct FakeInfo(Arc<std::sync::atomic::AtomicUsize>);
 

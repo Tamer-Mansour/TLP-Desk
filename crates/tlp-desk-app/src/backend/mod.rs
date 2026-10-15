@@ -27,7 +27,9 @@ pub mod files;
 pub mod files_bridge;
 pub mod files_fake;
 pub mod real;
+// TLP-settings-tray: host settings + connection-log glue for the real backend.
 pub mod recording;
+pub(crate) mod settings_tray;
 pub mod tunnels;
 pub mod whiteboard;
 
@@ -607,6 +609,26 @@ pub trait Backend: Send + Sync {
     // --- privacy mode (TLP-privacy) ---
 
     // --- settings / ux (TLP-ux) ---
+    /// Apply host settings now (TLP-settings-tray): the allow-list (empty while incoming
+    /// connections are paused) and the live host options (default permissions, accept
+    /// timeout, one-time code on/off, local-input grace, pointer marker). They apply to the
+    /// next connection; running sessions keep their permissions.
+    fn apply_host_settings(&self, settings: &crate::settings::HostSettings) {
+        tracing::debug!(
+            ?settings,
+            "apply_host_settings not supported by this backend"
+        );
+    }
+
+    /// Viewer side (TLP-settings-tray): ask the host for a quality preset
+    /// (`Message::SetQuality`). The host's encoder (TLP-perf) decides what it means.
+    fn request_quality(&self, session: SessionId, quality: tlp_desk_proto::QualitySettings) {
+        tracing::debug!(
+            session = session.0,
+            ?quality,
+            "request_quality not supported by this backend"
+        );
+    }
 
     // --- perf (TLP-perf) ---
 
