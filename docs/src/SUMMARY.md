@@ -17,6 +17,7 @@
   - [Clipboard sharing](user-guide/en/clipboard.md)
   - [Chat](user-guide/en/chat.md)
   - [Session recording](user-guide/en/recording.md)
+  - [Whiteboard: draw on the remote screen](user-guide/en/whiteboard.md)
   - [View options](user-guide/en/view-options.md)
   - [The statistics overlay](user-guide/en/stats.md)
   - [Settings](user-guide/en/settings.md)
@@ -34,7 +35,6 @@
     - [Privacy mode](user-guide/en/coming-soon/privacy-mode.md)
     - [Wake-on-LAN](user-guide/en/coming-soon/wake-on-lan.md)
     - [Port forwarding](user-guide/en/coming-soon/port-forwarding.md)
-    - [Whiteboard](user-guide/en/coming-soon/whiteboard.md)
     - [Remote device information](user-guide/en/coming-soon/device-info.md)
 
 # دليل المستخدم (العربية)
@@ -52,6 +52,7 @@
   - [مشاركة الحافظة](user-guide/ar/clipboard.md)
   - [المحادثة](user-guide/ar/chat.md)
   - [تسجيل الجلسة](user-guide/ar/recording.md)
+  - [اللوح الأبيض: الرسم على الشاشة](user-guide/ar/whiteboard.md)
   - [خيارات العرض](user-guide/ar/view-options.md)
   - [لوحة الإحصاءات](user-guide/ar/stats.md)
   - [الإعدادات](user-guide/ar/settings.md)
@@ -69,7 +70,6 @@
     - [وضع الخصوصية](user-guide/ar/coming-soon/privacy-mode.md)
     - [التشغيل عبر الشبكة (Wake-on-LAN)](user-guide/ar/coming-soon/wake-on-lan.md)
     - [إعادة توجيه المنافذ (الأنفاق)](user-guide/ar/coming-soon/port-forwarding.md)
-    - [اللوح الأبيض](user-guide/ar/coming-soon/whiteboard.md)
     - [معلومات الجهاز البعيد](user-guide/ar/coming-soon/device-info.md)
 
 # Security
