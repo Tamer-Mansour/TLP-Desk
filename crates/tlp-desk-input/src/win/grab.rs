@@ -7,14 +7,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC_EX};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetForegroundWindow, GetMessageW, PeekMessageW, PostThreadMessageW,
-    SetWindowsHookExW, UnhookWindowsHookEx, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
-    LLKHF_INJECTED, LLKHF_UP, MSG, PM_NOREMOVE, WH_KEYBOARD_LL, WM_QUIT, WM_USER,
+    CallNextHookEx, GetAncestor, GetForegroundWindow, GetMessageW, PeekMessageW,
+    PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, GA_ROOTOWNER, HC_ACTION,
+    KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED, LLKHF_UP, MSG, PM_NOREMOVE, WH_KEYBOARD_LL,
+    WM_QUIT, WM_USER,
 };
 
 use crate::grab_logic::GrabLogic;
@@ -211,6 +212,30 @@ unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: WPARAM, lparam: LP
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
+/// Whether `target` (a window handle, possibly a child or owned window of the real top-level
+/// window) is, or belongs to, the foreground window. winit may hand out a handle that is not
+/// exactly the one `GetForegroundWindow` reports; comparing the root windows avoids a grab
+/// that never applies.
+fn is_target_foreground(target: isize) -> bool {
+    // SAFETY: no arguments; returns the foreground window handle or null.
+    let fg = unsafe { GetForegroundWindow() };
+    if fg.0 as isize == target {
+        return true;
+    }
+    if fg.0.is_null() {
+        return false;
+    }
+    let target = HWND(target as *mut core::ffi::c_void);
+    // SAFETY: both handles are plain window handles; a stale one makes the call return null.
+    let (a, b) = unsafe {
+        (
+            GetAncestor(fg, GA_ROOTOWNER),
+            GetAncestor(target, GA_ROOTOWNER),
+        )
+    };
+    !a.0.is_null() && a == b
+}
+
 /// Returns true when the key must be suppressed locally.
 fn handle_key(info: &KBDLLHOOKSTRUCT) -> bool {
     HOOK_CTX.with(|c| {
@@ -220,8 +245,7 @@ fn handle_key(info: &KBDLLHOOKSTRUCT) -> bool {
         };
         let grab_now = ctx.shared.active.load(Ordering::SeqCst) && {
             let target = ctx.shared.target.load(Ordering::SeqCst);
-            // SAFETY: no arguments; returns the foreground window handle or null.
-            target == 0 || unsafe { GetForegroundWindow() }.0 as isize == target
+            target == 0 || is_target_foreground(target)
         };
         let injected = info.flags.contains(LLKHF_INJECTED);
         let extended = info.flags.contains(LLKHF_EXTENDED);

@@ -20,12 +20,18 @@
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
 pub mod chat;
+mod clipboard;
 pub mod fake;
+pub mod files;
+pub mod files_bridge;
+pub mod files_fake;
 pub mod real;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
+
+use std::path::PathBuf;
 
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 
@@ -335,6 +341,9 @@ pub enum BackendEvent {
     IncomingRequestCancelled { request: RequestId },
     /// Host side: a viewer is now connected to this device (show the banner).
     HostSessionStarted { session: SessionId, peer: PeerInfo },
+    /// Host side: the OS refused to inject this viewer's input (elevated window in front).
+    /// Rate limited by the host; the UI shows a notice for a while.
+    HostInputBlocked { session: SessionId },
     /// This device cannot accept incoming connections (connecting to others may still work).
     /// Sent at startup; the UI shows it until the app restarts.
     HostUnavailable(HostProblem),
@@ -345,8 +354,40 @@ pub enum BackendEvent {
     // in real.rs.
     // =======================================================================================
     // --- files: remote browser, transfers, Explorer copy/paste (TLP-files) ---
-
+    /// Answer to [Backend::fs_request].
+    FsResult {
+        side: files::FsSide,
+        request: files::FsRequestId,
+        result: Result<files::FsReply, files::FsFailure>,
+    },
+    /// The remote PC's clipboard now holds these copied files (None: nothing to paste).
+    RemoteClipboardFiles {
+        session: SessionId,
+        files: Option<files::RemoteClipboardFiles>,
+    },
+    /// Outcome of [Backend::fs_transfer] worth telling the user.
+    FilesNotice {
+        session: SessionId,
+        notice: files::FilesNotice,
+    },
+    /// Viewer side: a file transfer was created or changed (progress arrives about four times a
+    /// second). The UI keeps the newest view per `id`.
+    Transfer {
+        session: SessionId,
+        view: files::TransferView,
+    },
+    /// Viewer side: a transfer could not start.
+    TransferNotStarted {
+        session: SessionId,
+        error: files::TransferStartError,
+    },
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
+    /// Clipboard content was synced (or refused) in a viewer or host session. Kinds and sizes
+    /// only, never contents.
+    Clipboard {
+        session: SessionId,
+        event: tlp_desk_files::ClipboardEvent,
+    },
 
     // --- chat (TLP-chat) ---
     /// A chat message from the other side of a viewer or host session.
@@ -429,8 +470,63 @@ pub trait Backend: Send + Sync {
     // `RealBackend` only change where the lane actually implements it.
     // =======================================================================================
     // --- files (TLP-files) ---
+    /// Runs one file-system operation on side (this PC or the remote PC of a viewer session)
+    /// without blocking; the answer arrives as [BackendEvent::FsResult]. None if this
+    /// backend has no file access.
+    fn fs_request(&self, side: files::FsSide, op: files::FsOp) -> Option<files::FsRequestId> {
+        let _ = (side, op);
+        None
+    }
+
+    /// Starts copying files between this PC and the remote PC of session. Problems (and the
+    /// start) are reported as [BackendEvent::FilesNotice].
+    fn fs_transfer(&self, session: SessionId, request: files::TransferRequest) {
+        tracing::debug!(
+            session = session.0,
+            ?request,
+            "file transfers not supported by this backend"
+        );
+    }
+
+    /// Viewer side: send local files and folders (recursively) to the host's default folder.
+    /// Progress arrives as [`BackendEvent::Transfer`].
+    fn send_files(&self, session: SessionId, paths: Vec<PathBuf>) {
+        let _ = (session, paths);
+        tracing::debug!("send_files: not supported by this backend");
+    }
+
+    /// Viewer side: download host files and folders (absolute host paths in one folder) into
+    /// the local folder `dest`.
+    fn download_files(&self, session: SessionId, remote_paths: Vec<String>, dest: PathBuf) {
+        let _ = (session, remote_paths, dest);
+        tracing::debug!("download_files: not supported by this backend");
+    }
+
+    /// Cancel a running transfer; partial data is kept so a retry resumes.
+    fn cancel_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
+
+    /// Continue a cancelled, paused or failed transfer from its partial data.
+    fn retry_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
 
     // --- clipboard (TLP-clipboard) ---
+    /// Switch clipboard sync on or off for one viewer or host session ("Sync clipboard").
+    /// The host's `CLIPBOARD` permission still applies.
+    fn set_clipboard_sync(&self, session: SessionId, enabled: bool) {
+        tracing::debug!(
+            session = session.0,
+            enabled,
+            "clipboard sync toggle not supported"
+        );
+    }
+
+    /// Whether sessions started from now on sync the clipboard (settings default).
+    fn set_clipboard_default(&self, enabled: bool) {
+        tracing::debug!(enabled, "clipboard default not supported");
+    }
 
     // --- chat (TLP-chat) ---
     /// Send a chat message in a viewer or host session (queued, never blocks). Returns the

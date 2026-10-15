@@ -3,6 +3,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+/// How long the host banner keeps showing "remote input is blocked" after the last refusal.
+const HOST_BLOCKED_NOTICE: std::time::Duration = std::time::Duration::from_secs(15);
+
 use eframe::egui::{self, Id, RichText};
 use tlp_desk_proto::RejectReason;
 
@@ -103,9 +106,13 @@ pub struct App {
     pub host_sessions: Vec<(SessionId, PeerInfo)>,
     /// Host side: chat with each connected viewer (window opens when the viewer writes).
     pub host_chats: HashMap<SessionId, ChatState>,
+    /// When the OS last refused a remote viewer's input (elevated window in front).
+    host_input_blocked: Option<std::time::Instant>,
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    /// Recent clipboard activity of host sessions (banner indicator, TLP-clipboard).
+    pub host_clipboard: crate::ui::clipboard::HostClipboard,
 }
 
 impl App {
@@ -146,9 +153,13 @@ impl App {
             incoming: VecDeque::new(),
             host_sessions: Vec::new(),
             host_chats: HashMap::new(),
+            host_input_blocked: None,
             session: None,
             notice: None,
+            host_clipboard: Default::default(),
         };
+        app.backend
+            .set_clipboard_default(!app.settings.clipboard_sync_off);
         if let Some(code) = opts.code {
             app.code = code;
         }
@@ -286,6 +297,7 @@ impl App {
                     if self.pending.as_ref().is_some_and(|p| p.attempt == attempt) {
                         self.pending = None;
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
+                        view.clipboard.sync = !self.settings.clipboard_sync_off;
                         if let Some(grab) =
                             SystemKeyGrab::start(Arc::downgrade(&self.backend), session, self.hwnd)
                         {
@@ -360,6 +372,11 @@ impl App {
                         bring_to_front(ctx);
                     }
                 }
+                BackendEvent::HostInputBlocked { session } => {
+                    if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_input_blocked = Some(std::time::Instant::now());
+                    }
+                }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
                 // chat (TLP-chat)
                 BackendEvent::ChatReceived { session, line } => {
@@ -373,6 +390,45 @@ impl App {
                             .entry(session)
                             .or_insert_with(|| ChatState::new(allowed))
                             .set_allowed(allowed);
+                    }
+                }
+                BackendEvent::Clipboard { session, event } => self.clipboard_event(session, event),
+                // --- files (TLP-files) ---
+                BackendEvent::FsResult {
+                    side,
+                    request,
+                    result,
+                } => {
+                    if let Some(s) = self.session.as_mut() {
+                        s.files.on_result(side, request, result);
+                    }
+                }
+                BackendEvent::RemoteClipboardFiles { session, files } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.files.remote_clipboard = files;
+                    }
+                }
+                BackendEvent::FilesNotice { session, notice } => {
+                    let tx = self.tx;
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.files.on_notice(tx, &notice);
+                        // Progress of the copy shows in the transfer list.
+                        if matches!(
+                            notice,
+                            crate::backend::files::FilesNotice::TransferStarted { .. }
+                        ) {
+                            s.transfers.open = true;
+                        }
+                    }
+                }
+                BackendEvent::Transfer { session, view } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.update(view);
+                    }
+                }
+                BackendEvent::TransferNotStarted { session, error } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.not_started(error);
                     }
                 }
             }
@@ -435,6 +491,7 @@ impl App {
                         let text = tx.f(S::HostBanner, &[("name", &peer.name)]);
                         icons::icon(ui, tx, Icon::ViewOnly, 18.0, egui::Color32::WHITE);
                         ui.label(RichText::new(text).color(egui::Color32::WHITE).strong());
+                        self.host_clipboard.indicator(ui, tx, *session);
                         theme::row_end(ui, tx.rtl(), |ui| {
                             let end_button =
                                 icons::icon_text_button(tx, Icon::EndSession, tx.t(S::EndSession));
@@ -449,6 +506,19 @@ impl App {
                             }
                         });
                     });
+                }
+                // The remote person types into the void otherwise: say why.
+                if self
+                    .host_input_blocked
+                    .is_some_and(|t| t.elapsed() < HOST_BLOCKED_NOTICE)
+                {
+                    ui.label(
+                        RichText::new(tx.t(S::HostInputBlocked))
+                            .color(egui::Color32::WHITE)
+                            .small(),
+                    );
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs(1));
                 }
             });
         if let Some(s) = end {

@@ -12,6 +12,23 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
 
 ### Added
 
+- **Clipboard sharing.** Text, formatted text (HTML) and images are copied between the two PCs
+  in both directions while the host grants `Clipboard`; the permission is re-checked on every
+  send and apply, so revoking it stops sharing at once. The viewer toolbar has a "Sync clipboard"
+  switch and Settings has the default for new sessions. Change detection is event-driven on
+  Windows (`AddClipboardFormatListener`, no polling). Arabic text is exact (RLM/LRM, ZWJ/ZWNJ,
+  harakat, CRLF). Images travel as PNG (`ClipboardData::Png`, protocol v5); payloads over 1 MiB
+  use a clipboard side stream; caps are 16 MiB for text and HTML and 64 MiB decoded for images,
+  checked before allocating. Echo loops are prevented, duplicates are dropped, and only kinds and
+  sizes are ever logged. CLI: `clip-send`, `serve --clipboard`.
+- **Remote file browser and Explorer copy/paste.** A two-pane file manager (this PC | remote PC,
+  mirrored in Arabic) opens from the session toolbar: drives and known folders, breadcrumbs,
+  sorting, multi-select, new folder, rename, delete with confirmation, and copy between the panes
+  through the transfer engine. Files copied in Explorer on either PC can be pasted on the other
+  with a button (no delayed-render clipboard object, so not Ctrl+V inside Explorer). The host
+  serves the `FsRequest` messages only while the session holds `Files`, re-checked on every
+  request, and refuses traversal, alternate data streams, devices and network paths. CLI:
+  `ls`, `mkdir`, `rm`, `mv`.
 - **Wire protocol v4** — the message set for the rest of the roadmap, defined ahead of the
   features: remote file system (`FsRequest` / `FsResponse`), file transfer (`TransferOffer` …
   `TransferError`), clipboard HTML and files, chat, audio control, session and system control
@@ -54,6 +71,19 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
   (`_tlpdesk._udp.local.`) with a UDP 47401 broadcast fallback.
 - Wire protocol v1–v3: v2 added SPAKE2 key confirmation, keyframe requests and one QUIC stream
   per video frame; v3 added local input priority notices and the monitor list.
+
+### Fixed
+
+- **Typing on the host did not arrive.** The viewer dropped window key events whenever the OS
+  keyboard grab was on, even when the grab had not captured the key (hook removed by Windows,
+  mismatched window handle), and a toolbar click left keyboard focus on the button. Keys the
+  grab misses are now sent from the window, the grab reinstalls its hook, and the session view
+  takes keyboard focus back (unless a text field has it).
+- **A local mouse blocked remote keys.** Host-side "local user wins" priority is now per device:
+  local typing holds back remote keys, local mouse use holds back only the remote pointer.
+- The host shows a notice (and the CLI prints a line) when Windows refuses injected input because
+  an administrator window or secure screen is in front; the service lane lifts that limit.
+- `connect --type TEXT --then-ctrl S` types US-layout scancodes into the host for testing.
 
 ### Changed
 

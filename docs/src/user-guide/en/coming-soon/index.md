@@ -7,8 +7,6 @@ until it arrives.
 
 | Feature | Milestone |
 |---|---|
-| [File transfer and remote file browser](file-transfer.md) | M2 |
-| [Clipboard sharing](clipboard.md) | M2 |
 | [Chat](chat.md) | M2 |
 | [Sound from the remote PC](audio.md) | M2 |
 | [Address book](address-book.md) | M2 |

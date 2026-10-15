@@ -86,6 +86,7 @@ impl Peer {
                 ..defaults.host
             },
             fallback_discovery: false,
+            ..defaults
         };
         let (backend, rx) = RealBackend::start_concrete(rt.handle(), Arc::new(|| {}), cfg);
         Self {
