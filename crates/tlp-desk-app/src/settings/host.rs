@@ -65,7 +65,15 @@ impl PermissionSet {
 
 impl Default for PermissionSet {
     fn default() -> Self {
-        Self(tlp_desk_host::DEFAULT_PERMISSIONS)
+        // Moving files, clipboard, chat and pointing things out on screen are core uses; port
+        // forwarding (TUNNEL) stays off until the host user allows it per session.
+        Self(
+            tlp_desk_host::DEFAULT_PERMISSIONS
+                .union(Permissions::CLIPBOARD)
+                .union(Permissions::FILES)
+                .union(Permissions::CHAT)
+                .union(Permissions::WHITEBOARD),
+        )
     }
 }
 

@@ -82,6 +82,13 @@ impl App {
                             self.quality_card(ui);
                             ui.add_space(12.0);
                             self.startup_card(ui);
+                            ui.add_space(12.0);
+                            crate::ui::clipboard::settings_card(
+                                ui,
+                                tx,
+                                &mut self.settings,
+                                self.backend.as_ref(),
+                            );
                         });
                     });
             });

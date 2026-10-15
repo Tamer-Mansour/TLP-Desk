@@ -15,9 +15,14 @@ tlp-desk-crypto.workspace = true
 tlp-desk-net.workspace = true
 tlp-desk-capture.workspace = true
 tlp-desk-codec.workspace = true
+tlp-desk-input.workspace = true
 thiserror.workspace = true
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros", "net"] }
 tracing = "0.1"
+# Free disk space before/while recording (pure Rust, no libc; MIT OR Apache-2.0).
+fs4 = "1"
+# Local wall-clock time for recording file names ("local-offset" reads the time zone).
+time = { version = "0.3", features = ["local-offset"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

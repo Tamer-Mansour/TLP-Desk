@@ -53,6 +53,11 @@ fn samples() -> Vec<Message> {
             height: 1,
             rgba: vec![1, 2, 3, 4],
         }),
+        Message::ClipboardData(ClipboardData::Png {
+            width: 2,
+            height: 1,
+            png: vec![0x89, b'P', b'N', b'G', 0, 1],
+        }),
         Message::FileChunk(FileChunk {
             transfer_id: 7,
             offset: 4096,
@@ -565,6 +570,30 @@ fn v4_permissions_gate_feature_messages() {
 }
 
 #[test]
-fn protocol_version_is_4() {
-    assert_eq!(PROTOCOL_VERSION, 4);
+fn v5_clipboard_png_is_appended_to_clipboard_data() {
+    // v5 appends `ClipboardData::Png` after `Image` (index 1); `Text`/`Image` keep theirs.
+    let outer = index(&Message::ClipboardData(ClipboardData::Text(String::new())));
+    let text = encode_message(&Message::ClipboardData(ClipboardData::Text(String::new()))).unwrap();
+    assert_eq!(text, vec![outer, 0, 0]);
+    let png = encode_message(&Message::ClipboardData(ClipboardData::Png {
+        width: 1,
+        height: 2,
+        png: vec![9],
+    }))
+    .unwrap();
+    assert_eq!(png, vec![outer, 2, 1, 2, 1, 9]);
+    assert_eq!(
+        Message::ClipboardData(ClipboardData::Png {
+            width: 1,
+            height: 1,
+            png: vec![]
+        })
+        .required_permissions(),
+        Permissions::CLIPBOARD
+    );
+}
+
+#[test]
+fn protocol_version_is_5() {
+    assert_eq!(PROTOCOL_VERSION, 5);
 }

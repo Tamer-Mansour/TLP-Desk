@@ -49,6 +49,9 @@ pub struct Settings {
     pub quality: QualityChoice,
     /// Autostart, start hidden, close-to-tray.
     pub startup: StartupSettings,
+    /// New sessions start with clipboard sync off (default: on, so stored as an opt-out).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clipboard_sync_off: bool,
 }
 
 impl Default for Settings {
@@ -61,6 +64,7 @@ impl Default for Settings {
             host: HostSettings::default(),
             quality: QualityChoice::default(),
             startup: StartupSettings::default(),
+            clipboard_sync_off: false,
         }
     }
 }

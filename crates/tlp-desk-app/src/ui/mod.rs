@@ -1,8 +1,18 @@
 //! egui views.
 
+pub mod chat;
+pub mod clipboard;
+pub mod device_info;
+pub mod file_browser;
 pub mod home;
 pub mod icons;
+pub(crate) mod key_forward;
+pub mod playback;
+pub mod recordings;
 pub mod session;
 pub mod settings;
 pub mod theme;
+pub mod transfers;
+pub mod tunnels;
+pub mod whiteboard;
 pub mod widgets;

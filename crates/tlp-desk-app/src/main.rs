@@ -100,6 +100,11 @@ fn main() -> anyhow::Result<()> {
                         IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                         port.unwrap_or(tlp_desk_net::DEFAULT_PORT),
                     ),
+                    clipboard: Some(std::sync::Arc::new(tlp_desk_files::SystemClipboard::new())),
+                    // Default permissions, timeouts and the allow-list come from settings.json
+                    // (Settings screen), not from constants here.
+                    host_settings: Some(settings.host.clone()),
+                    connection_log: tlp_desk_app::settings::app_data_dir(),
                     ..Default::default()
                 };
                 backend::real::RealBackend::start_with(&rt, repaint, cfg)
