@@ -309,7 +309,7 @@ impl App {
                         }
                         self.session = Some(view);
                         let title =
-                            format!("{} â€” {}", self.tx.raw(S::AppTitle), self.session_title());
+                            format!("{} — {}", self.tx.raw(S::AppTitle), self.session_title());
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
                     } else {
                         // Attempt was cancelled locally; do not leak the session.

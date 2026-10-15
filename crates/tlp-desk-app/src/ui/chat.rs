@@ -1059,8 +1059,8 @@ mod tests {
                 }
             }
             // The time is inside the bubble, below the text.
-            let (tpos, tg) = &b.time;
-            assert!(b.rect.contains(*tpos) && tpos.x + tg.size().x <= b.rect.max.x + 0.5);
+            let (time_pos, tg) = &b.time;
+            assert!(b.rect.contains(*time_pos) && time_pos.x + tg.size().x <= b.rect.max.x + 0.5);
         }
     }
 
