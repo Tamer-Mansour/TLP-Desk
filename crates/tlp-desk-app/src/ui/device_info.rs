@@ -16,6 +16,20 @@ use crate::i18n::{format, Tx, S};
 /// Show "no answer" if the host stays silent this long (e.g. an older version).
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Window width, and the gap kept below the session toolbar when it first opens.
+const WIDTH: f32 = 360.0;
+
+/// First position: just under the toolbar, at the start edge (left, or right in Arabic).
+fn default_pos(ctx: &egui::Context, rtl: bool) -> egui::Pos2 {
+    let screen = ctx.content_rect();
+    let x = if rtl {
+        (screen.right() - WIDTH - 24.0).max(screen.left())
+    } else {
+        screen.left() + 16.0
+    };
+    egui::pos2(x, screen.top() + 64.0)
+}
+
 /// Per-session state of the panel.
 #[derive(Debug, Default)]
 pub struct DeviceInfoPanel {
@@ -94,7 +108,8 @@ impl DeviceInfoPanel {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(360.0)
+            .default_width(WIDTH)
+            .default_pos(default_pos(ctx, tx.rtl()))
             .show(ctx, |ui| {
                 theme::column(ui, tx.rtl(), |ui| {
                     let busy = self.pending();
@@ -122,7 +137,10 @@ impl DeviceInfoPanel {
                         ui.label(RichText::new(tx.t(S::DeviceInfoDisks)).strong());
                         for disk in disks(tx, info) {
                             ui.label(tx.p(&disk.title));
-                            ui.add(egui::ProgressBar::new(disk.used).text(tx.p(&disk.free_text)));
+                            // The text goes beside the bar, not on it: over a partly filled bar
+                            // it would be unreadable in one half.
+                            ui.add(egui::ProgressBar::new(disk.used).desired_height(8.0));
+                            ui.label(RichText::new(tx.p(&disk.free_text)).weak().small());
                         }
                     }
                 });
