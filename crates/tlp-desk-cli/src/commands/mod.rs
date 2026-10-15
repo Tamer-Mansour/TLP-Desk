@@ -11,6 +11,7 @@ pub mod id;
 pub mod list;
 pub mod send_file;
 pub mod serve;
+pub mod typing;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
 
 use std::path::PathBuf;

@@ -337,6 +337,9 @@ pub enum BackendEvent {
     IncomingRequestCancelled { request: RequestId },
     /// Host side: a viewer is now connected to this device (show the banner).
     HostSessionStarted { session: SessionId, peer: PeerInfo },
+    /// Host side: the OS refused to inject this viewer's input (elevated window in front).
+    /// Rate limited by the host; the UI shows a notice for a while.
+    HostInputBlocked { session: SessionId },
     /// This device cannot accept incoming connections (connecting to others may still work).
     /// Sent at startup; the UI shows it until the app restarts.
     HostUnavailable(HostProblem),

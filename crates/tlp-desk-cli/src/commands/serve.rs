@@ -218,6 +218,10 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     HostEvent::PermissionsChanged { .. } => {}
+                    HostEvent::InputBlocked { id } => out.event(
+                        text::input_blocked(),
+                        &json!({ "type": "input_blocked", "session": id.0 }),
+                    ),
                     HostEvent::SessionEnded { id, peer, reason } => out.event(
                         text::viewer_left(&peer, &reason),
                         &json!({

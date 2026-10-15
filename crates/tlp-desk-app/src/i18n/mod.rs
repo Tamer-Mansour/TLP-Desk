@@ -156,6 +156,7 @@ strings! {
     Accept => "Accept", "قبول";
     Decline => "Decline", "رفض";
     HostBanner => "{name} is connected to this device", "{name} متصل بهذا الجهاز";
+    HostInputBlocked => "Remote typing and clicks are blocked by a window running as administrator (or a secure screen) on this PC. Switch to a normal window, or run TLP-Desk as a service.", "الكتابة والنقر عن بُعد محجوبان بسبب نافذة تعمل بصلاحيات المسؤول (أو شاشة آمنة) على هذا الجهاز. انتقل إلى نافذة عادية أو شغّل TLP-Desk كخدمة.";
     EndSession => "End session", "إنهاء الجلسة";
     HostPortInUse => "Port {port} is already in use, probably by another running TLP-Desk. This device cannot accept connections, but you can still connect to other devices.", "المنفذ {port} مستخدم بالفعل، وربما يعمل TLP-Desk مسبقاً. لا يستطيع هذا الجهاز استقبال اتصالات، لكن ما زال بإمكانك الاتصال بأجهزة أخرى.";
     HostUnavailable => "This device cannot accept connections: {detail}", "لا يستطيع هذا الجهاز استقبال اتصالات: {detail}";

@@ -592,6 +592,19 @@ impl Inner {
                 }
                 HostEvent::SessionStarted(v) => self.host_session_started(v.id, &v.peer),
                 HostEvent::PermissionsChanged { .. } => {}
+                HostEvent::InputBlocked { id } => {
+                    tracing::warn!(session = id.0, "remote input blocked by the OS");
+                    let session = {
+                        let st = self.state();
+                        st.host_sessions
+                            .iter()
+                            .find(|(_, h)| **h == id)
+                            .map(|(k, _)| *k)
+                    };
+                    if let Some(session) = session {
+                        self.emit(BackendEvent::HostInputBlocked { session });
+                    }
+                }
                 HostEvent::SessionEnded { id, reason, .. } => {
                     self.host_session_ended(id, map_host_end(reason));
                 }
