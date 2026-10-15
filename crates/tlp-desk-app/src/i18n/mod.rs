@@ -213,6 +213,58 @@ strings! {
     // to your section avoids merge conflicts between parallel branches.
     // =======================================================================================
     // --- files ---
+    FsFiles => "Files: browse and copy between the two PCs", "الملفات: تصفّح وانسخ بين الجهازين";
+    FsTitle => "Files", "الملفات";
+    FsClose => "Close files", "إغلاق الملفات";
+    FsThisPc => "This PC", "هذا الجهاز";
+    FsRemotePc => "Remote PC", "الجهاز البعيد";
+    FsDrives => "Drives and folders", "الأقراص والمجلدات";
+    FsForward => "Forward", "إلى الأمام";
+    FsUp => "Up one folder", "المجلد الأعلى";
+    FsRefresh => "Refresh", "تحديث";
+    FsNewFolder => "New folder", "مجلد جديد";
+    FsRename => "Rename", "إعادة تسمية";
+    FsDelete => "Delete", "حذف";
+    FsUpload => "Copy to the remote PC", "نسخ إلى الجهاز البعيد";
+    FsDownload => "Copy to this PC", "نسخ إلى هذا الجهاز";
+    FsName => "Name", "الاسم";
+    FsSize => "Size", "الحجم";
+    FsModified => "Modified", "آخر تعديل";
+    FsSortHint => "Sort by this column (click again to reverse)", "رتّب حسب هذا العمود (انقر مرة أخرى لعكس الترتيب)";
+    FsEmpty => "This folder is empty.", "هذا المجلد فارغ.";
+    FsLoading => "Loading…", "جارٍ التحميل…";
+    FsLocalDisk => "Local disk", "قرص محلي";
+    FsHome => "Personal folder", "المجلد الشخصي";
+    FsDesktop => "Desktop", "سطح المكتب";
+    FsDocuments => "Documents", "المستندات";
+    FsDownloads => "Downloads", "التنزيلات";
+    FsPictures => "Pictures", "الصور";
+    FsMusic => "Music", "الموسيقى";
+    FsVideos => "Videos", "مقاطع الفيديو";
+    FsFreeOf => "{free} free of {total}", "{free} متاحة من {total}";
+    FsCreate => "Create", "إنشاء";
+    FsRenameTitle => "Rename “{name}”", "إعادة تسمية «{name}»";
+    FsInvalidName => "This name cannot be used for a file or folder.", "لا يمكن استخدام هذا الاسم لملف أو مجلد.";
+    FsDeleteTitle => "Delete permanently?", "حذف نهائي؟";
+    FsDeleteBody => "{n} item(s) will be deleted permanently from {where}, including everything inside folders. This cannot be undone.", "سيُحذف {n} من العناصر نهائياً من {where}، مع كل ما في داخل المجلدات. لا يمكن التراجع عن ذلك.";
+    FsDeleteConfirm => "Delete permanently", "احذف نهائياً";
+    FsPickFolder => "Open a folder in both panes first.", "افتح مجلداً في الجهتين أولاً.";
+    FsPasteRemote => "Paste files copied on the remote PC", "الصق الملفات المنسوخة على الجهاز البعيد";
+    FsPasteRemoteHint => "{n} item(s) were copied on the remote PC. They are pasted into the folder open on this PC (or Downloads).", "نُسخ {n} من العناصر على الجهاز البعيد. تُلصق في المجلد المفتوح على هذا الجهاز (أو في التنزيلات).";
+    FsPasteLocal => "Paste files copied on this PC", "الصق الملفات المنسوخة على هذا الجهاز";
+    FsTransferStarted => "Copying {n} item(s)…", "جارٍ نسخ {n} من العناصر…";
+    FsNothingToPaste => "No files are copied.", "لا توجد ملفات منسوخة.";
+    FsErrNotFound => "It no longer exists.", "لم يعد موجوداً.";
+    FsErrDenied => "Access denied.", "تم رفض الوصول.";
+    FsErrExists => "An item with this name already exists.", "يوجد عنصر بهذا الاسم بالفعل.";
+    FsErrNotEmpty => "The folder is not empty.", "المجلد ليس فارغاً.";
+    FsErrInvalidPath => "This path cannot be used.", "لا يمكن استخدام هذا المسار.";
+    FsErrNoSpace => "The disk is full.", "القرص ممتلئ.";
+    FsErrBusy => "The file is in use by another program.", "الملف قيد الاستخدام في برنامج آخر.";
+    FsErrNoPermission => "The remote PC does not allow file access in this session.", "لا يسمح الجهاز البعيد بالوصول إلى الملفات في هذه الجلسة.";
+    FsErrTimeout => "The remote PC did not answer in time.", "لم يستجب الجهاز البعيد في الوقت المحدد.";
+    FsErrTransfers => "Copying files is not available in this version yet.", "نسخ الملفات غير متاح في هذا الإصدار بعد.";
+    FsErrOther => "Error: {detail}", "خطأ: {detail}";
 
     // --- clipboard ---
 
