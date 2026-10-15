@@ -19,5 +19,5 @@ attempts, not allowed by your settings).
   Excel).
 
 The file is `%APPDATA%\TLP-Desk\connections.log`, one JSON record per line. When it grows past a
-size limit it is rotated to `connections.log.1`, `.2` and so on and the oldest is deleted, so it
+size limit it is rotated to `connections.1.log`, `connections.2.log` and so on and the oldest is deleted, so it
 never fills the disk.
