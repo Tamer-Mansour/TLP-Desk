@@ -20,11 +20,14 @@
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
 pub mod fake;
+pub mod files;
 pub mod real;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
+
+use std::path::PathBuf;
 
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 
@@ -344,7 +347,17 @@ pub enum BackendEvent {
     // in real.rs.
     // =======================================================================================
     // --- files: remote browser, transfers, Explorer copy/paste (TLP-files) ---
-
+    /// Viewer side: a file transfer was created or changed (progress arrives about four times a
+    /// second). The UI keeps the newest view per `id`.
+    Transfer {
+        session: SessionId,
+        view: files::TransferView,
+    },
+    /// Viewer side: a transfer could not start.
+    TransferNotStarted {
+        session: SessionId,
+        error: files::TransferStartError,
+    },
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
 
     // --- chat (TLP-ux) ---
@@ -421,6 +434,30 @@ pub trait Backend: Send + Sync {
     // `RealBackend` only change where the lane actually implements it.
     // =======================================================================================
     // --- files (TLP-files) ---
+
+    /// Viewer side: send local files and folders (recursively) to the host's default folder.
+    /// Progress arrives as [`BackendEvent::Transfer`].
+    fn send_files(&self, session: SessionId, paths: Vec<PathBuf>) {
+        let _ = (session, paths);
+        tracing::debug!("send_files: not supported by this backend");
+    }
+
+    /// Viewer side: download host files and folders (absolute host paths in one folder) into
+    /// the local folder `dest`.
+    fn download_files(&self, session: SessionId, remote_paths: Vec<String>, dest: PathBuf) {
+        let _ = (session, remote_paths, dest);
+        tracing::debug!("download_files: not supported by this backend");
+    }
+
+    /// Cancel a running transfer; partial data is kept so a retry resumes.
+    fn cancel_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
+
+    /// Continue a cancelled, paused or failed transfer from its partial data.
+    fn retry_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
 
     // --- clipboard (TLP-clipboard) ---
 

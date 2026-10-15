@@ -18,6 +18,7 @@ tlp-desk-net.workspace = true
 tlp-desk-host.workspace = true
 tlp-desk-viewer.workspace = true
 tlp-desk-input.workspace = true
+tlp-desk-files.workspace = true
 if-addrs = "0.13"
 raw-window-handle = "0.6"
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }
@@ -28,6 +29,8 @@ tracing = "0.1"
 sys-locale = "0.3"
 # Rasterizes the vendored tlp-icons SVGs (ui::icons). No default features: icons have no text or
 # embedded raster images, so no font database (fontdb/system fonts) is pulled in.
+# Native file / folder picker for sending files (Win32 dialogs; no GTK or portals on Windows).
+rfd = { version = "0.15", default-features = false }
 resvg = { version = "0.48", default-features = false }
 
 [dev-dependencies]

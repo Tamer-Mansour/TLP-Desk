@@ -6,8 +6,10 @@
 
 pub mod common;
 pub mod connect;
+pub mod get_file;
 pub mod id;
 pub mod list;
+pub mod send_file;
 pub mod serve;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
 
@@ -60,6 +62,10 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// Viewer: send local files and folders to a host (--to <host folder>).
+    SendFile(send_file::SendFileArgs),
+    /// Viewer: download files and folders from a host (--to <local folder>).
+    GetFile(get_file::GetFileArgs),
     // FEATURE HOOK: one variant per new subcommand.
 }
 
@@ -87,6 +93,8 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::SendFile(a) => send_file::run(&ctx, a).await,
+        Cmd::GetFile(a) => get_file::run(&ctx, a).await,
         // FEATURE HOOK: one arm per new subcommand.
     }
 }

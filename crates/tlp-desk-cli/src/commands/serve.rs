@@ -7,9 +7,11 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
+use tlp_desk_files::{FileTransfer, TransferConfig, TransferEvent};
 use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
-use tlp_desk_net::{Endpoint, EndpointConfig, FeatureSet};
+use tlp_desk_net::{Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
 use tlp_desk_proto::Permissions;
+use tlp_desk_proto::TransferDirection;
 
 use super::common::{any_addr, id_str, load_identity, peer_json, Ctx};
 use crate::output::Output;
@@ -49,6 +51,10 @@ pub struct ServeArgs {
     /// Do not show the green marker at the pointer while a viewer moves it.
     #[arg(long)]
     pub no_pointer_marker: bool,
+    /// Let viewers send and receive files (grants the files permission; uploads go to the
+    /// folder the viewer names, or this user's Desktop).
+    #[arg(long)]
+    pub allow_files: bool,
 }
 
 impl ServeArgs {
@@ -64,7 +70,12 @@ impl ServeArgs {
                 Permissions::VIEW
             } else {
                 DEFAULT_PERMISSIONS
-            },
+            }
+            .union(if self.allow_files {
+                Permissions::FILES
+            } else {
+                Permissions::NONE
+            }),
             advertise: !self.no_discovery,
             device_name: self
                 .name
@@ -79,7 +90,37 @@ impl ServeArgs {
 /// The session features the CLI host serves.
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
 fn host_features() -> FeatureSet {
-    FeatureSet::new()
+    FeatureSet::new().with(FileTransfer::new(TransferConfig::default()))
+}
+
+/// Prints the start and end of file transfers in sessions.
+fn transfer_event(out: Output, event: &FeatureEvent) {
+    match event.payload::<TransferEvent>() {
+        Some(TransferEvent::Started(info)) => out.event(
+            text::serve_transfer(&info.label, info.direction == TransferDirection::Upload),
+            &json!({
+                "type": "transfer_started",
+                "label": info.label,
+                "direction": format!("{:?}", info.direction),
+                "files": info.total_files,
+                "bytes": info.total_bytes,
+                "destination": info.dest_dir,
+            }),
+        ),
+        Some(TransferEvent::Finished {
+            state,
+            failed_items,
+            ..
+        }) => out.event(
+            text::transfer_stopped(&format!("{state:?}")),
+            &json!({
+                "type": "transfer_finished",
+                "state": format!("{state:?}"),
+                "failed": failed_items,
+            }),
+        ),
+        _ => {}
+    }
 }
 
 /// Runs `serve` until Ctrl+C.
@@ -187,7 +228,7 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { .. } => {}
+                    HostEvent::Feature { event, .. } => transfer_event(out, &event),
                 }
             }
         }
