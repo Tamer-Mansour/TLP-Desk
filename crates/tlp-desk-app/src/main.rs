@@ -100,6 +100,13 @@ fn main() -> anyhow::Result<()> {
                         IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                         port.unwrap_or(tlp_desk_net::DEFAULT_PORT),
                     ),
+                    clipboard: Some(std::sync::Arc::new(tlp_desk_files::SystemClipboard::new())),
+                    // Clipboard sync is part of a normal session (revocable live by the host).
+                    host: tlp_desk_host::HostConfig {
+                        default_permissions: tlp_desk_host::DEFAULT_PERMISSIONS
+                            .union(tlp_desk_proto::Permissions::CLIPBOARD),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 };
                 backend::real::RealBackend::start_with(&rt, repaint, cfg)

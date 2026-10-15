@@ -59,6 +59,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// "Sync clipboard" switch and toast (TLP-clipboard).
+    pub clipboard: super::clipboard::ClipboardUi,
     /// Two-pane file browser (TLP-files), toggled from the toolbar.
     pub files: FileBrowser,
     /// File transfer queue (lane files-transfer).
@@ -105,6 +107,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            clipboard: Default::default(),
             files: FileBrowser::new(id),
             transfers: TransferPanel::new(),
         }
@@ -365,6 +368,8 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    let (id, perms) = (self.id, self.permissions);
+                    self.clipboard.toolbar(ui, tx, id, perms, backend);
                     self.files_buttons(ui, tx, backend);
                     if icons::icon_toggle(
                         ui,

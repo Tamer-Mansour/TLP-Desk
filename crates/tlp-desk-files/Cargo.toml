@@ -20,19 +20,26 @@ blake3 = "1.8"
 fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 tracing = "0.1"
+# Clipboard image wire format (protocol v5 `ClipboardData::Png`).
+png = "0.18"
+# System clipboard access (text, HTML, images, file lists).
+arboard = "3.6"
 
 [target.'cfg(windows)'.dependencies]
-# Drives (labels, size, free space) and known folders (Desktop, Documents, ...) for the remote
-# file browser's starting points; wrapped in `fs::windows`, the crate's only unsafe module.
+# Drives (labels, size, free space) and known folders for the remote file browser (`fs::windows`)
+# plus event-driven clipboard change notifications (`clipboard::windows`,
+# AddClipboardFormatListener). The crate's only unsafe modules.
 windows = { version = "0.62", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
-# CF_HDROP (files copied in Explorer) for clipboard file sharing. No default features: we only
-# read file lists, never images.
-arboard = { version = "3.6", default-features = false }
 
 [dev-dependencies]
 tlp-desk-crypto.workspace = true

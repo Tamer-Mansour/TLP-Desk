@@ -296,6 +296,15 @@ strings! {
     FailBusy => "file is in use", "الملف قيد الاستخدام";
 
     // --- clipboard ---
+    ClipboardSync => "Sync clipboard", "مزامنة الحافظة";
+    ClipboardNotAllowed => "The other device does not allow clipboard sync.", "لا يسمح الجهاز الآخر بمزامنة الحافظة.";
+    ClipboardSent => "Clipboard sent", "أُرسلت الحافظة";
+    ClipboardReceived => "Clipboard received", "استُلمت الحافظة";
+    ClipboardTooLarge => "The clipboard content is too large to sync.", "محتوى الحافظة أكبر من أن تتم مزامنته.";
+    ClipboardFailed => "The clipboard could not be synced.", "تعذّرت مزامنة الحافظة.";
+    ClipboardSettings => "Clipboard", "الحافظة";
+    ClipboardSyncDefault => "Sync the clipboard in new sessions", "مزامنة الحافظة في الجلسات الجديدة";
+    ClipboardSyncHint => "Copied text, formatted text and images move between both devices while the host allows it.", "ينتقل النص المنسوخ والنص المنسّق والصور بين الجهازين ما دام المضيف يسمح بذلك.";
 
     // --- chat ---
 

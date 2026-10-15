@@ -4,6 +4,7 @@
 //! `Args` struct and a `run(ctx, args)` function, then add one line in each FEATURE HOOK below
 //! (`mod`, the [`Cmd`] variant, the [`run`] arm). Dial/auth helpers live in [`common`].
 
+pub mod clip_send;
 pub mod common;
 pub mod connect;
 pub mod get_file;
@@ -68,6 +69,8 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// Viewer: put text on the host's clipboard (this PC's clipboard is not touched).
+    ClipSend(clip_send::ClipSendArgs),
     /// List a folder on the remote PC (or its drives and known folders). Needs "files".
     Ls(ls::LsArgs),
     /// Create a folder on the remote PC. Needs "files".
@@ -107,6 +110,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::ClipSend(a) => clip_send::run(&ctx, a).await,
         Cmd::Ls(a) => ls::run(&ctx, a).await,
         Cmd::Mkdir(a) => mkdir::run(&ctx, a).await,
         Cmd::Rm(a) => rm::run(&ctx, a).await,
@@ -196,6 +200,36 @@ mod tests {
         assert_eq!(cfg.default_permissions, tlp_desk_proto::Permissions::VIEW);
         assert_eq!(cfg.device_name, "حاسوب المكتب");
         assert_eq!(s.port, tlp_desk_net::DEFAULT_PORT);
+    }
+
+    #[test]
+    fn clip_send_parses_text_or_file() {
+        let Cmd::ClipSend(c) =
+            parse(&["clip-send", "10.0.0.2", "مرحبا\u{200F}", "--code", "123456"])
+                .unwrap()
+                .cmd
+        else {
+            panic!("not clip-send")
+        };
+        assert_eq!(c.dial.target, "10.0.0.2");
+        assert_eq!(c.text.as_deref(), Some("مرحبا\u{200F}"));
+        assert_eq!(c.dial.auth.code.as_deref(), Some("123456"));
+        let Cmd::ClipSend(c) = parse(&["clip-send", "10.0.0.2", "--file", "نص.txt"])
+            .unwrap()
+            .cmd
+        else {
+            panic!("not clip-send")
+        };
+        assert_eq!(c.file, Some(PathBuf::from("نص.txt")));
+        assert!(parse(&["clip-send", "10.0.0.2", "x", "--file", "a.txt"]).is_err());
+        let Cmd::Serve(s) = parse(&["serve", "--clipboard"]).unwrap().cmd else {
+            panic!("not serve")
+        };
+        let cfg = s.host_config();
+        assert!(cfg
+            .default_permissions
+            .contains(tlp_desk_proto::Permissions::CLIPBOARD));
+        assert!(cfg.features.names().contains(&"clipboard"));
     }
 
     #[test]

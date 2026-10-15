@@ -36,8 +36,8 @@ input language (for example with Alt+Shift or Win+Space while connected) — you
 matter.
 
 Tab, the arrow keys and Escape go to the remote PC. Ctrl+C, Ctrl+V and Ctrl+X are pressed on the
-remote PC too (they copy and paste *there*; clipboard sharing between the two PCs is
-[coming soon](coming-soon/clipboard.md)).
+remote PC too (they copy and paste *there*; [clipboard sharing](clipboard.md) between the two PCs
+is separate).
 
 ### System keys: Windows key, Alt+Tab
 
@@ -70,7 +70,7 @@ the movement is yours (you do not see this marker).
 - Windows that run **as administrator** on the remote PC, **UAC prompts**, the **lock screen** and
   the **sign-in screen** cannot be controlled (and UAC prompts or the lock screen may not be visible)
   — this needs the [unattended access service](coming-soon/unattended-access.md).
-- Clipboard, chat and sound are [coming soon](coming-soon/index.md).
+- Chat and sound are [coming soon](coming-soon/index.md).
 
 ## Sending files
 

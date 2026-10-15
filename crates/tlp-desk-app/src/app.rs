@@ -107,6 +107,8 @@ pub struct App {
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    /// Recent clipboard activity of host sessions (banner indicator, TLP-clipboard).
+    pub host_clipboard: crate::ui::clipboard::HostClipboard,
 }
 
 impl App {
@@ -149,7 +151,10 @@ impl App {
             host_input_blocked: None,
             session: None,
             notice: None,
+            host_clipboard: Default::default(),
         };
+        app.backend
+            .set_clipboard_default(!app.settings.clipboard_sync_off);
         if let Some(code) = opts.code {
             app.code = code;
         }
@@ -287,6 +292,7 @@ impl App {
                     if self.pending.as_ref().is_some_and(|p| p.attempt == attempt) {
                         self.pending = None;
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
+                        view.clipboard.sync = !self.settings.clipboard_sync_off;
                         if let Some(grab) =
                             SystemKeyGrab::start(Arc::downgrade(&self.backend), session, self.hwnd)
                         {
@@ -366,6 +372,7 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                BackendEvent::Clipboard { session, event } => self.clipboard_event(session, event),
                 // --- files (TLP-files) ---
                 BackendEvent::FsResult {
                     side,
@@ -435,6 +442,7 @@ impl App {
                         let text = tx.f(S::HostBanner, &[("name", &peer.name)]);
                         icons::icon(ui, tx, Icon::ViewOnly, 18.0, egui::Color32::WHITE);
                         ui.label(RichText::new(text).color(egui::Color32::WHITE).strong());
+                        self.host_clipboard.indicator(ui, tx, *session);
                         theme::row_end(ui, tx.rtl(), |ui| {
                             let end_button =
                                 icons::icon_text_button(tx, Icon::EndSession, tx.t(S::EndSession));

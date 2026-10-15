@@ -7,7 +7,6 @@ until it arrives.
 
 | Feature | Milestone |
 |---|---|
-| [Clipboard sharing](clipboard.md) | M2 |
 | [Chat](chat.md) | M2 |
 | [Sound from the remote PC](audio.md) | M2 |
 | [Address book](address-book.md) | M2 |

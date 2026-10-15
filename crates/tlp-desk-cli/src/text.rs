@@ -434,6 +434,64 @@ pub fn selecting_monitor(index: u32) -> String {
     )
 }
 
+// --- clipboard (TLP-clipboard) ---
+
+pub fn clip_sent(bytes: u64) -> String {
+    t(
+        format!("Clipboard sent ({bytes} bytes)."),
+        format!("أُرسلت الحافظة ({bytes} بايت)."),
+    )
+}
+
+pub fn clip_received(bytes: u64) -> String {
+    t(
+        format!("Clipboard received ({bytes} bytes)."),
+        format!("استُلمت الحافظة ({bytes} بايت)."),
+    )
+}
+
+pub fn clip_not_synced() -> &'static str {
+    t(
+        "The clipboard could not be synced.",
+        "تعذّرت مزامنة الحافظة.",
+    )
+}
+
+pub fn clip_too_large() -> &'static str {
+    t(
+        "The clipboard content is too large to sync.",
+        "محتوى الحافظة أكبر من أن تتم مزامنته.",
+    )
+}
+
+pub fn clip_not_allowed() -> &'static str {
+    t(
+        "The host does not allow clipboard sync for this session.",
+        "لا يسمح المضيف بمزامنة الحافظة في هذه الجلسة.",
+    )
+}
+
+pub fn clip_ended_early() -> &'static str {
+    t(
+        "The session ended before the clipboard was sent.",
+        "انتهت الجلسة قبل إرسال الحافظة.",
+    )
+}
+
+pub fn clip_timeout() -> &'static str {
+    t(
+        "Timed out waiting for the clipboard to be sent.",
+        "انتهت المهلة قبل إرسال الحافظة.",
+    )
+}
+
+pub fn clip_nothing() -> &'static str {
+    t(
+        "Nothing to send: give the text or --file.",
+        "لا شيء للإرسال: اكتب النص أو استخدم --file.",
+    )
+}
+
 // --- files: remote file system (TLP-files-fs) ---
 
 /// One line of `ls`: `<DIR>` or the size in bytes, then the name.

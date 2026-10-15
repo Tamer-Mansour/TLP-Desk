@@ -53,6 +53,9 @@ pub struct ServeArgs {
     /// Do not show the green marker at the pointer while a viewer moves it.
     #[arg(long)]
     pub no_pointer_marker: bool,
+    /// Sync this PC's clipboard with viewers (grants the clipboard permission).
+    #[arg(long)]
+    pub clipboard: bool,
     /// Let viewers send and receive files (grants the files permission; uploads go to the
     /// folder the viewer names, or this user's Desktop).
     #[arg(long)]
@@ -73,6 +76,11 @@ impl ServeArgs {
             } else {
                 DEFAULT_PERMISSIONS
             }
+            .union(if self.clipboard {
+                Permissions::CLIPBOARD
+            } else {
+                Permissions::NONE
+            })
             .union(if self.allow_files {
                 Permissions::FILES
             } else {
@@ -83,7 +91,7 @@ impl ServeArgs {
                 .name
                 .clone()
                 .unwrap_or_else(tlp_desk_net::default_device_name),
-            features: host_features(),
+            features: host_features(self),
             ..HostConfig::default()
         }
     }
@@ -91,14 +99,22 @@ impl ServeArgs {
 
 /// The session features the CLI host serves.
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
-fn host_features() -> FeatureSet {
-    FeatureSet::new()
+fn host_features(args: &ServeArgs) -> FeatureSet {
+    let mut set = FeatureSet::new()
         // Uploads and downloads of files and folders.
         .with(FileTransfer::new(TransferConfig::default()))
         // Remote file browser; served only to sessions holding FILES.
         .with(FsFeature::new(FsConfig::default()))
         // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
-        .with(ClipFilesFeature::new(ClipFilesConfig::default()))
+        .with(ClipFilesFeature::new(ClipFilesConfig::default()));
+    if args.clipboard {
+        // Text, HTML and images; served only to sessions holding CLIPBOARD.
+        set.push(tlp_desk_files::ClipboardFeature::new(
+            Arc::new(tlp_desk_files::SystemClipboard::new()),
+            tlp_desk_files::ClipboardConfig::default(),
+        ));
+    }
+    set
 }
 
 /// Prints the start and end of file transfers in sessions.
@@ -240,7 +256,13 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { event, .. } => transfer_event(out, &event),
+                    HostEvent::Feature { event, .. } => {
+                        if let Some((line, value)) = super::clip_send::event_line(&event) {
+                            out.event(line, &value);
+                        } else {
+                            transfer_event(out, &event);
+                        }
+                    }
                 }
             }
         }
