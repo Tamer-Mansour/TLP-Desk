@@ -10,6 +10,7 @@ pub mod common;
 pub mod connect;
 pub mod forward;
 pub mod get_file;
+pub mod help;
 pub mod id;
 pub mod info;
 pub mod list;
@@ -369,6 +370,70 @@ mod tests {
         assert_eq!(crate::exit::Exit::of(&e), crate::exit::Exit::Failure);
         let ar = text::with_lang(text::Lang::Ar, || text::error_line(&e));
         assert!(ar.contains("غير موجود"), "{ar}");
+    }
+
+    #[test]
+    fn every_subcommand_parses_and_is_listed_here() {
+        // One valid command line per subcommand; a new command must add its row (so every
+        // lane's command is parse-tested and appears in the Arabic help too).
+        let samples: &[&[&str]] = &[
+            &["id"],
+            &["list", "--json"],
+            &["serve", "--name", "مكتب"],
+            &["connect", "123456789", "--code", "042917"],
+            &["info", "123456789", "--code", "042917"],
+            &["wol", "01:23:45:67:89:ab"],
+            &["exec-wol", "مكتب"],
+            &[
+                "forward",
+                "10.0.0.2",
+                "8080:127.0.0.1:80",
+                "--code",
+                "123456",
+            ],
+            &["chat", "10.0.0.2", "مرحبا", "--code", "123456"],
+            &["clip-send", "10.0.0.2", "نص", "--code", "123456"],
+            &["ls", "10.0.0.2", "--code", "123456"],
+            &["mkdir", "10.0.0.2", "D:/x", "--code", "123456"],
+            &["rm", "10.0.0.2", "D:/x", "--code", "123456"],
+            &["mv", "10.0.0.2", "D:/a", "D:/b", "--code", "123456"],
+            &[
+                "send-file",
+                "10.0.0.2",
+                "a.txt",
+                "--to",
+                "D:/",
+                "--code",
+                "123456",
+            ],
+            &["get-file", "10.0.0.2", "D:/a.txt", "--code", "123456"],
+        ];
+        let mut covered = std::collections::BTreeSet::new();
+        for argv in samples {
+            let cli = parse(argv).unwrap_or_else(|e| panic!("{argv:?}: {e}"));
+            let _ = cli;
+            let name = if argv[0] == "exec-wol" {
+                "wol"
+            } else {
+                argv[0]
+            };
+            covered.insert(name);
+        }
+        for sub in Cli::command().get_subcommands() {
+            assert!(
+                covered.contains(sub.get_name()),
+                "add a sample command line for `{}`",
+                sub.get_name()
+            );
+        }
+    }
+
+    #[test]
+    fn password_flag_is_rejected_for_every_dialing_command() {
+        for cmd in ["connect", "info", "chat", "ls"] {
+            let r = parse(&[cmd, "10.0.0.2", "--password=hunter2"]);
+            assert!(r.is_err(), "{cmd} must not take --password");
+        }
     }
 
     #[test]
