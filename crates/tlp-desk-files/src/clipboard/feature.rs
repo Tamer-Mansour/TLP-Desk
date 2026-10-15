@@ -9,12 +9,12 @@ use tlp_desk_net::{Feature, FeatureCtx, StreamKind, STREAM_REFUSED};
 use tlp_desk_proto::{FrameDecoder, Message, Permissions, Role, MAX_FRAME_LEN};
 use tokio::sync::{mpsc, watch};
 
+use super::error::ClipboardError;
 use super::sync::{content_hash, OwnWrites, SyncState};
 use super::{
     wire, ClipContent, ClipKind, ClipboardBackend, ClipboardConfig, ClipboardEvent, Direction,
     RefusedReason,
 };
-use crate::FilesError;
 
 /// [`Feature::name`] of the clipboard feature and `FeatureEvent::feature` of its events.
 pub const FEATURE_NAME: &str = "clipboard";
@@ -124,8 +124,8 @@ impl ClipboardFeature {
     /// the file-transfer feature when the user pastes files received from the peer).
     ///
     /// # Errors
-    /// [`FilesError::Clipboard`] if the clipboard cannot be written.
-    pub fn write_local(&self, content: &ClipContent) -> Result<(), FilesError> {
+    /// [`ClipboardError::Clipboard`] if the clipboard cannot be written.
+    pub fn write_local(&self, content: &ClipContent) -> Result<(), ClipboardError> {
         let seq = self.inner.backend.write(content)?;
         lock(&self.inner.own).record(seq);
         Ok(())
@@ -187,11 +187,11 @@ impl SessionTask {
         self.ctx.emit(FEATURE_NAME, ev);
     }
 
-    fn refused(&self, direction: Direction, kind: ClipKind, e: &FilesError) {
+    fn refused(&self, direction: Direction, kind: ClipKind, e: &ClipboardError) {
         let reason = match e {
-            FilesError::TooLarge { .. } => RefusedReason::TooLarge,
-            FilesError::BadImage(_) | FilesError::Proto(_) => RefusedReason::Invalid,
-            FilesError::Clipboard(_) | FilesError::Net(_) => RefusedReason::ClipboardError,
+            ClipboardError::TooLarge { .. } => RefusedReason::TooLarge,
+            ClipboardError::BadImage(_) | ClipboardError::Proto(_) => RefusedReason::Invalid,
+            ClipboardError::Clipboard(_) | ClipboardError::Net(_) => RefusedReason::ClipboardError,
         };
         tracing::info!(session = self.ctx.session_key, ?direction, ?kind, %e, "clipboard not synced");
         self.emit(ClipboardEvent::Refused {
@@ -308,7 +308,11 @@ impl SessionTask {
             }
         };
         let sent = if inline {
-            self.ctx.session.send(&msg).await.map_err(FilesError::from)
+            self.ctx
+                .session
+                .send(&msg)
+                .await
+                .map_err(ClipboardError::from)
         } else {
             let id = self.inner.next_stream_id.fetch_add(1, Ordering::Relaxed);
             send_on_stream(&self.ctx, id, &frame).await
@@ -380,13 +384,13 @@ impl SessionTask {
 }
 
 /// Sends one framed message on its own `Clipboard` side stream.
-async fn send_on_stream(ctx: &FeatureCtx, id: u64, frame: &[u8]) -> Result<(), FilesError> {
+async fn send_on_stream(ctx: &FeatureCtx, id: u64, frame: &[u8]) -> Result<(), ClipboardError> {
     let mut s = ctx.session.open_uni(StreamKind::Clipboard, id).await?;
     s.write_all(frame)
         .await
-        .map_err(|e| FilesError::Clipboard(format!("clipboard stream: {e}")))?;
+        .map_err(|e| ClipboardError::Clipboard(format!("clipboard stream: {e}")))?;
     s.finish()
-        .map_err(|e| FilesError::Clipboard(format!("clipboard stream: {e}")))?;
+        .map_err(|e| ClipboardError::Clipboard(format!("clipboard stream: {e}")))?;
     Ok(())
 }
 

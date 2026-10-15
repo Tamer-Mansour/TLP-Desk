@@ -13,6 +13,11 @@ workspace = true
 tlp-desk-proto.workspace = true
 tlp-desk-net.workspace = true
 thiserror.workspace = true
+# BLAKE3 per-item verification; `hazmat` (subtree hashing) lets both sides hash 16 MiB pieces
+# on several streams/threads in parallel and merge them into the standard file hash.
+blake3 = "1.8"
+# Free space on the destination volume (safe wrapper around GetDiskFreeSpaceExW / statvfs).
+fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 tracing = "0.1"
 # Clipboard image wire format (protocol v5 `ClipboardData::Png`).
@@ -21,16 +26,24 @@ png = "0.18"
 arboard = "3.6"
 
 [target.'cfg(windows)'.dependencies]
-# Event-driven clipboard change notifications (AddClipboardFormatListener).
+# Drives (labels, size, free space) and known folders for the remote file browser (`fs::windows`)
+# plus event-driven clipboard change notifications (`clipboard::windows`,
+# AddClipboardFormatListener). The crate's only unsafe modules.
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
     "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]
 tlp-desk-crypto.workspace = true
+proptest = "1"
+tempfile = "3"
 tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

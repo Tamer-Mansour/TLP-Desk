@@ -11,7 +11,7 @@ use clap::Args;
 use serde_json::json;
 use tlp_desk_files::{
     ClipContent, ClipboardConfig, ClipboardEvent, ClipboardFeature, Direction, MemoryClipboard,
-    RefusedReason, FEATURE_NAME,
+    RefusedReason, CLIPBOARD_FEATURE_NAME,
 };
 use tlp_desk_net::{FeatureEvent, FeatureSet};
 use tlp_desk_proto::Permissions;
@@ -51,7 +51,7 @@ pub fn load_text(text: Option<&str>, file: Option<&Path>) -> Result<String> {
 /// A line for a clipboard feature event (kinds and sizes only), if `event` is one. Used by
 /// `serve --clipboard` too.
 pub fn event_line(event: &FeatureEvent) -> Option<(String, serde_json::Value)> {
-    if event.feature != FEATURE_NAME {
+    if event.feature != CLIPBOARD_FEATURE_NAME {
         return None;
     }
     event.payload::<ClipboardEvent>().map(|e| match e {
@@ -122,8 +122,10 @@ pub async fn run(ctx: &Ctx, args: &ClipSendArgs) -> Result<()> {
                         direction: Direction::Sent,
                         bytes,
                         ..
-                    }) if e.feature == FEATURE_NAME => return Ok(*bytes),
-                    Some(ClipboardEvent::Refused { reason, .. }) if e.feature == FEATURE_NAME => {
+                    }) if e.feature == CLIPBOARD_FEATURE_NAME => return Ok(*bytes),
+                    Some(ClipboardEvent::Refused { reason, .. })
+                        if e.feature == CLIPBOARD_FEATURE_NAME =>
+                    {
                         return Err(match reason {
                             RefusedReason::TooLarge => text::clip_too_large(),
                             _ => text::clip_not_synced(),
@@ -179,7 +181,7 @@ mod tests {
     #[test]
     fn events_become_lines_without_contents() {
         let ev = FeatureEvent::new(
-            FEATURE_NAME,
+            CLIPBOARD_FEATURE_NAME,
             1,
             ClipboardEvent::Synced {
                 direction: Direction::Received,

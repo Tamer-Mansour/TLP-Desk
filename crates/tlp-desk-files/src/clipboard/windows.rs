@@ -26,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_CLIPBOARDUPDATE, WM_QUIT, WNDCLASSW,
 };
 
-use crate::FilesError;
+use super::error::ClipboardError;
 
 thread_local! {
     /// The listener thread's channel; only touched on that thread (by its window procedure).
@@ -137,12 +137,12 @@ pub(crate) struct Listener {
 
 impl Listener {
     /// Starts the listener; `tx` gets the sequence number on every change.
-    pub(crate) fn start(tx: watch::Sender<u64>) -> Result<Self, FilesError> {
+    pub(crate) fn start(tx: watch::Sender<u64>) -> Result<Self, ClipboardError> {
         let (ready_tx, ready_rx) = mpsc::channel();
         let join = std::thread::Builder::new()
             .name("tlp-clipboard-listener".into())
             .spawn(move || run(tx, ready_tx))
-            .map_err(|e| FilesError::Clipboard(e.to_string()))?;
+            .map_err(|e| ClipboardError::Clipboard(e.to_string()))?;
         match ready_rx.recv() {
             Ok(Ok(thread_id)) => Ok(Self {
                 thread_id,
@@ -150,9 +150,9 @@ impl Listener {
             }),
             Ok(Err(e)) => {
                 let _ = join.join();
-                Err(FilesError::Clipboard(e))
+                Err(ClipboardError::Clipboard(e))
             }
-            Err(_) => Err(FilesError::Clipboard("listener thread ended".into())),
+            Err(_) => Err(ClipboardError::Clipboard("listener thread ended".into())),
         }
     }
 }

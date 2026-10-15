@@ -7,8 +7,8 @@ use std::io::Cursor;
 
 use tlp_desk_proto::{encode_frame, ClipboardData, Message, ProtoError};
 
+use super::error::ClipboardError;
 use super::{ClipContent, ClipImage, ClipKind, ClipboardConfig};
-use crate::FilesError;
 
 /// Framed messages up to this size go on the control stream; larger ones on a
 /// `StreamKind::Clipboard` side stream (protocol.md: "larger than about 1 MiB").
@@ -21,8 +21,8 @@ fn rgba_len(width: u32, height: u32) -> Option<u64> {
         .checked_mul(4)
 }
 
-fn too_large(kind: &'static str, size: u64, limit: u64) -> FilesError {
-    FilesError::TooLarge { kind, size, limit }
+fn too_large(kind: &'static str, size: u64, limit: u64) -> ClipboardError {
+    ClipboardError::TooLarge { kind, size, limit }
 }
 
 fn len64(n: usize) -> u64 {
@@ -35,9 +35,9 @@ fn check_image(
     height: u32,
     rgba_bytes: Option<usize>,
     cap: u64,
-) -> Result<u64, FilesError> {
+) -> Result<u64, ClipboardError> {
     if width == 0 || height == 0 {
-        return Err(FilesError::BadImage("zero width or height".into()));
+        return Err(ClipboardError::BadImage("zero width or height".into()));
     }
     let need = rgba_len(width, height).ok_or_else(|| too_large("image", u64::MAX, cap))?;
     if need > cap {
@@ -45,7 +45,7 @@ fn check_image(
     }
     if let Some(have) = rgba_bytes {
         if len64(have) != need {
-            return Err(FilesError::BadImage(format!(
+            return Err(ClipboardError::BadImage(format!(
                 "{width}x{height} needs {need} RGBA bytes, got {have}"
             )));
         }
@@ -68,7 +68,7 @@ pub(crate) fn kind_of(msg: &Message) -> Option<ClipKind> {
 pub(crate) fn to_message(
     content: &ClipContent,
     cfg: &ClipboardConfig,
-) -> Result<Option<Message>, FilesError> {
+) -> Result<Option<Message>, ClipboardError> {
     Ok(Some(match content {
         ClipContent::Text(t) => {
             let n = len64(t.len());
@@ -105,8 +105,8 @@ pub(crate) fn to_message(
 }
 
 /// Serializes `msg` as one frame and says whether it is small enough for the control stream.
-/// A message over the protocol's frame limit is [`FilesError::TooLarge`].
-pub(crate) fn frame(msg: &Message, kind: ClipKind) -> Result<(Vec<u8>, bool), FilesError> {
+/// A message over the protocol's frame limit is [`ClipboardError::TooLarge`].
+pub(crate) fn frame(msg: &Message, kind: ClipKind) -> Result<(Vec<u8>, bool), ClipboardError> {
     match encode_frame(msg) {
         Ok(f) => {
             let inline = f.len() <= INLINE_MAX;
@@ -135,7 +135,7 @@ fn kind_name(kind: ClipKind) -> &'static str {
 pub(crate) fn from_message(
     msg: Message,
     cfg: &ClipboardConfig,
-) -> Result<Option<ClipContent>, FilesError> {
+) -> Result<Option<ClipContent>, ClipboardError> {
     Ok(Some(match msg {
         Message::ClipboardData(ClipboardData::Text(t)) => {
             let n = len64(t.len());
@@ -170,12 +170,12 @@ pub(crate) fn from_message(
     }))
 }
 
-fn png_err(e: impl std::fmt::Display) -> FilesError {
-    FilesError::BadImage(e.to_string())
+fn png_err(e: impl std::fmt::Display) -> ClipboardError {
+    ClipboardError::BadImage(e.to_string())
 }
 
 /// PNG-encodes an RGBA8 image (fast compression: clipboard sync is interactive).
-pub(crate) fn encode_png(img: &ClipImage) -> Result<Vec<u8>, FilesError> {
+pub(crate) fn encode_png(img: &ClipImage) -> Result<Vec<u8>, ClipboardError> {
     let mut out = Vec::new();
     {
         let mut enc = png::Encoder::new(&mut out, img.width, img.height);
@@ -196,7 +196,7 @@ pub(crate) fn decode_png(
     height: u32,
     data: &[u8],
     cap: u64,
-) -> Result<ClipImage, FilesError> {
+) -> Result<ClipImage, ClipboardError> {
     let need = check_image(width, height, None, cap)?;
     let need_usize = usize::try_from(need).map_err(|_| too_large("image", need, cap))?;
     // Room for the output buffer plus the decoder's own (row-sized) scratch space.
@@ -211,13 +211,13 @@ pub(crate) fn decode_png(
         (info.width, info.height)
     };
     if (w, h) != (width, height) {
-        return Err(FilesError::BadImage(format!(
+        return Err(ClipboardError::BadImage(format!(
             "PNG is {w}x{h}, announced {width}x{height}"
         )));
     }
     let (color, depth) = reader.output_color_type();
     if depth != png::BitDepth::Eight {
-        return Err(FilesError::BadImage("unsupported PNG bit depth".into()));
+        return Err(ClipboardError::BadImage("unsupported PNG bit depth".into()));
     }
     let channels = match color {
         png::ColorType::Grayscale => 1usize,
@@ -225,7 +225,7 @@ pub(crate) fn decode_png(
         png::ColorType::Rgb => 3,
         png::ColorType::Rgba => 4,
         png::ColorType::Indexed => {
-            return Err(FilesError::BadImage("unexpanded palette PNG".into()))
+            return Err(ClipboardError::BadImage("unexpanded palette PNG".into()))
         }
     };
     let buf_len = reader
@@ -245,7 +245,7 @@ pub(crate) fn decode_png(
         let start = y.saturating_mul(line);
         let src = buf
             .get(start..start.saturating_add(row))
-            .ok_or_else(|| FilesError::BadImage("truncated PNG rows".into()))?;
+            .ok_or_else(|| ClipboardError::BadImage("truncated PNG rows".into()))?;
         match channels {
             4 => rgba.extend_from_slice(src),
             3 => src
@@ -260,7 +260,9 @@ pub(crate) fn decode_png(
         }
     }
     if rgba.len() != need_usize {
-        return Err(FilesError::BadImage("PNG pixel data is incomplete".into()));
+        return Err(ClipboardError::BadImage(
+            "PNG pixel data is incomplete".into(),
+        ));
     }
     Ok(ClipImage {
         width,
@@ -342,7 +344,7 @@ mod tests {
         let c = ClipContent::Text("مرحبا".into());
         assert!(matches!(
             to_message(&c, &small),
-            Err(FilesError::TooLarge {
+            Err(ClipboardError::TooLarge {
                 kind: "text",
                 size: 10,
                 limit: 8
@@ -351,7 +353,7 @@ mod tests {
         let m = Message::ClipboardData(ClipboardData::Text("مرحبا".into()));
         assert!(matches!(
             from_message(m, &small),
-            Err(FilesError::TooLarge { .. })
+            Err(ClipboardError::TooLarge { .. })
         ));
     }
 
@@ -365,7 +367,7 @@ mod tests {
         });
         assert!(matches!(
             from_message(m, &cfg()),
-            Err(FilesError::TooLarge { kind: "image", .. })
+            Err(ClipboardError::TooLarge { kind: "image", .. })
         ));
         let m = Message::ClipboardData(ClipboardData::Png {
             width: u32::MAX,
@@ -380,7 +382,7 @@ mod tests {
         };
         assert!(matches!(
             to_message(&big, &tiny),
-            Err(FilesError::TooLarge { .. })
+            Err(ClipboardError::TooLarge { .. })
         ));
     }
 
@@ -389,11 +391,11 @@ mod tests {
         let png = encode_png(&image(4, 4)).unwrap();
         assert!(matches!(
             decode_png(4, 5, &png, 1 << 20),
-            Err(FilesError::BadImage(_))
+            Err(ClipboardError::BadImage(_))
         ));
         assert!(matches!(
             decode_png(0, 4, &png, 1 << 20),
-            Err(FilesError::BadImage(_))
+            Err(ClipboardError::BadImage(_))
         ));
         // Garbage and truncated bodies are errors, not panics.
         assert!(decode_png(4, 4, b"not a png", 1 << 20).is_err());
@@ -409,7 +411,7 @@ mod tests {
         });
         assert!(matches!(
             from_message(m, &cfg()),
-            Err(FilesError::BadImage(_))
+            Err(ClipboardError::BadImage(_))
         ));
         let ok = Message::ClipboardData(ClipboardData::Image {
             width: 1,
@@ -455,7 +457,7 @@ mod tests {
         let huge = Message::ClipboardData(ClipboardData::Text("x".repeat(17 << 20)));
         assert!(matches!(
             frame(&huge, ClipKind::Text),
-            Err(FilesError::TooLarge { .. })
+            Err(ClipboardError::TooLarge { .. })
         ));
     }
 

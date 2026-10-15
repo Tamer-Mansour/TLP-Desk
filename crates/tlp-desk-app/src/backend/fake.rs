@@ -311,6 +311,11 @@ impl Inner {
             monitors: fake_monitors(),
             active: 0,
         });
+        // The fake remote PC has files copied in Explorer, ready to paste.
+        self.emit(BackendEvent::RemoteClipboardFiles {
+            session,
+            files: Some(super::files_fake::remote_clipboard()),
+        });
     }
 
     async fn run_video(
@@ -470,6 +475,79 @@ impl Backend for FakeBackend {
     }
 
     fn set_view_only(&self, _session: SessionId, _view_only: bool) {}
+
+    fn fs_request(
+        &self,
+        side: super::files::FsSide,
+        op: super::files::FsOp,
+    ) -> Option<super::files::FsRequestId> {
+        use super::files::{FsFailure, FsSide};
+        let request = super::files::FsRequestId(self.inner.next_id());
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || match side {
+                FsSide::Local => super::files_fake::local_request(&op),
+                FsSide::Remote(_) => super::files_fake::remote_request(&op),
+            })
+            .await
+            .unwrap_or_else(|e| Err(FsFailure::Other(e.to_string())));
+            me.emit(BackendEvent::FsResult {
+                side,
+                request,
+                result,
+            });
+        });
+        Some(request)
+    }
+
+    fn fs_transfer(&self, session: SessionId, request: super::files::TransferRequest) {
+        self.inner.emit(BackendEvent::FilesNotice {
+            session,
+            notice: super::files_fake::transfer_notice(&request),
+        });
+    }
+
+    /// Pretends to send: 100 MB per file at ~50 MB/s, with live progress events.
+    fn send_files(&self, session: SessionId, paths: Vec<std::path::PathBuf>) {
+        use super::files::{TransferDir, TransferId, TransferStatus, TransferView};
+        let inner = Arc::clone(&self.inner);
+        let id = TransferId(inner.next_id.fetch_add(1, Ordering::Relaxed));
+        let label = match paths.as_slice() {
+            [one] => one
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            many => format!("{} items", many.len()),
+        };
+        let files = paths.len().max(1) as u32;
+        let total = u64::from(files) * 100_000_000;
+        self.inner.rt.spawn(async move {
+            let mut view = TransferView {
+                id,
+                dir: TransferDir::Send,
+                label,
+                status: TransferStatus::Running,
+                bytes_done: 0,
+                total_bytes: total,
+                files_done: 0,
+                total_files: files,
+                failed_files: 0,
+                bytes_per_sec: 50_000_000,
+                local_dest: None,
+            };
+            while view.bytes_done < total {
+                inner.emit(BackendEvent::Transfer {
+                    session,
+                    view: view.clone(),
+                });
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                view.bytes_done = (view.bytes_done + 12_500_000).min(total);
+                view.files_done = (view.bytes_done / 100_000_000) as u32;
+            }
+            view.status = TransferStatus::Completed;
+            view.bytes_per_sec = 0;
+            inner.emit(BackendEvent::Transfer { session, view });
+        });
+    }
 
     fn select_monitor(&self, session: SessionId, index: u32) {
         if !fake_monitors().iter().any(|m| m.index == index) {

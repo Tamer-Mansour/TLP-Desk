@@ -4,7 +4,7 @@
 ///
 /// Messages never contain clipboard or file *contents*, only sizes and kinds.
 #[derive(Debug, thiserror::Error)]
-pub enum FilesError {
+pub enum ClipboardError {
     /// The system clipboard could not be opened, read or written.
     #[error("clipboard unavailable: {0}")]
     Clipboard(String),

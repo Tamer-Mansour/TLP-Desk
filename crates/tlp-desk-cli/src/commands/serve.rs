@@ -7,9 +7,13 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
+use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
+use tlp_desk_files::fs::{FsConfig, FsFeature};
+use tlp_desk_files::{FileTransfer, TransferConfig, TransferEvent};
 use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
-use tlp_desk_net::{Endpoint, EndpointConfig, FeatureSet};
+use tlp_desk_net::{Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
 use tlp_desk_proto::Permissions;
+use tlp_desk_proto::TransferDirection;
 
 use super::common::{any_addr, id_str, load_identity, peer_json, Ctx};
 use crate::output::Output;
@@ -52,6 +56,10 @@ pub struct ServeArgs {
     /// Sync this PC's clipboard with viewers (grants the clipboard permission).
     #[arg(long)]
     pub clipboard: bool,
+    /// Let viewers send and receive files (grants the files permission; uploads go to the
+    /// folder the viewer names, or this user's Desktop).
+    #[arg(long)]
+    pub allow_files: bool,
 }
 
 impl ServeArgs {
@@ -72,6 +80,11 @@ impl ServeArgs {
                 Permissions::CLIPBOARD
             } else {
                 Permissions::NONE
+            })
+            .union(if self.allow_files {
+                Permissions::FILES
+            } else {
+                Permissions::NONE
             }),
             advertise: !self.no_discovery,
             device_name: self
@@ -87,14 +100,51 @@ impl ServeArgs {
 /// The session features the CLI host serves.
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
 fn host_features(args: &ServeArgs) -> FeatureSet {
-    let mut set = FeatureSet::new();
+    let mut set = FeatureSet::new()
+        // Uploads and downloads of files and folders.
+        .with(FileTransfer::new(TransferConfig::default()))
+        // Remote file browser; served only to sessions holding FILES.
+        .with(FsFeature::new(FsConfig::default()))
+        // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
+        .with(ClipFilesFeature::new(ClipFilesConfig::default()));
     if args.clipboard {
+        // Text, HTML and images; served only to sessions holding CLIPBOARD.
         set.push(tlp_desk_files::ClipboardFeature::new(
             Arc::new(tlp_desk_files::SystemClipboard::new()),
             tlp_desk_files::ClipboardConfig::default(),
         ));
     }
     set
+}
+
+/// Prints the start and end of file transfers in sessions.
+fn transfer_event(out: Output, event: &FeatureEvent) {
+    match event.payload::<TransferEvent>() {
+        Some(TransferEvent::Started(info)) => out.event(
+            text::serve_transfer(&info.label, info.direction == TransferDirection::Upload),
+            &json!({
+                "type": "transfer_started",
+                "label": info.label,
+                "direction": format!("{:?}", info.direction),
+                "files": info.total_files,
+                "bytes": info.total_bytes,
+                "destination": info.dest_dir,
+            }),
+        ),
+        Some(TransferEvent::Finished {
+            state,
+            failed_items,
+            ..
+        }) => out.event(
+            text::transfer_stopped(&format!("{state:?}")),
+            &json!({
+                "type": "transfer_finished",
+                "state": format!("{state:?}"),
+                "failed": failed_items,
+            }),
+        ),
+        _ => {}
+    }
 }
 
 /// Runs `serve` until Ctrl+C.
@@ -192,6 +242,10 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     HostEvent::PermissionsChanged { .. } => {}
+                    HostEvent::InputBlocked { id } => out.event(
+                        text::input_blocked(),
+                        &json!({ "type": "input_blocked", "session": id.0 }),
+                    ),
                     HostEvent::SessionEnded { id, peer, reason } => out.event(
                         text::viewer_left(&peer, &reason),
                         &json!({
@@ -205,6 +259,8 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                     HostEvent::Feature { event, .. } => {
                         if let Some((line, value)) = super::clip_send::event_line(&event) {
                             out.event(line, &value);
+                        } else {
+                            transfer_event(out, &event);
                         }
                     }
                 }

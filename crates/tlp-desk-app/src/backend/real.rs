@@ -21,15 +21,18 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use tlp_desk_crypto::{Fingerprint, HostKey, Identity};
+use tlp_desk_files::clipfiles::ClipFilesConfig;
+use tlp_desk_files::fs::FsConfig;
+use tlp_desk_files::{FileTransfer, FilesError, TransferConfig, TransferSnapshot, TransferState};
 use tlp_desk_host::{
     EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, RequestId as HostRequestId,
-    SessionId as HostSessionId,
+    SessionId as HostSessionId, DEFAULT_PERMISSIONS,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
-    NetError, DEFAULT_PORT,
+    FeatureSet, NetError, DEFAULT_PORT,
 };
-use tlp_desk_proto::{InputEvent, RejectReason};
+use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 use tlp_desk_viewer::{
     AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, KnownHostsStore,
     PixelFormat, Viewer, ViewerConfig, ViewerError, ViewerEvent, ViewerEvents, ViewerSession,
@@ -37,6 +40,11 @@ use tlp_desk_viewer::{
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::files::{
+    FsOp, FsRequestId, FsSide, TransferDir, TransferId, TransferRequest, TransferStartError,
+    TransferStatus, TransferView,
+};
+use super::files_bridge::{EngineStarter, FilesBridge};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
@@ -65,6 +73,8 @@ pub struct RealConfig {
     /// Clipboard to sync in sessions (the app passes the system clipboard). `None` = a private
     /// in-memory clipboard, so tests never touch the user's real clipboard.
     pub clipboard: Option<Arc<dyn tlp_desk_files::ClipboardBackend>>,
+    /// File transfer settings (conflict policy, where uploads from viewers land).
+    pub transfer: TransferConfig,
 }
 
 impl Default for RealConfig {
@@ -74,9 +84,15 @@ impl Default for RealConfig {
             bind: SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), DEFAULT_PORT),
             device_name: None,
             known_hosts: KnownHostsStore::Default,
-            host: HostConfig::default(),
+            host: HostConfig {
+                // Moving files is a core use: accepted sessions may send and receive them.
+                // The host user can revoke it live.
+                default_permissions: DEFAULT_PERMISSIONS.union(Permissions::FILES),
+                ..HostConfig::default()
+            },
             fallback_discovery: true,
             clipboard: None,
+            transfer: TransferConfig::default(),
         }
     }
 }
@@ -105,8 +121,12 @@ struct Inner {
     discovery: Option<Arc<Discovery>>,
     own_id: DeviceId,
     bridges: Bridges,
+    /// File transfer engine shared by host and viewer sessions (lane files-transfer).
+    files: Arc<FileTransfer>,
     state: Mutex<State>,
     clipboard: Arc<tlp_desk_files::ClipboardFeature>,
+    /// Files lane: remote file system + clipboard files features (TLP-files).
+    fsb: FilesBridge,
 }
 
 #[derive(Default)]
@@ -123,6 +143,35 @@ struct State {
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The UI's view of an engine snapshot.
+fn transfer_view(s: &TransferSnapshot) -> TransferView {
+    let status = match &s.state {
+        TransferState::Preparing => TransferStatus::Preparing,
+        TransferState::Running => TransferStatus::Running,
+        TransferState::Paused => TransferStatus::Paused,
+        TransferState::Completed => TransferStatus::Completed,
+        TransferState::Cancelled => TransferStatus::Cancelled,
+        TransferState::Failed(e) => TransferStatus::Failed(e.clone()),
+        TransferState::Disconnected => TransferStatus::Disconnected,
+    };
+    TransferView {
+        id: TransferId(s.info.id.0),
+        dir: match s.info.direction {
+            tlp_desk_proto::TransferDirection::Upload => TransferDir::Send,
+            _ => TransferDir::Receive,
+        },
+        label: s.info.label.clone(),
+        status,
+        bytes_done: s.bytes_done,
+        total_bytes: s.info.total_bytes,
+        files_done: s.files_done,
+        total_files: s.info.total_files,
+        failed_files: s.failed_items,
+        bytes_per_sec: s.bytes_per_sec,
+        local_dest: s.local_dest.clone(),
+    }
 }
 
 fn app_id(id: tlp_desk_crypto::DeviceId) -> DeviceId {
@@ -312,12 +361,20 @@ impl RealBackend {
         }
 
         let clipboard = super::clipboard::feature(cfg.clipboard.clone());
+        let files = FileTransfer::new(cfg.transfer.clone());
+        let fsb = FilesBridge::new(FsConfig::default(), ClipFilesConfig::default()).with_starter(
+            Arc::new(EngineStarter::new(files.clone(), cfg.transfer.conflict)),
+        );
+        fsb.link_engine(&files);
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
             let host_cfg = HostConfig {
                 device_name: device_name.clone(),
-                features: super::clipboard::register(cfg.host.features.clone(), &clipboard),
+                features: super::clipboard::register(
+                    fsb.register(cfg.host.features.clone().with(files.clone())),
+                    &clipboard,
+                ),
                 ..cfg.host.clone()
             };
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
@@ -364,7 +421,10 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
-                features: super::clipboard::register(Default::default(), &clipboard),
+                features: super::clipboard::register(
+                    fsb.register(FeatureSet::new().with(files.clone())),
+                    &clipboard,
+                ),
                 ..ViewerConfig::default()
             };
             match Viewer::new(ep.clone(), vcfg) {
@@ -390,8 +450,10 @@ impl RealBackend {
             discovery,
             own_id,
             bridges,
+            files,
             state: Mutex::default(),
             clipboard,
+            fsb,
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -407,6 +469,7 @@ impl RealBackend {
         if let Some(ev) = host_events {
             rt.spawn(inner.clone().pump_host(ev));
         }
+        rt.spawn(inner.clone().pump_files());
         rt.spawn(inner.clone().pump_devices());
         rt.spawn(inner.clone().reconcile_loop());
         (Arc::new(RealBackend { inner }), rx)
@@ -460,6 +523,65 @@ impl Inner {
         }
     }
 
+    // ----- file transfers (lane files-transfer) -----------------------------------------
+
+    /// Forwards the engine's events of viewer sessions to the UI as [`BackendEvent::Transfer`].
+    /// Transfers of host sessions (the other side started them) are not shown here.
+    async fn pump_files(self: Arc<Self>) {
+        let mut rx = self.files.subscribe();
+        loop {
+            let (key, event) = match rx.recv().await {
+                Ok(x) => x,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            };
+            let Some(session) = self.viewer_session_for_key(key) else {
+                continue;
+            };
+            if let Some(snap) = self.files.snapshot(event.id()) {
+                if snap.info.initiated_locally {
+                    self.emit(BackendEvent::Transfer {
+                        session,
+                        view: transfer_view(&snap),
+                    });
+                }
+            }
+        }
+    }
+
+    fn viewer_session_for_key(&self, key: u64) -> Option<SessionId> {
+        self.state()
+            .viewer_sessions
+            .iter()
+            .find(|(_, s)| s.feature_key() == key)
+            .map(|(id, _)| *id)
+    }
+
+    fn feature_key(&self, session: SessionId) -> Option<u64> {
+        self.state()
+            .viewer_sessions
+            .get(&session)
+            .map(|s| s.feature_key())
+    }
+
+    /// Runs `start` (an engine call) and reports a failure to the UI.
+    fn spawn_transfer<F>(self: &Arc<Self>, session: SessionId, start: F)
+    where
+        F: std::future::Future<Output = Result<(), FilesError>> + Send + 'static,
+    {
+        let me = Arc::clone(self);
+        self.rt.spawn(async move {
+            if let Err(e) = start.await {
+                tracing::warn!(%e, "transfer did not start");
+                let error = match e {
+                    FilesError::PermissionDenied => TransferStartError::NoPermission,
+                    other => TransferStartError::Other(other.to_string()),
+                };
+                me.emit(BackendEvent::TransferNotStarted { session, error });
+            }
+        });
+    }
+
     // ----- host side -------------------------------------------------------------------
 
     async fn pump_host(self: Arc<Self>, mut events: HostEvents) {
@@ -496,6 +618,19 @@ impl Inner {
                 }
                 HostEvent::SessionStarted(v) => self.host_session_started(v.id, &v.peer),
                 HostEvent::PermissionsChanged { .. } => {}
+                HostEvent::InputBlocked { id } => {
+                    tracing::warn!(session = id.0, "remote input blocked by the OS");
+                    let session = {
+                        let st = self.state();
+                        st.host_sessions
+                            .iter()
+                            .find(|(_, h)| **h == id)
+                            .map(|(k, _)| *k)
+                    };
+                    if let Some(session) = session {
+                        self.emit(BackendEvent::HostInputBlocked { session });
+                    }
+                }
                 HostEvent::SessionEnded { id, reason, .. } => {
                     self.host_session_ended(id, map_host_end(reason));
                 }
@@ -771,6 +906,10 @@ impl Inner {
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 ViewerEvent::Feature(event) => {
+                    if let Some(ev) = FilesBridge::map_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
                     tracing::debug!(
                         session = session.0,
                         feature = event.feature,
@@ -881,6 +1020,48 @@ impl Backend for RealBackend {
         }
     }
 
+    fn fs_request(&self, side: FsSide, op: FsOp) -> Option<FsRequestId> {
+        Some(self.files_request(side, op))
+    }
+
+    fn fs_transfer(&self, session: SessionId, request: TransferRequest) {
+        self.files_transfer(session, request);
+    }
+
+    fn send_files(&self, session: SessionId, paths: Vec<PathBuf>) {
+        let Some(key) = self.inner.feature_key(session) else {
+            return;
+        };
+        let ft = self.inner.files.clone();
+        self.inner.spawn_transfer(session, async move {
+            ft.start_upload(key, paths, String::new()).await.map(|_| ())
+        });
+    }
+
+    fn download_files(&self, session: SessionId, remote_paths: Vec<String>, dest: PathBuf) {
+        let Some(key) = self.inner.feature_key(session) else {
+            return;
+        };
+        let ft = self.inner.files.clone();
+        self.inner.spawn_transfer(session, async move {
+            ft.start_download(key, remote_paths, dest).await.map(|_| ())
+        });
+    }
+
+    fn cancel_transfer(&self, _session: SessionId, id: TransferId) {
+        self.inner.files.cancel(tlp_desk_files::TransferId(id.0));
+    }
+
+    fn retry_transfer(&self, session: SessionId, id: TransferId) {
+        let Some(key) = self.inner.feature_key(session) else {
+            return;
+        };
+        let ft = self.inner.files.clone();
+        self.inner.spawn_transfer(session, async move {
+            ft.resume(tlp_desk_files::TransferId(id.0), key).await
+        });
+    }
+
     fn disconnect(&self, session: SessionId) {
         let (viewer, host) = {
             let st = self.inner.state();
@@ -917,6 +1098,46 @@ impl Backend for RealBackend {
 
     fn set_clipboard_default(&self, enabled: bool) {
         self.inner.clipboard.set_default_enabled(enabled);
+    }
+}
+
+// --- files (TLP-files) ---
+impl RealBackend {
+    /// Feature key of a viewer session (what the files features are keyed by).
+    fn feature_key(&self, session: SessionId) -> Option<u64> {
+        self.inner
+            .state()
+            .viewer_sessions
+            .get(&session)
+            .map(|s| s.feature_key())
+    }
+
+    fn emitter(&self) -> impl Fn(BackendEvent) + Send + Sync + 'static {
+        let inner = Arc::downgrade(&self.inner);
+        move |ev| {
+            if let Some(inner) = inner.upgrade() {
+                inner.emit(ev);
+            }
+        }
+    }
+
+    fn files_request(&self, side: FsSide, op: FsOp) -> FsRequestId {
+        let request = FsRequestId(self.inner.next_id());
+        let key = match side {
+            FsSide::Local => None,
+            FsSide::Remote(s) => self.feature_key(s),
+        };
+        self.inner
+            .fsb
+            .request(&self.inner.rt, side, key, op, request, self.emitter());
+        request
+    }
+
+    fn files_transfer(&self, session: SessionId, request: TransferRequest) {
+        let key = self.feature_key(session);
+        self.inner
+            .fsb
+            .transfer(&self.inner.rt, session, key, request, self.emitter());
     }
 }
 

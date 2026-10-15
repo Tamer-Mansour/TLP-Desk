@@ -21,6 +21,7 @@
 //! [`LocalFilesHook`].
 
 mod backend;
+mod error;
 mod feature;
 mod memory;
 mod sync;
@@ -33,6 +34,7 @@ mod wire;
 use std::path::PathBuf;
 
 pub use backend::ClipboardBackend;
+pub use error::ClipboardError;
 pub use feature::{ClipboardFeature, LocalFilesHook, FEATURE_NAME};
 pub use memory::MemoryClipboard;
 pub use system::SystemClipboard;

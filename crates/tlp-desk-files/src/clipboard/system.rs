@@ -5,8 +5,8 @@ use std::sync::{Mutex, PoisonError};
 
 use tokio::sync::watch;
 
+use super::error::ClipboardError;
 use super::{ClipContent, ClipImage, ClipboardBackend};
-use crate::FilesError;
 
 /// The system clipboard. Created lazily (opening it can fail, e.g. in a service session);
 /// errors are reported per call, never as a panic.
@@ -34,11 +34,11 @@ impl Default for SystemClipboard {
     }
 }
 
-fn err(e: arboard::Error) -> FilesError {
-    FilesError::Clipboard(e.to_string())
+fn err(e: arboard::Error) -> ClipboardError {
+    ClipboardError::Clipboard(e.to_string())
 }
 
-fn present<T>(r: Result<T, arboard::Error>) -> Result<Option<T>, FilesError> {
+fn present<T>(r: Result<T, arboard::Error>) -> Result<Option<T>, ClipboardError> {
     match r {
         Ok(v) => Ok(Some(v)),
         Err(arboard::Error::ContentNotAvailable | arboard::Error::ConversionFailure) => Ok(None),
@@ -81,8 +81,8 @@ impl SystemClipboard {
 
     fn with<T>(
         &self,
-        f: impl FnOnce(&mut arboard::Clipboard) -> Result<T, FilesError>,
-    ) -> Result<T, FilesError> {
+        f: impl FnOnce(&mut arboard::Clipboard) -> Result<T, ClipboardError>,
+    ) -> Result<T, ClipboardError> {
         let mut guard = self.board.lock().unwrap_or_else(PoisonError::into_inner);
         let board = match guard.as_mut() {
             Some(b) => b,
@@ -106,7 +106,7 @@ impl SystemClipboard {
 }
 
 impl ClipboardBackend for SystemClipboard {
-    fn read(&self) -> Result<Option<ClipContent>, FilesError> {
+    fn read(&self) -> Result<Option<ClipContent>, ClipboardError> {
         self.with(|cb| {
             if let Some(files) = present(cb.get().file_list())? {
                 if !files.is_empty() {
@@ -138,7 +138,7 @@ impl ClipboardBackend for SystemClipboard {
         })
     }
 
-    fn write(&self, content: &ClipContent) -> Result<u64, FilesError> {
+    fn write(&self, content: &ClipContent) -> Result<u64, ClipboardError> {
         self.with(|cb| match content {
             ClipContent::Text(t) => cb.set_text(t.as_str()).map_err(err),
             ClipContent::Html { html, alt_text } => cb
@@ -161,7 +161,7 @@ impl ClipboardBackend for SystemClipboard {
     }
 }
 
-fn read_image(cb: &mut arboard::Clipboard) -> Result<Option<ClipContent>, FilesError> {
+fn read_image(cb: &mut arboard::Clipboard) -> Result<Option<ClipContent>, ClipboardError> {
     let Some(img) = present(cb.get_image())? else {
         return Ok(None);
     };

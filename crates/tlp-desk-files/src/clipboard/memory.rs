@@ -6,8 +6,8 @@ use std::sync::{Mutex, PoisonError};
 
 use tokio::sync::watch;
 
+use super::error::ClipboardError;
 use super::{ClipContent, ClipboardBackend};
-use crate::FilesError;
 
 /// A process-local clipboard with change notifications, like the OS one.
 #[derive(Debug)]
@@ -83,11 +83,11 @@ impl MemoryClipboard {
 }
 
 impl ClipboardBackend for MemoryClipboard {
-    fn read(&self) -> Result<Option<ClipContent>, FilesError> {
+    fn read(&self) -> Result<Option<ClipContent>, ClipboardError> {
         Ok(self.content())
     }
 
-    fn write(&self, content: &ClipContent) -> Result<u64, FilesError> {
+    fn write(&self, content: &ClipContent) -> Result<u64, ClipboardError> {
         self.writes.fetch_add(1, Ordering::Relaxed);
         Ok(self.set(Some(content.clone())))
     }

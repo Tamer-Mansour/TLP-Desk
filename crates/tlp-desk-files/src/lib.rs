@@ -4,17 +4,33 @@
 //!   ([`ClipboardFeature`], registered in the host's and viewer's `FeatureSet`). The system
 //!   clipboard sits behind [`ClipboardBackend`] so tests use [`MemoryClipboard`] and never touch
 //!   the user's real clipboard.
+//! * [`transfer`]: fast file and folder transfer between viewer and host on parallel QUIC
+//!   streams, with resume, BLAKE3 verification and atomic writes. Entry point:
+//!   [`FileTransfer`] (a session `Feature`).
+//! * [`clipfiles`]: Explorer copy/paste of files between the devices (`ClipboardFiles`).
+//! * [`fs`]: browse and change the other device's files (protocol v4 `FsRequest`/`FsResponse`).
 //!
-//! Boundaries: this crate never logs clipboard or file contents; every feature is gated by the
-//! session's live `Permissions`. `unsafe` is denied workspace-wide and only allowed in the
-//! Windows platform module (`clipboard/windows.rs`, clipboard change notifications).
+//! No function in this crate contacts anything outside the session's peer.
+//! Clipboard contents are never logged: only kinds and sizes.
+// `deny`, not `forbid`: the Win32 wrappers `fs::windows` (drive labels, free space, known
+// folders) and `clipboard::windows` (change notifications) opt back in, with a
+// `// SAFETY:` comment on every block.
+#![deny(unsafe_code)]
 
 pub mod clipboard;
-mod error;
+pub mod clipfiles;
+pub mod fs;
 
-pub use clipboard::{
-    ClipContent, ClipImage, ClipKind, ClipboardBackend, ClipboardConfig, ClipboardEvent,
-    ClipboardFeature, Direction, LocalFilesHook, MemoryClipboard, RefusedReason, SystemClipboard,
-    FEATURE_NAME, INLINE_MAX,
+// --- files-transfer lane ---
+pub mod transfer;
+pub use transfer::{
+    ConflictPolicy, FileTransfer, FilesError, PathIssue, TransferConfig, TransferEvent, TransferId,
+    TransferInfo, TransferRole, TransferSnapshot, TransferState, FEATURE_NAME, META_SUFFIX,
+    PART_SUFFIX, TRANSFER_REQ_ID_BIT,
 };
-pub use error::FilesError;
+// --- end files-transfer lane ---
+pub use clipboard::{
+    ClipContent, ClipImage, ClipKind, ClipboardBackend, ClipboardConfig, ClipboardError,
+    ClipboardEvent, ClipboardFeature, Direction, LocalFilesHook, MemoryClipboard, RefusedReason,
+    SystemClipboard, FEATURE_NAME as CLIPBOARD_FEATURE_NAME, INLINE_MAX,
+};

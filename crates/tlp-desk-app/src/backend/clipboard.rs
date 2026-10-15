@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tlp_desk_files::{
     ClipboardBackend, ClipboardConfig, ClipboardEvent, ClipboardFeature, MemoryClipboard,
-    FEATURE_NAME,
+    CLIPBOARD_FEATURE_NAME,
 };
 use tlp_desk_net::{FeatureEvent, FeatureSet};
 
@@ -25,7 +25,7 @@ pub(super) fn register(set: FeatureSet, feature: &Arc<ClipboardFeature>) -> Feat
 
 /// The UI event for a clipboard feature event, if `event` is one.
 pub(super) fn map(session: SessionId, event: &FeatureEvent) -> Option<BackendEvent> {
-    if event.feature != FEATURE_NAME {
+    if event.feature != CLIPBOARD_FEATURE_NAME {
         return None;
     }
     event
@@ -48,7 +48,7 @@ mod tests {
             kind: ClipKind::Text,
             bytes: 4,
         };
-        let fe = FeatureEvent::new(FEATURE_NAME, 3, ev.clone());
+        let fe = FeatureEvent::new(CLIPBOARD_FEATURE_NAME, 3, ev.clone());
         match map(SessionId(9), &fe) {
             Some(BackendEvent::Clipboard { session, event }) => {
                 assert_eq!(session, SessionId(9));
