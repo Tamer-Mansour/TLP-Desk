@@ -102,6 +102,11 @@ pub struct App {
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    // --- TLP-settings-tray ---
+    /// Settings screen editor state.
+    pub settings_ui: crate::ui::settings::SettingsUi,
+    /// "Start with Windows" (the HKCU Run key; a fake in tests).
+    pub autostart: Box<dyn crate::settings::autostart::AutoStart>,
 }
 
 impl App {
@@ -143,7 +148,13 @@ impl App {
             host_sessions: Vec::new(),
             session: None,
             notice: None,
+            settings_ui: Default::default(),
+            autostart: crate::settings::autostart::system(),
         };
+        // The Run key is the truth for "start with Windows" (it can be removed outside the app).
+        if let Ok(on) = app.autostart.is_enabled() {
+            app.settings.startup.start_with_windows = on;
+        }
         if let Some(code) = opts.code {
             app.code = code;
         }
