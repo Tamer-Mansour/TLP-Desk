@@ -224,6 +224,14 @@ pub fn viewer_left(peer: &PeerInfo, reason: &HostEnd) -> String {
     )
 }
 
+pub fn input_blocked() -> String {
+    t(
+        "INPUT BLOCKED: an administrator window or secure screen is in front",
+        "الإدخال محجوب: نافذة مسؤول أو شاشة آمنة في المقدمة",
+    )
+    .into()
+}
+
 pub fn code_changed(code: &str) -> String {
     t(
         format!("New one-time code: {code}"),
