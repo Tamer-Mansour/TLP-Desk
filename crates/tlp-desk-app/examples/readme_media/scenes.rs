@@ -14,11 +14,12 @@ use tlp_desk_app::backend::fake::{fake_monitors, test_pattern_frame};
 use tlp_desk_app::backend::{
     AttemptId, ConnectTarget, DeviceId, FrameSlot, RequestId, SessionId, SessionStats,
 };
-use tlp_desk_app::i18n::{DigitStyle, Lang, Tx};
+use tlp_desk_app::i18n::{DigitStyle, Lang, Tx, S};
+use tlp_desk_app::ui::address_book::{Dialog, EditForm, HomeTab};
 use tlp_desk_app::ui::session::ViewerSession;
 use tlp_desk_proto::Permissions;
 
-use crate::backend::{devices, incoming_peer, session_peer};
+use crate::backend::{devices, incoming_peer, pick, saved_devices, session_peer, FIXED_NOW};
 
 /// One screenshot: `docs/media/<name>-<lang>-<theme>.png`.
 pub struct Scene {
@@ -81,6 +82,21 @@ pub const SCENES: &[Scene] = &[
         name: "key-changed",
         about: "loud warning when a host's key changed",
         setup: key_changed,
+    },
+    Scene {
+        name: "address-book",
+        about: "address book: favorites, groups, online status, Connect and Wake up",
+        setup: address_book,
+    },
+    Scene {
+        name: "address-book-edit",
+        about: "address book: editing a saved device (alias, group, tags, notes, MAC)",
+        setup: address_book_edit,
+    },
+    Scene {
+        name: "wake-on-lan",
+        about: "address book: Wake-on-LAN magic packet sent to an offline PC",
+        setup: wake_on_lan,
     },
 ];
 
@@ -170,6 +186,31 @@ fn settings(app: &mut App, lang: Lang) {
     if lang == Lang::Ar {
         use_digits(app, DigitStyle::ArabicIndic);
     }
+}
+
+fn address_book(app: &mut App, lang: Lang) {
+    home(app, lang);
+    app.address_book.fixed_now = Some(FIXED_NOW);
+    app.address_book.book = saved_devices(lang);
+    app.address_book.tab = HomeTab::AddressBook;
+    let backend = app.backend.clone();
+    let list = devices(lang);
+    let tx = app.tx;
+    app.address_book.on_devices(&list, backend.as_ref(), tx);
+}
+
+fn address_book_edit(app: &mut App, lang: Lang) {
+    address_book(app, lang);
+    if let Some(e) = app.address_book.book.get(DeviceId(950_442_118)) {
+        app.address_book.dialog = Some(Dialog::Edit(EditForm::edit(e)));
+    }
+}
+
+fn wake_on_lan(app: &mut App, lang: Lang) {
+    address_book(app, lang);
+    let name = pick(lang, "Lab laptop", "حاسوب المختبر المحمول");
+    let text = app.tx.f(S::AbWakeSent, &[("name", &name)]);
+    app.address_book.show_toast(text, false);
 }
 
 fn key_changed(app: &mut App, lang: Lang) {

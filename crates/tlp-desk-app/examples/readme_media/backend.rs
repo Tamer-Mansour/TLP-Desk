@@ -9,6 +9,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
+use tlp_desk_app::address_book::{AddressBook, Entry, MacAddr, MacSource, UnixTime};
 use tlp_desk_app::backend::{
     AttemptId, Backend, ConnectTarget, DeviceId, DiscoveredDevice, EventReceiver, EventSender,
     LocalInfo, PeerInfo, RequestId, SessionId,
@@ -119,4 +120,74 @@ pub fn incoming_peer(lang: Lang) -> PeerInfo {
         name: pick(lang, "Lab-Laptop", "حاسوب-المختبر"),
         address: ip([192, 168, 1, 81]),
     }
+}
+
+/// The fixed "now" of the address book scenes (relative times never depend on the clock).
+pub const FIXED_NOW: UnixTime = 1_760_000_000;
+
+/// Saved devices for the address book scenes: a favorite, groups, Arabic aliases, online and
+/// offline devices with and without a MAC (Wake up enabled / disabled).
+pub fn saved_devices(lang: Lang) -> AddressBook {
+    let entry = |id: u32, alias: String, name: &str, group: String, a: [u8; 4]| {
+        let mut e = Entry::new(DeviceId(id));
+        e.alias = alias;
+        e.name = name.to_owned();
+        e.group = group;
+        e.push_ip(ip(a));
+        e
+    };
+    let office = pick(lang, "Office", "المكتب");
+    let mut book = AddressBook::default();
+
+    let mut accounting = entry(
+        715_204_386,
+        pick(lang, "Accounting", "مكتب المحاسبة"),
+        "Office-PC",
+        office.clone(),
+        [192, 168, 1, 40],
+    );
+    accounting.favorite = true;
+    accounting.mac = Some(MacAddr([0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e]));
+    accounting.last_connected = Some(FIXED_NOW - 2 * 3600);
+    accounting.pinned_fingerprint = Some("3f9a 1c07 e2b4 58d1".into());
+    book.upsert(accounting);
+
+    let library = entry(
+        306_117_942,
+        pick(lang, "Library", "المكتبة"),
+        "حاسوب-المكتبة",
+        office,
+        [192, 168, 1, 57],
+    );
+    book.upsert(library);
+
+    let mut lab = entry(
+        950_442_118,
+        pick(lang, "Lab laptop", "حاسوب المختبر المحمول"),
+        "Lab-Laptop",
+        pick(lang, "Lab", "المختبر"),
+        [192, 168, 1, 81],
+    );
+    lab.mac = Some(MacAddr([0x00, 0x1b, 0x63, 0x84, 0x45, 0xe6]));
+    lab.mac_source = MacSource::Manual;
+    lab.tags = vec![pick(lang, "tests", "اختبارات"), pick(lang, "night", "ليلي")];
+    lab.notes = pick(
+        lang,
+        "Wakes for the nightly test run.",
+        "يُوقَظ لتشغيل الاختبارات الليلية.",
+    );
+    lab.last_seen = Some(FIXED_NOW - 3 * 86_400);
+    lab.last_connected = Some(FIXED_NOW - 5 * 86_400);
+    book.upsert(lab);
+
+    let mut nas = entry(
+        611_390_275,
+        pick(lang, "Home server", "خادم المنزل"),
+        "NAS-01",
+        pick(lang, "Home", "المنزل"),
+        [192, 168, 1, 90],
+    );
+    nas.last_seen = Some(FIXED_NOW - 25 * 60);
+    book.upsert(nas);
+    book
 }
