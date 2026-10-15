@@ -1,5 +1,6 @@
 //! egui views.
 
+pub mod chat;
 pub mod clipboard;
 pub mod file_browser;
 pub mod home;

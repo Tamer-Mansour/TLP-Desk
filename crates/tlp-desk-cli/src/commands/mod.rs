@@ -4,6 +4,7 @@
 //! `Args` struct and a `run(ctx, args)` function, then add one line in each FEATURE HOOK below
 //! (`mod`, the [`Cmd`] variant, the [`run`] arm). Dial/auth helpers live in [`common`].
 
+pub mod chat;
 pub mod clip_send;
 pub mod common;
 pub mod connect;
@@ -69,6 +70,8 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// Viewer: send one chat message to a host and print the replies.
+    Chat(chat::ChatArgs),
     /// Viewer: put text on the host's clipboard (this PC's clipboard is not touched).
     ClipSend(clip_send::ClipSendArgs),
     /// List a folder on the remote PC (or its drives and known folders). Needs "files".
@@ -110,6 +113,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::Chat(a) => chat::run(&ctx, a).await,
         Cmd::ClipSend(a) => clip_send::run(&ctx, a).await,
         Cmd::Ls(a) => ls::run(&ctx, a).await,
         Cmd::Mkdir(a) => mkdir::run(&ctx, a).await,

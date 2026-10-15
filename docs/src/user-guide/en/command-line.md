@@ -30,6 +30,7 @@ TLP-Desk-cli id                     # this PC's device ID and key fingerprint
 TLP-Desk-cli list                   # devices on the network (5 seconds)
 TLP-Desk-cli serve --code           # be a host; print a one-time code
 TLP-Desk-cli connect 123456789 --code 042917 --seconds 10 --snapshot shot.png
+TLP-Desk-cli chat 123456789 "مرحباً، hello" --code 042917 --wait 10   # send a chat message, print replies
 TLP-Desk-cli ls 123456789 --code 042917 D:\Shared   # also: mkdir, rm, mv (need the Files permission)
 ```
 

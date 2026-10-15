@@ -11,7 +11,7 @@ use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
 use tlp_desk_files::fs::{FsConfig, FsFeature};
 use tlp_desk_files::{FileTransfer, TransferConfig, TransferEvent};
 use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
-use tlp_desk_net::{Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
+use tlp_desk_net::{ChatEvent, ChatFeature, Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
 use tlp_desk_proto::Permissions;
 use tlp_desk_proto::TransferDirection;
 
@@ -74,7 +74,7 @@ impl ServeArgs {
             default_permissions: if self.view_only {
                 Permissions::VIEW
             } else {
-                DEFAULT_PERMISSIONS
+                DEFAULT_PERMISSIONS.union(Permissions::CHAT)
             }
             .union(if self.clipboard {
                 Permissions::CLIPBOARD
@@ -106,7 +106,9 @@ fn host_features(args: &ServeArgs) -> FeatureSet {
         // Remote file browser; served only to sessions holding FILES.
         .with(FsFeature::new(FsConfig::default()))
         // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
-        .with(ClipFilesFeature::new(ClipFilesConfig::default()));
+        .with(ClipFilesFeature::new(ClipFilesConfig::default()))
+        // Chat: received messages are printed; the CLI host does not reply (TLP-chat).
+        .with(ChatFeature::new());
     if args.clipboard {
         // Text, HTML and images; served only to sessions holding CLIPBOARD.
         set.push(tlp_desk_files::ClipboardFeature::new(
@@ -256,9 +258,20 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { event, .. } => {
+                    HostEvent::Feature { id, event } => {
                         if let Some((line, value)) = super::clip_send::event_line(&event) {
                             out.event(line, &value);
+                        } else if let Some(ChatEvent::Received(m)) = event.payload::<ChatEvent>() {
+                            let name = host
+                                .sessions()
+                                .into_iter()
+                                .find(|v| v.id == id)
+                                .map(|v| v.peer.name)
+                                .unwrap_or_default();
+                            out.event(
+                                text::chat_received(&name, &m.text),
+                                &json!({ "type": "chat", "session": id.0, "text": m.text }),
+                            );
                         } else {
                             transfer_event(out, &event);
                         }

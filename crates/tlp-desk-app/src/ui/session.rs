@@ -9,6 +9,7 @@ use eframe::egui::{
 };
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
+use super::chat::{self, ChatState};
 use super::file_browser::FileBrowser;
 use super::icons::{self, Icon};
 use super::key_forward::KeyForwarder;
@@ -59,6 +60,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Chat with the host user (side panel).
+    pub chat: ChatState,
     /// "Sync clipboard" switch and toast (TLP-clipboard).
     pub clipboard: super::clipboard::ClipboardUi,
     /// Two-pane file browser (TLP-files), toggled from the toolbar.
@@ -107,6 +110,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            chat: ChatState::new(permissions.contains(Permissions::CHAT)),
             clipboard: Default::default(),
             files: FileBrowser::new(id),
             transfers: TransferPanel::new(),
@@ -235,6 +239,7 @@ impl ViewerSession {
         self.files.ui(ui, tx, backend, self.permissions);
         let modal_open = modal_open || self.files.modal_open() || self.files.owns_keyboard();
         self.transfers_ui(ui, tx, backend);
+        chat::side_panel(ui, tx, &mut self.chat, backend, self.id);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
@@ -381,6 +386,9 @@ impl ViewerSession {
                     .clicked()
                     {
                         self.transfers.open = !self.transfers.open;
+                    }
+                    if chat::chat_toggle(ui, tx, &self.chat) {
+                        self.chat.set_open(!self.chat.is_open());
                     }
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
@@ -1027,6 +1035,29 @@ mod tests {
         rig.frame(vec![]);
         rig.take();
         rig.frame(vec![egui_key(egui::Key::H, true)]);
+        let sent = rig.take();
+        assert!(sent.is_empty(), "{sent:?}");
+    }
+
+    /// Typing in the real chat panel (Arabic included) must not leak a single input event to
+    /// the remote PC.
+    #[test]
+    fn typing_in_the_chat_box_sends_no_input_to_the_remote() {
+        let mut rig = Rig::new(None);
+        rig.session.chat.set_open(true);
+        rig.frame(vec![]);
+        rig.ctx
+            .memory_mut(|m| m.request_focus(egui::Id::new(("chat-input", SessionId(1).0))));
+        rig.frame(vec![]);
+        rig.frame(vec![]);
+        rig.take();
+        rig.frame(vec![
+            egui_key(egui::Key::H, true),
+            egui::Event::Text("مرحبا hi".into()),
+            egui_key(egui::Key::H, false),
+            egui_key(egui::Key::Backspace, true),
+            egui_key(egui::Key::Backspace, false),
+        ]);
         let sent = rig.take();
         assert!(sent.is_empty(), "{sent:?}");
     }

@@ -27,7 +27,7 @@ unicode-bidi = "0.3.18"
 serde_json = "1"
 tracing = "0.1"
 sys-locale = "0.3"
-# Local UTC offset for the file browser's "modified" column (Windows: GetTimeZoneInformation).
+# Local UTC offset for the file browser's "modified" column and chat timestamps (Windows: GetTimeZoneInformation).
 time = { version = "0.3", default-features = false, features = ["std", "local-offset"] }
 # Rasterizes the vendored tlp-icons SVGs (ui::icons). No default features: icons have no text or
 # embedded raster images, so no font database (fontdb/system fonts) is pulled in.
