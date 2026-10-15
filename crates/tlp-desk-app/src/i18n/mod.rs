@@ -229,6 +229,24 @@ strings! {
     // --- perf ---
 
     // --- power ---
+
+    // --- device info (TLP-cli-devinfo) ---
+    DeviceInfoTitle => "Device info", "معلومات الجهاز";
+    DeviceInfoRefresh => "Refresh", "تحديث";
+    DeviceInfoLoading => "Asking the other device…", "جارٍ سؤال الجهاز الآخر…";
+    DeviceInfoNoAnswer => "The other device did not answer. It may run an older TLP-Desk.", "لم يُجب الجهاز الآخر. ربما يعمل بإصدار أقدم من TLP-Desk.";
+    DeviceInfoComputer => "Computer name", "اسم الحاسوب";
+    DeviceInfoSystem => "System", "النظام";
+    DeviceInfoVersion => "Version", "الإصدار";
+    DeviceInfoCpu => "Processor", "المعالج";
+    DeviceInfoThreads => "Threads", "مسارات المعالجة";
+    DeviceInfoMemory => "Memory", "الذاكرة";
+    DeviceInfoUptime => "Running for", "مدة التشغيل";
+    DeviceInfoDisks => "Disks", "الأقراص";
+    DeviceInfoDiskFree => "{free} free of {total}", "{free} متاح من {total}";
+    UptimeDays => "{d} d {h} h {m} min", "{d} ي {h} س {m} د";
+    UptimeHours => "{h} h {m} min", "{h} س {m} د";
+    UptimeMinutes => "{m} min", "{m} د";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.
