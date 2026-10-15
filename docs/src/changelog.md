@@ -12,6 +12,7 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
 
 ### Added
 
+- **Session recording and playback.** The viewer records a session into a standard fragmented MP4 (H.264 stored as received, no re-encoding, no wire change) at `%USERPROFILE%VideosTLP-DeskTLP-Desk <peer> <date time>.mp4`. Crash-safe (one-second fragments, interrupted files can be repaired), a new file starts when the remote picture size changes, a keyframe is requested at the start and every 4 seconds, and recording refuses to start on a nearly full disk. The toolbar has a record toggle with a red indicator and elapsed time; the home screen has a Recordings list (play, open folder, delete, repair) and a playback window (play/pause, keyframe seek, 0.5x-4x, fit/actual size). The host is not notified; the indicator is viewer-only.
 - **Clipboard sharing.** Text, formatted text (HTML) and images are copied between the two PCs
   in both directions while the host grants `Clipboard`; the permission is re-checked on every
   send and apply, so revoking it stops sharing at once. The viewer toolbar has a "Sync clipboard"
