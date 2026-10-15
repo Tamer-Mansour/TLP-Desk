@@ -11,9 +11,10 @@ use tlp_desk_app::backend::{
     HostProblem, SessionId,
 };
 use tlp_desk_capture::{BgraFrame, CaptureError, CursorState, MonitorInfo, ScreenCapturer};
-use tlp_desk_host::HostConfig;
+use tlp_desk_files::TransferConfig;
+use tlp_desk_host::{HostConfig, DEFAULT_PERMISSIONS};
 use tlp_desk_input::{InputError, InputInjector, MonitorRect};
-use tlp_desk_proto::{InputEvent, RejectReason};
+use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 use tlp_desk_viewer::KnownHostsStore;
 use tokio::runtime::Runtime;
 
@@ -107,9 +108,14 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
             // No real low-level hooks or on-screen marker in tests.
             local_input_grace: Duration::ZERO,
             remote_pointer_marker: false,
+            default_permissions: DEFAULT_PERMISSIONS.union(Permissions::FILES),
             ..HostConfig::default()
         },
         fallback_discovery: false,
+        transfer: TransferConfig {
+            default_upload_dir: Some(dir.join("received")),
+            ..TransferConfig::default()
+        },
     }
 }
 
@@ -410,4 +416,80 @@ fn busy_port_degrades_to_dial_only_with_a_clear_problem() {
         BackendEvent::SessionStarted { attempt: a, .. } if *a == attempt => Some(()),
         _ => None,
     });
+}
+
+fn find_file(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_file(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().is_some_and(|n| n == name) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+#[test]
+fn files_are_sent_through_the_backend_with_progress() {
+    use tlp_desk_app::backend::files::TransferStatus;
+
+    let rt = Runtime::new().unwrap();
+    let host = start(&rt, Arc::default(), 0, |d| {
+        std::fs::create_dir_all(d.join("received")).unwrap();
+    });
+    let mut viewer = start(&rt, Arc::default(), 0, |_| {});
+    let code = host.backend.local_info().one_time_code;
+    let attempt = viewer.backend.connect(
+        ConnectTarget::Address(host.backend.local_addr().unwrap()),
+        Some(code),
+    );
+    let (session, _frames) = viewer.events.wait(&rt, "session", |e| match e {
+        BackendEvent::SessionStarted {
+            attempt: a,
+            session,
+            frames,
+            ..
+        } if *a == attempt => Some((*session, frames.clone())),
+        _ => None,
+    });
+
+    // A nested folder with Arabic names plus a larger file.
+    let src = tempfile::tempdir().unwrap();
+    let folder = src.path().join("مجلد المشروع");
+    std::fs::create_dir_all(folder.join("فرعي")).unwrap();
+    std::fs::write(folder.join("فرعي").join("ملف.txt"), "مرحبا بالعالم").unwrap();
+    let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(folder.join("big.bin"), &big).unwrap();
+
+    viewer.backend.send_files(session, vec![folder]);
+    let view = viewer.events.wait(&rt, "transfer completed", |e| match e {
+        BackendEvent::Transfer { session: s, view }
+            if *s == session && view.status == TransferStatus::Completed =>
+        {
+            Some(view.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(view.total_files, 2);
+    assert_eq!(view.failed_files, 0);
+    assert_eq!(view.bytes_done, view.total_bytes);
+
+    let received = host._dir.path().join("received");
+    let text = find_file(&received, "ملف.txt").expect("Arabic file arrived");
+    assert_eq!(std::fs::read_to_string(text).unwrap(), "مرحبا بالعالم");
+    let bin = find_file(&received, "big.bin").expect("big file arrived");
+    assert_eq!(std::fs::read(bin).unwrap(), big);
+
+    // A missing path is reported instead of silently ignored.
+    viewer
+        .backend
+        .send_files(session, vec![src.path().join("does-not-exist")]);
+    viewer.events.wait(&rt, "not started", |e| match e {
+        BackendEvent::TransferNotStarted { session: s, .. } if *s == session => Some(()),
+        _ => None,
+    });
+    viewer.backend.disconnect(session);
 }

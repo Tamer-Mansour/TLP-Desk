@@ -3,6 +3,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+/// How long the host banner keeps showing "remote input is blocked" after the last refusal.
+const HOST_BLOCKED_NOTICE: std::time::Duration = std::time::Duration::from_secs(15);
+
 use eframe::egui::{self, Id, RichText};
 use tlp_desk_proto::RejectReason;
 
@@ -99,6 +102,8 @@ pub struct App {
     hwnd: Option<isize>,
     pub incoming: VecDeque<(RequestId, PeerInfo)>,
     pub host_sessions: Vec<(SessionId, PeerInfo)>,
+    /// When the OS last refused a remote viewer's input (elevated window in front).
+    host_input_blocked: Option<std::time::Instant>,
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
@@ -141,6 +146,7 @@ impl App {
             hwnd: keygrab::window_handle(cc),
             incoming: VecDeque::new(),
             host_sessions: Vec::new(),
+            host_input_blocked: None,
             session: None,
             notice: None,
         };
@@ -354,6 +360,11 @@ impl App {
                         bring_to_front(ctx);
                     }
                 }
+                BackendEvent::HostInputBlocked { session } => {
+                    if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_input_blocked = Some(std::time::Instant::now());
+                    }
+                }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
                 // --- files (TLP-files) ---
                 BackendEvent::FsResult {
@@ -374,6 +385,16 @@ impl App {
                     let tx = self.tx;
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
                         s.files.on_notice(tx, &notice);
+                    }
+                }
+                BackendEvent::Transfer { session, view } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.update(view);
+                    }
+                }
+                BackendEvent::TransferNotStarted { session, error } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.not_started(error);
                     }
                 }
             }
@@ -415,6 +436,19 @@ impl App {
                             }
                         });
                     });
+                }
+                // The remote person types into the void otherwise: say why.
+                if self
+                    .host_input_blocked
+                    .is_some_and(|t| t.elapsed() < HOST_BLOCKED_NOTICE)
+                {
+                    ui.label(
+                        RichText::new(tx.t(S::HostInputBlocked))
+                            .color(egui::Color32::WHITE)
+                            .small(),
+                    );
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs(1));
                 }
             });
         if let Some(s) = end {

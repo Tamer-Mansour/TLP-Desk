@@ -1,5 +1,6 @@
 //! Explorer copy on the host, announced to the viewer over a real loopback session.
 
+#[path = "fs_common/mod.rs"]
 mod common;
 
 use std::sync::Arc;

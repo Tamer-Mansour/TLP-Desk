@@ -13,6 +13,11 @@ workspace = true
 tlp-desk-proto.workspace = true
 tlp-desk-net.workspace = true
 thiserror.workspace = true
+# BLAKE3 per-item verification; `hazmat` (subtree hashing) lets both sides hash 16 MiB pieces
+# on several streams/threads in parallel and merge them into the standard file hash.
+blake3 = "1.8"
+# Free space on the destination volume (safe wrapper around GetDiskFreeSpaceExW / statvfs).
+fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 tracing = "0.1"
 
@@ -31,7 +36,7 @@ arboard = { version = "3.6", default-features = false }
 
 [dev-dependencies]
 tlp-desk-crypto.workspace = true
+proptest = "1"
+tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tempfile = "3"
-proptest = "1"

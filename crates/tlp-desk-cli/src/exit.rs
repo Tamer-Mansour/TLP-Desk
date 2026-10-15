@@ -95,6 +95,9 @@ impl Exit {
                     return x;
                 }
             }
+            if let Some(e) = cause.downcast_ref::<tlp_desk_files::FilesError>() {
+                return of_files(e);
+            }
         }
         Exit::Failure
     }
@@ -122,6 +125,18 @@ fn of_fs(e: &tlp_desk_files::fs::FsClientError) -> Exit {
             Exit::PermissionDenied
         }
         C::Timeout => Exit::Timeout,
+        _ => Exit::Failure,
+    }
+}
+
+fn of_files(e: &tlp_desk_files::FilesError) -> Exit {
+    use tlp_desk_files::FilesError as F;
+    use tlp_desk_proto::FsError;
+    match e {
+        F::PermissionDenied | F::Remote(FsError::PermissionDenied) => Exit::PermissionDenied,
+        F::Remote(FsError::NotFound) => Exit::NotFound,
+        F::Cancelled => Exit::Interrupted,
+        F::Net(n) => of_net(n).unwrap_or(Exit::Failure),
         _ => Exit::Failure,
     }
 }

@@ -6,6 +6,7 @@
 
 pub mod common;
 pub mod connect;
+pub mod get_file;
 pub mod id;
 pub mod list;
 pub mod ls;
@@ -13,7 +14,9 @@ pub mod mkdir;
 pub mod mv;
 pub mod remote_fs;
 pub mod rm;
+pub mod send_file;
 pub mod serve;
+pub mod typing;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
 
 use std::path::PathBuf;
@@ -73,6 +76,10 @@ pub enum Cmd {
     Rm(rm::RmArgs),
     /// Rename or move within one drive of the remote PC. Needs "files".
     Mv(mv::MvArgs),
+    /// Viewer: send local files and folders to a host (--to <host folder>).
+    SendFile(send_file::SendFileArgs),
+    /// Viewer: download files and folders from a host (--to <local folder>).
+    GetFile(get_file::GetFileArgs),
     // FEATURE HOOK: one variant per new subcommand.
 }
 
@@ -104,6 +111,8 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::Mkdir(a) => mkdir::run(&ctx, a).await,
         Cmd::Rm(a) => rm::run(&ctx, a).await,
         Cmd::Mv(a) => mv::run(&ctx, a).await,
+        Cmd::SendFile(a) => send_file::run(&ctx, a).await,
+        Cmd::GetFile(a) => get_file::run(&ctx, a).await,
         // FEATURE HOOK: one arm per new subcommand.
     }
 }
@@ -248,7 +257,7 @@ mod tests {
         };
         assert_eq!((m.from.as_str(), m.to.as_str()), ("D:\\a.txt", "D:\\ب.txt"));
         assert!(parse(&["mv", "10.0.0.2", "D:\\a.txt"]).is_err());
-        let Cmd::Serve(s) = parse(&["serve", "--files"]).unwrap().cmd else {
+        let Cmd::Serve(s) = parse(&["serve", "--allow-files"]).unwrap().cmd else {
             panic!("not serve")
         };
         assert!(s

@@ -230,6 +230,14 @@ pub fn viewer_left(peer: &PeerInfo, reason: &HostEnd) -> String {
     )
 }
 
+pub fn input_blocked() -> String {
+    t(
+        "INPUT BLOCKED: an administrator window or secure screen is in front",
+        "الإدخال محجوب: نافذة مسؤول أو شاشة آمنة في المقدمة",
+    )
+    .into()
+}
+
 pub fn code_changed(code: &str) -> String {
     t(
         format!("New one-time code: {code}"),
@@ -542,6 +550,113 @@ pub fn fs_error(e: &tlp_desk_files::fs::FsClientError) -> String {
         .into(),
     }
 }
+
+// --- files-transfer lane: send-file / get-file ---
+
+/// Bytes with a binary unit and ASCII digits (`1.5 GiB`), in both languages.
+pub fn bytes(n: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut v = n as f64;
+    let mut u = 0;
+    while v >= 1024.0 && u + 1 < UNITS.len() {
+        v /= 1024.0;
+        u += 1;
+    }
+    let unit = UNITS.get(u).copied().unwrap_or("B");
+    if u == 0 {
+        format!("{n} {unit}")
+    } else {
+        format!("{v:.1} {unit}")
+    }
+}
+
+/// `1:05` / `1:02:03` for a duration in seconds.
+fn clock(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+pub fn transfer_started(label: &str, files: u32, total: u64, upload: bool) -> String {
+    let size = bytes(total);
+    if upload {
+        t(
+            format!("Sending \"{label}\": {files} file(s), {size}..."),
+            format!("جارٍ إرسال \"{label}\": {files} ملف، {size}..."),
+        )
+    } else {
+        t(
+            format!("Receiving \"{label}\": {files} file(s), {size}..."),
+            format!("جارٍ استلام \"{label}\": {files} ملف، {size}..."),
+        )
+    }
+}
+
+pub fn transfer_progress(done: u64, total: u64, rate: u64, files_done: u32, files: u32) -> String {
+    let pct = done.saturating_mul(100).checked_div(total).unwrap_or(100);
+    let eta = total
+        .saturating_sub(done)
+        .checked_div(rate)
+        .map_or_else(|| "-".to_string(), clock);
+    let (d, tt, r) = (bytes(done), bytes(total), bytes(rate));
+    t(
+        format!("{pct:>3}%  {d} / {tt}  {r}/s  ETA {eta}  files {files_done}/{files}"),
+        format!("{pct:>3}%  {d} / {tt}  {r}/ث  المتبقي {eta}  الملفات {files_done}/{files}"),
+    )
+}
+
+pub fn transfer_item_failed(rel_path: &str, error: &str) -> String {
+    t(
+        format!("failed: {rel_path} ({error})"),
+        format!("فشل: {rel_path} ({error})"),
+    )
+}
+
+pub fn transfer_done(files: u32, total: u64, secs: f64, failed: u32, dest: &str) -> String {
+    let rate = bytes((total as f64 / secs.max(0.001)) as u64);
+    let size = bytes(total);
+    t(
+        format!(
+            "Done: {files} file(s), {size} in {secs:.1} s ({rate}/s), {failed} failed. Destination: {dest}"
+        ),
+        format!(
+            "اكتمل: {files} ملف، {size} خلال {secs:.1} ث ({rate}/ث)، فشل {failed}. الوجهة: {dest}"
+        ),
+    )
+}
+
+pub fn transfer_stopped(state: &str) -> String {
+    t(
+        format!("Transfer stopped: {state}"),
+        format!("توقف النقل: {state}"),
+    )
+}
+
+pub fn transfer_items_failed(failed: u32) -> String {
+    t(
+        format!("{failed} file(s) could not be transferred"),
+        format!("تعذّر نقل {failed} ملف"),
+    )
+}
+
+pub fn serve_transfer(label: &str, upload: bool) -> String {
+    if upload {
+        t(
+            format!("Receiving files from the viewer: \"{label}\""),
+            format!("استلام ملفات من العارض: \"{label}\""),
+        )
+    } else {
+        t(
+            format!("Sending files to the viewer: \"{label}\""),
+            format!("إرسال ملفات إلى العارض: \"{label}\""),
+        )
+    }
+}
+
+// --- end files-transfer lane ---
 
 #[cfg(test)]
 mod tests {

@@ -29,6 +29,8 @@ use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
+use std::path::PathBuf;
+
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 
 pub use tlp_desk_proto::MonitorDesc;
@@ -337,6 +339,9 @@ pub enum BackendEvent {
     IncomingRequestCancelled { request: RequestId },
     /// Host side: a viewer is now connected to this device (show the banner).
     HostSessionStarted { session: SessionId, peer: PeerInfo },
+    /// Host side: the OS refused to inject this viewer's input (elevated window in front).
+    /// Rate limited by the host; the UI shows a notice for a while.
+    HostInputBlocked { session: SessionId },
     /// This device cannot accept incoming connections (connecting to others may still work).
     /// Sent at startup; the UI shows it until the app restarts.
     HostUnavailable(HostProblem),
@@ -362,6 +367,17 @@ pub enum BackendEvent {
     FilesNotice {
         session: SessionId,
         notice: files::FilesNotice,
+    },
+    /// Viewer side: a file transfer was created or changed (progress arrives about four times a
+    /// second). The UI keeps the newest view per `id`.
+    Transfer {
+        session: SessionId,
+        view: files::TransferView,
+    },
+    /// Viewer side: a transfer could not start.
+    TransferNotStarted {
+        session: SessionId,
+        error: files::TransferStartError,
     },
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
 
@@ -455,6 +471,30 @@ pub trait Backend: Send + Sync {
             ?request,
             "file transfers not supported by this backend"
         );
+    }
+
+    /// Viewer side: send local files and folders (recursively) to the host's default folder.
+    /// Progress arrives as [`BackendEvent::Transfer`].
+    fn send_files(&self, session: SessionId, paths: Vec<PathBuf>) {
+        let _ = (session, paths);
+        tracing::debug!("send_files: not supported by this backend");
+    }
+
+    /// Viewer side: download host files and folders (absolute host paths in one folder) into
+    /// the local folder `dest`.
+    fn download_files(&self, session: SessionId, remote_paths: Vec<String>, dest: PathBuf) {
+        let _ = (session, remote_paths, dest);
+        tracing::debug!("download_files: not supported by this backend");
+    }
+
+    /// Cancel a running transfer; partial data is kept so a retry resumes.
+    fn cancel_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
+
+    /// Continue a cancelled, paused or failed transfer from its partial data.
+    fn retry_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
     }
 
     // --- clipboard (TLP-clipboard) ---

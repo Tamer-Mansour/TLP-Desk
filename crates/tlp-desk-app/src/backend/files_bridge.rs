@@ -6,7 +6,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tlp_desk_files::clipfiles::{self, ClipFilesConfig, ClipFilesFeature, RemoteClipboardFiles};
-use tlp_desk_files::fs::{execute, known_folder, FsConfig, FsFeature, StartError, TransferStarter};
+use tlp_desk_files::fs::{
+    execute, known_folder, FsConfig, FsFeature, StartError, StartFuture, TransferStarter,
+};
+use tlp_desk_files::{ConflictPolicy, FileTransfer, FilesError};
 use tlp_desk_net::{FeatureEvent, FeatureSet};
 use tlp_desk_proto::FsRootKind;
 use tokio::runtime::Handle;
@@ -36,6 +39,21 @@ impl FilesBridge {
             clip: ClipFilesFeature::new(clip),
             starter: None,
         }
+    }
+
+    /// Wires in the transfer engine used by [`FilesBridge::transfer`].
+    pub fn with_starter(mut self, starter: Arc<dyn TransferStarter>) -> Self {
+        self.starter = Some(starter);
+        self
+    }
+
+    /// Lets the engine serve pastes of the files announced by this PC's clipboard feature.
+    pub fn link_engine(&self, engine: &FileTransfer) {
+        let clip = self.clip.clone();
+        engine.set_announced_source(Arc::new(move |key, id| {
+            let a = clip.announced(key, id)?;
+            Some(a.set.source_dir.to_string_lossy().into_owned())
+        }));
     }
 
     /// `set` plus the files features (registration for host and viewer sessions).
@@ -116,6 +134,65 @@ impl FilesBridge {
     }
 }
 
+/// The real [`TransferStarter`]: the transfer engine of the app.
+pub struct EngineStarter {
+    engine: Arc<FileTransfer>,
+    policy: ConflictPolicy,
+}
+
+impl EngineStarter {
+    /// `policy` decides what happens when a downloaded file already exists locally.
+    pub fn new(engine: Arc<FileTransfer>, policy: ConflictPolicy) -> Self {
+        Self { engine, policy }
+    }
+}
+
+fn start_error(e: FilesError) -> StartError {
+    match e {
+        FilesError::PermissionDenied => StartError::NoPermission,
+        other => StartError::Other(other.to_string()),
+    }
+}
+
+impl TransferStarter for EngineStarter {
+    fn upload(&self, key: u64, local: Vec<PathBuf>, remote_dir: String) -> StartFuture<'_> {
+        Box::pin(async move {
+            let id = self.engine.start_upload(key, local, remote_dir).await;
+            id.map(|i| i.0).map_err(start_error)
+        })
+    }
+
+    fn download(&self, key: u64, remote: Vec<String>, local_dir: PathBuf) -> StartFuture<'_> {
+        Box::pin(async move {
+            let id = self.engine.start_download(key, remote, local_dir).await;
+            id.map(|i| i.0).map_err(start_error)
+        })
+    }
+
+    fn paste_remote_clipboard<'a>(
+        &'a self,
+        key: u64,
+        files: &'a RemoteClipboardFiles,
+        local_dir: PathBuf,
+    ) -> StartFuture<'a> {
+        Box::pin(async move {
+            // The host finds the source folder from the announced id (empty `source_dir`).
+            let id = self
+                .engine
+                .start_download_items(
+                    key,
+                    Some(files.transfer_id),
+                    String::new(),
+                    files.items.clone(),
+                    local_dir,
+                    self.policy,
+                )
+                .await;
+            id.map(|i| i.0).map_err(start_error)
+        })
+    }
+}
+
 /// `Ok(Some((top-level count, upload)))` when started, `Ok(None)` when there was nothing to
 /// paste.
 async fn start(
@@ -128,12 +205,12 @@ async fn start(
     match req {
         TransferRequest::Upload { local, remote_dir } => {
             let n = local.len();
-            starter.upload(key, local, remote_dir)?;
+            starter.upload(key, local, remote_dir).await?;
             Ok(Some((n, true)))
         }
         TransferRequest::Download { remote, local_dir } => {
             let n = remote.len();
-            starter.download(key, remote, local_dir)?;
+            starter.download(key, remote, local_dir).await?;
             Ok(Some((n, false)))
         }
         TransferRequest::PasteRemoteClipboard { local_dir } => {
@@ -143,7 +220,7 @@ async fn start(
             let dir = local_dir
                 .or_else(|| known_folder(FsRootKind::Downloads))
                 .ok_or_else(|| StartError::Other("no Downloads folder".into()))?;
-            starter.paste_remote_clipboard(key, &files, dir)?;
+            starter.paste_remote_clipboard(key, &files, dir).await?;
             Ok(Some((files.top_level_count(), false)))
         }
         TransferRequest::PasteLocalClipboard { remote_dir } => {
@@ -155,7 +232,7 @@ async fn start(
                 return Ok(None);
             }
             let n = local.len();
-            starter.upload(key, local, remote_dir)?;
+            starter.upload(key, local, remote_dir).await?;
             Ok(Some((n, true)))
         }
     }
@@ -176,37 +253,37 @@ mod tests {
             _: u64,
             local: Vec<PathBuf>,
             remote_dir: String,
-        ) -> Result<u64, StartError> {
+        ) -> StartFuture<'_> {
             self.0
                 .lock()
                 .unwrap()
                 .push(format!("up {local:?} -> {remote_dir}"));
-            Ok(1)
+            Box::pin(async { Ok(1) })
         }
         fn download(
             &self,
             _: u64,
             remote: Vec<String>,
             local_dir: PathBuf,
-        ) -> Result<u64, StartError> {
+        ) -> StartFuture<'_> {
             self.0
                 .lock()
                 .unwrap()
                 .push(format!("down {remote:?} -> {}", local_dir.display()));
-            Ok(2)
+            Box::pin(async { Ok(2) })
         }
-        fn paste_remote_clipboard(
-            &self,
+        fn paste_remote_clipboard<'a>(
+            &'a self,
             _: u64,
-            files: &RemoteClipboardFiles,
+            files: &'a RemoteClipboardFiles,
             local_dir: PathBuf,
-        ) -> Result<u64, StartError> {
+        ) -> StartFuture<'a> {
             self.0.lock().unwrap().push(format!(
                 "paste {} -> {}",
                 files.transfer_id,
                 local_dir.display()
             ));
-            Ok(3)
+            Box::pin(async { Ok(3) })
         }
     }
 

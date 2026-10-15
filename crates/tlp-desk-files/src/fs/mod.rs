@@ -29,7 +29,7 @@ pub use client::{FsClient, FsClientError, DEFAULT_TIMEOUT};
 pub use feature::{FsFeature, FEATURE_NAME};
 pub use ops::{entry_order, execute, map_io, sort_entries, unix_ms, MAX_LIST_ENTRIES};
 pub use roots::known_folder;
-pub use starter::{StartError, TransferStarter};
+pub use starter::{StartError, StartFuture, TransferStarter};
 
 /// Host-side settings of the remote file system.
 #[derive(Debug, Clone, Default)]

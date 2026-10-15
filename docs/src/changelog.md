@@ -55,6 +55,19 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
 - Wire protocol v1–v3: v2 added SPAKE2 key confirmation, keyframe requests and one QUIC stream
   per video frame; v3 added local input priority notices and the monitor list.
 
+### Fixed
+
+- **Typing on the host did not arrive.** The viewer dropped window key events whenever the OS
+  keyboard grab was on, even when the grab had not captured the key (hook removed by Windows,
+  mismatched window handle), and a toolbar click left keyboard focus on the button. Keys the
+  grab misses are now sent from the window, the grab reinstalls its hook, and the session view
+  takes keyboard focus back (unless a text field has it).
+- **A local mouse blocked remote keys.** Host-side "local user wins" priority is now per device:
+  local typing holds back remote keys, local mouse use holds back only the remote pointer.
+- The host shows a notice (and the CLI prints a line) when Windows refuses injected input because
+  an administrator window or secure screen is in front; the service lane lifts that limit.
+- `connect --type TEXT --then-ctrl S` types US-layout scancodes into the host for testing.
+
 ### Changed
 
 - Product renamed to **TLP-Desk** everywhere users see it (window title, executables, installer,

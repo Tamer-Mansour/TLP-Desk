@@ -2,6 +2,7 @@
 //! delete with Arabic names, permission gating, live revocation, hostile paths, a 10k-entry
 //! folder.
 
+#[path = "fs_common/mod.rs"]
 mod common;
 
 use std::path::Path;

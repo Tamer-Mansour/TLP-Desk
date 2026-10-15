@@ -31,8 +31,8 @@ use super::{
 
 const FPS: u64 = 30;
 
-/// The fake host's monitors.
-fn fake_monitors() -> Vec<MonitorDesc> {
+/// The fake host's monitors (also used by the README media generator).
+pub fn fake_monitors() -> Vec<MonitorDesc> {
     vec![
         MonitorDesc {
             index: 0,
@@ -507,6 +507,48 @@ impl Backend for FakeBackend {
         });
     }
 
+    /// Pretends to send: 100 MB per file at ~50 MB/s, with live progress events.
+    fn send_files(&self, session: SessionId, paths: Vec<std::path::PathBuf>) {
+        use super::files::{TransferDir, TransferId, TransferStatus, TransferView};
+        let inner = Arc::clone(&self.inner);
+        let id = TransferId(inner.next_id.fetch_add(1, Ordering::Relaxed));
+        let label = match paths.as_slice() {
+            [one] => one
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            many => format!("{} items", many.len()),
+        };
+        let files = paths.len().max(1) as u32;
+        let total = u64::from(files) * 100_000_000;
+        self.inner.rt.spawn(async move {
+            let mut view = TransferView {
+                id,
+                dir: TransferDir::Send,
+                label,
+                status: TransferStatus::Running,
+                bytes_done: 0,
+                total_bytes: total,
+                files_done: 0,
+                total_files: files,
+                failed_files: 0,
+                bytes_per_sec: 50_000_000,
+                local_dest: None,
+            };
+            while view.bytes_done < total {
+                inner.emit(BackendEvent::Transfer {
+                    session,
+                    view: view.clone(),
+                });
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                view.bytes_done = (view.bytes_done + 12_500_000).min(total);
+                view.files_done = (view.bytes_done / 100_000_000) as u32;
+            }
+            view.status = TransferStatus::Completed;
+            view.bytes_per_sec = 0;
+            inner.emit(BackendEvent::Transfer { session, view });
+        });
+    }
+
     fn select_monitor(&self, session: SessionId, index: u32) {
         if !fake_monitors().iter().any(|m| m.index == index) {
             return; // like the real host: unknown index ignored
@@ -538,6 +580,30 @@ impl Backend for FakeBackend {
                 reason: EndReason::Local,
             });
         }
+    }
+}
+
+/// One frame of the fake remote screen at time `t` seconds, for monitor `monitor` (an index from
+/// [`fake_monitors`], unknown = the primary) with the remote pointer at `cursor` (normalized
+/// `0..=u16::MAX`). A pure function of its arguments, so the README media generator
+/// (`examples/readme_media`) gets byte-identical frames on every run.
+pub fn test_pattern_frame(monitor: u32, t: f32, cursor: (u16, u16)) -> VideoImage {
+    let mons = fake_monitors();
+    let m = mons
+        .iter()
+        .find(|m| m.index == monitor)
+        .or(mons.first())
+        .map_or((1280, 720, 0), |m| (m.width, m.height, m.index));
+    let remote = RemoteState {
+        cursor,
+        monitor: m.2,
+        ..RemoteState::default()
+    };
+    VideoImage {
+        width: m.0,
+        height: m.1,
+        rgba: render_test_pattern(m.0, m.1, t, &remote),
+        seq: 0,
     }
 }
 
@@ -613,6 +679,16 @@ mod tests {
         let px = render_test_pattern(64, 48, 0.5, &RemoteState::default());
         assert_eq!(px.len(), 64 * 48 * 4);
         assert!(px.chunks_exact(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn test_pattern_frame_is_deterministic_per_monitor() {
+        let a = test_pattern_frame(1, 2.5, (100, 200));
+        assert_eq!((a.width, a.height), (1024, 768));
+        assert_eq!(a, test_pattern_frame(1, 2.5, (100, 200)));
+        // Unknown monitor index falls back to the primary.
+        let p = test_pattern_frame(9, 0.0, (0, 0));
+        assert_eq!((p.width, p.height), (1280, 720));
     }
 
     #[test]

@@ -2,10 +2,12 @@
 //!
 //! The browser decides *what* to copy where; the transfer code (`TLP-files-transfer` lane,
 //! module `transfer`) moves the bytes. The app holds an `Arc<dyn TransferStarter>` and calls it
-//! from the UI; every method returns at once (the transfer runs in the background and reports
-//! progress through its own events).
+//! from a background task; every method resolves as soon as the transfer is registered (the
+//! bytes move in the background and progress comes through the engine's own events).
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use crate::clipfiles::RemoteClipboardFiles;
 
@@ -26,10 +28,13 @@ pub enum StartError {
     Other(String),
 }
 
+/// Result of starting one transfer: its id.
+pub type StartFuture<'a> = Pin<Box<dyn Future<Output = Result<u64, StartError>> + Send + 'a>>;
+
 /// Starts transfers for a viewer session (`session_key` = `ViewerSession::feature_key`).
 pub trait TransferStarter: Send + Sync {
-    /// Copies local files and folders into the folder `remote_dir` of the remote PC. Returns
-    /// the transfer id.
+    /// Copies local files and folders into the folder `remote_dir` of the remote PC. Resolves
+    /// to the transfer id.
     ///
     /// # Errors
     ///
@@ -39,7 +44,7 @@ pub trait TransferStarter: Send + Sync {
         session_key: u64,
         local_paths: Vec<PathBuf>,
         remote_dir: String,
-    ) -> Result<u64, StartError>;
+    ) -> StartFuture<'_>;
 
     /// Copies files and folders of the remote PC (absolute remote paths, all in one folder)
     /// into the local folder `local_dir`. Returns the transfer id.
@@ -52,7 +57,7 @@ pub trait TransferStarter: Send + Sync {
         session_key: u64,
         remote_paths: Vec<String>,
         local_dir: PathBuf,
-    ) -> Result<u64, StartError>;
+    ) -> StartFuture<'_>;
 
     /// Pastes files copied in Explorer on the remote PC into `local_dir`: a download offer
     /// carrying `files.transfer_id` and `files.items` (the host resolves the source folder).
@@ -60,10 +65,10 @@ pub trait TransferStarter: Send + Sync {
     /// # Errors
     ///
     /// See [`StartError`].
-    fn paste_remote_clipboard(
-        &self,
+    fn paste_remote_clipboard<'a>(
+        &'a self,
         session_key: u64,
-        files: &RemoteClipboardFiles,
+        files: &'a RemoteClipboardFiles,
         local_dir: PathBuf,
-    ) -> Result<u64, StartError>;
+    ) -> StartFuture<'a>;
 }

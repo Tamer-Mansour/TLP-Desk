@@ -156,6 +156,7 @@ strings! {
     Accept => "Accept", "قبول";
     Decline => "Decline", "رفض";
     HostBanner => "{name} is connected to this device", "{name} متصل بهذا الجهاز";
+    HostInputBlocked => "Remote typing and clicks are blocked by a window running as administrator (or a secure screen) on this PC. Switch to a normal window, or run TLP-Desk as a service.", "الكتابة والنقر عن بُعد محجوبان بسبب نافذة تعمل بصلاحيات المسؤول (أو شاشة آمنة) على هذا الجهاز. انتقل إلى نافذة عادية أو شغّل TLP-Desk كخدمة.";
     EndSession => "End session", "إنهاء الجلسة";
     HostPortInUse => "Port {port} is already in use, probably by another running TLP-Desk. This device cannot accept connections, but you can still connect to other devices.", "المنفذ {port} مستخدم بالفعل، وربما يعمل TLP-Desk مسبقاً. لا يستطيع هذا الجهاز استقبال اتصالات، لكن ما زال بإمكانك الاتصال بأجهزة أخرى.";
     HostUnavailable => "This device cannot accept connections: {detail}", "لا يستطيع هذا الجهاز استقبال اتصالات: {detail}";
@@ -265,6 +266,34 @@ strings! {
     FsErrTimeout => "The remote PC did not answer in time.", "لم يستجب الجهاز البعيد في الوقت المحدد.";
     FsErrTransfers => "Copying files is not available in this version yet.", "نسخ الملفات غير متاح في هذا الإصدار بعد.";
     FsErrOther => "Error: {detail}", "خطأ: {detail}";
+    CloseTransfers => "Hide the transfer list", "إخفاء قائمة النقل";
+    FilesPanelTitle => "File transfer", "نقل الملفات";
+    SendFiles => "Send files…", "إرسال ملفات…";
+    SendFolder => "Send folder…", "إرسال مجلد…";
+    DropToSend => "Drop to send to {name}", "أفلت الملفات لإرسالها إلى {name}";
+    NoTransfers => "No transfers yet. Drag files onto the window or use the buttons.", "لا توجد عمليات نقل بعد. اسحب الملفات إلى النافذة أو استخدم الأزرار.";
+    TransferPreparing => "Preparing…", "جارٍ التحضير…";
+    TransferPaused => "Paused", "متوقف مؤقتاً";
+    TransferDone => "Done", "اكتمل";
+    TransferDoneFailures => "Done, {n} file(s) failed", "اكتمل، وتعذّر نقل {n} ملف";
+    TransferCancelled => "Cancelled", "أُلغي";
+    TransferLost => "Connection lost", "انقطع الاتصال";
+    TransferFailed => "Failed: {reason}", "فشل: {reason}";
+    TransferFiles => "{done} of {total} files", "{done} من {total} ملف";
+    TransferRate => "{size}/s", "{size}/ث";
+    TransferEta => "{time} left", "المتبقي {time}";
+    TransferRetry => "Retry (continues where it stopped)", "إعادة المحاولة (تكمل من حيث توقفت)";
+    TransferCancel => "Cancel transfer", "إلغاء النقل";
+    OpenFolder => "Open folder", "فتح المجلد";
+    ClearFinished => "Clear finished", "مسح المنتهية";
+    FilesNotAllowed => "The host has not allowed file transfer for this session.", "لم يسمح المضيف بنقل الملفات في هذه الجلسة.";
+    FailNoSpace => "not enough free disk space", "لا توجد مساحة كافية على القرص";
+    FailDeclined => "the other side declined", "رفض الطرف الآخر";
+    FailHash => "data was corrupted in transit", "تلفت البيانات أثناء النقل";
+    FailPath => "invalid file name or path", "اسم الملف أو مساره غير صالح";
+    FailPermission => "not allowed", "غير مسموح";
+    FailNotFound => "file not found", "الملف غير موجود";
+    FailBusy => "file is in use", "الملف قيد الاستخدام";
 
     // --- clipboard ---
 

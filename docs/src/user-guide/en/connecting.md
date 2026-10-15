@@ -1,5 +1,7 @@
 # Connecting
 
+![Connect box with a device ID and one-time code](../../media/connect-code-en-light.png)
+
 Use the **Connect to a device** card on the home screen of *your* PC (the viewer).
 
 ## 1. Say which PC
