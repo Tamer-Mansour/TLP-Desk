@@ -19,6 +19,7 @@
 //! constructed like
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
+pub mod device_info;
 pub mod fake;
 pub mod real;
 
@@ -28,7 +29,7 @@ use std::sync::{Arc, Mutex};
 
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 
-pub use tlp_desk_proto::MonitorDesc;
+pub use tlp_desk_proto::{DeviceInfo, DiskInfo, MonitorDesc};
 
 /// Callback the backend calls (from any thread) to make the UI repaint.
 pub type RepaintFn = Arc<dyn Fn() + Send + Sync>;
@@ -360,6 +361,13 @@ pub enum BackendEvent {
     // --- perf: quality presets, latency overlay, all monitors (TLP-perf) ---
 
     // --- power: WOL, recording, tunnels, whiteboard, connection log, device info (TLP-power) ---
+
+    // --- device info (TLP-cli-devinfo) ---
+    /// The host answered [`Backend::request_device_info`] (already sanitized).
+    DeviceInfo {
+        session: SessionId,
+        info: DeviceInfo,
+    },
 }
 
 /// Why this device cannot act as a host.
@@ -437,6 +445,16 @@ pub trait Backend: Send + Sync {
     // --- perf (TLP-perf) ---
 
     // --- power (TLP-power) ---
+
+    // --- device info (TLP-cli-devinfo) ---
+    /// Viewer side: ask the host for its OS, CPU, RAM, disks and uptime. The answer arrives as
+    /// [`BackendEvent::DeviceInfo`]; the host needs `VIEW` to answer.
+    fn request_device_info(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "device info not supported by this backend"
+        );
+    }
 }
 
 #[cfg(test)]

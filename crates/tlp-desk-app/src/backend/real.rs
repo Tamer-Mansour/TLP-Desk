@@ -311,6 +311,7 @@ impl RealBackend {
         if let Some((ep, true)) = &endpoint {
             let host_cfg = HostConfig {
                 device_name: device_name.clone(),
+                features: super::device_info::with_host_feature(cfg.host.features.clone()),
                 ..cfg.host.clone()
             };
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
@@ -357,6 +358,7 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
+                features: super::device_info::with_viewer_feature(Default::default()),
                 ..ViewerConfig::default()
             };
             match Viewer::new(ep.clone(), vcfg) {
@@ -748,6 +750,13 @@ impl Inner {
                 }
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
+                ViewerEvent::Feature(event)
+                    if event.feature == tlp_desk_viewer::DEVICE_INFO_FEATURE =>
+                {
+                    if let Some(ev) = super::device_info::map_viewer_event(session, &event) {
+                        self.emit(ev);
+                    }
+                }
                 ViewerEvent::Feature(event) => {
                     tracing::debug!(
                         session = session.0,
@@ -853,6 +862,13 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn request_device_info(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            tlp_desk_viewer::request_device_info(&s);
         }
     }
 

@@ -266,6 +266,13 @@ fn host_and_viewer_through_the_backend_trait() {
         BackendEvent::Stats { session: s, stats } if *s == session && stats.fps > 0.0 => Some(()),
         _ => None,
     });
+    // Device info: the host answers from this machine (read-only system query).
+    viewer.backend.request_device_info(session);
+    let info = viewer.events.wait(&rt, "device info", |e| match e {
+        BackendEvent::DeviceInfo { session: s, info } if *s == session => Some(info.clone()),
+        _ => None,
+    });
+    assert!(info.cores >= 1 && info.ram_bytes > 0, "{info:?}");
 
     // The host user ends the session from the banner.
     host.backend.disconnect(host_session);
