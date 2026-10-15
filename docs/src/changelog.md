@@ -12,6 +12,15 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
 
 ### Added
 
+- **Clipboard sharing.** Text, formatted text (HTML) and images are copied between the two PCs
+  in both directions while the host grants `Clipboard`; the permission is re-checked on every
+  send and apply, so revoking it stops sharing at once. The viewer toolbar has a "Sync clipboard"
+  switch and Settings has the default for new sessions. Change detection is event-driven on
+  Windows (`AddClipboardFormatListener`, no polling). Arabic text is exact (RLM/LRM, ZWJ/ZWNJ,
+  harakat, CRLF). Images travel as PNG (`ClipboardData::Png`, protocol v5); payloads over 1 MiB
+  use a clipboard side stream; caps are 16 MiB for text and HTML and 64 MiB decoded for images,
+  checked before allocating. Echo loops are prevented, duplicates are dropped, and only kinds and
+  sizes are ever logged. CLI: `clip-send`, `serve --clipboard`.
 - **Remote file browser and Explorer copy/paste.** A two-pane file manager (this PC | remote PC,
   mirrored in Arabic) opens from the session toolbar: drives and known folders, breadcrumbs,
   sorting, multi-select, new folder, rename, delete with confirmation, and copy between the panes

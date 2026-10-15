@@ -52,5 +52,5 @@ the UI and on disk.
 
 When you implement it, update this page, the user guide pages for
 [file transfer](../../user-guide/en/file-transfer.md) and
-[clipboard](../../user-guide/en/coming-soon/clipboard.md), and the
+[clipboard](../../user-guide/en/clipboard.md), and the
 [changelog](../../changelog.md).
