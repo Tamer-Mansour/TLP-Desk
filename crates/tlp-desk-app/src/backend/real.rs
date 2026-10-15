@@ -37,6 +37,8 @@ use tlp_desk_viewer::{
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::files::{FsOp, FsRequestId, FsSide, TransferRequest};
+use super::files_bridge::FilesBridge;
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
@@ -102,6 +104,8 @@ struct Inner {
     own_id: DeviceId,
     bridges: Bridges,
     state: Mutex<State>,
+    /// Files lane: remote file system + clipboard files features (TLP-files).
+    files: FilesBridge,
 }
 
 #[derive(Default)]
@@ -306,11 +310,13 @@ impl RealBackend {
             }
         }
 
+        let files = FilesBridge::default();
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
             let host_cfg = HostConfig {
                 device_name: device_name.clone(),
+                features: files.register(cfg.host.features.clone()),
                 ..cfg.host.clone()
             };
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
@@ -357,6 +363,7 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
+                features: files.register(tlp_desk_net::FeatureSet::new()),
                 ..ViewerConfig::default()
             };
             match Viewer::new(ep.clone(), vcfg) {
@@ -383,6 +390,7 @@ impl RealBackend {
             own_id,
             bridges,
             state: Mutex::default(),
+            files,
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -749,6 +757,10 @@ impl Inner {
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 ViewerEvent::Feature(event) => {
+                    if let Some(ev) = FilesBridge::map_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
                     tracing::debug!(
                         session = session.0,
                         feature = event.feature,
@@ -856,6 +868,14 @@ impl Backend for RealBackend {
         }
     }
 
+    fn fs_request(&self, side: FsSide, op: FsOp) -> Option<FsRequestId> {
+        Some(self.files_request(side, op))
+    }
+
+    fn fs_transfer(&self, session: SessionId, request: TransferRequest) {
+        self.files_transfer(session, request);
+    }
+
     fn disconnect(&self, session: SessionId) {
         let (viewer, host) = {
             let st = self.inner.state();
@@ -871,6 +891,46 @@ impl Backend for RealBackend {
                 h.disconnect(id); // SessionEnded via pump_host
             }
         }
+    }
+}
+
+// --- files (TLP-files) ---
+impl RealBackend {
+    /// Feature key of a viewer session (what the files features are keyed by).
+    fn feature_key(&self, session: SessionId) -> Option<u64> {
+        self.inner
+            .state()
+            .viewer_sessions
+            .get(&session)
+            .map(|s| s.feature_key())
+    }
+
+    fn emitter(&self) -> impl Fn(BackendEvent) + Send + Sync + 'static {
+        let inner = Arc::downgrade(&self.inner);
+        move |ev| {
+            if let Some(inner) = inner.upgrade() {
+                inner.emit(ev);
+            }
+        }
+    }
+
+    fn files_request(&self, side: FsSide, op: FsOp) -> FsRequestId {
+        let request = FsRequestId(self.inner.next_id());
+        let key = match side {
+            FsSide::Local => None,
+            FsSide::Remote(s) => self.feature_key(s),
+        };
+        self.inner
+            .files
+            .request(&self.inner.rt, side, key, op, request, self.emitter());
+        request
+    }
+
+    fn files_transfer(&self, session: SessionId, request: TransferRequest) {
+        let key = self.feature_key(session);
+        self.inner
+            .files
+            .transfer(&self.inner.rt, session, key, request, self.emitter());
     }
 }
 

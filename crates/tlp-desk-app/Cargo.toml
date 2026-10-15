@@ -18,6 +18,7 @@ tlp-desk-net.workspace = true
 tlp-desk-host.workspace = true
 tlp-desk-viewer.workspace = true
 tlp-desk-input.workspace = true
+tlp-desk-files.workspace = true
 if-addrs = "0.13"
 raw-window-handle = "0.6"
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }
@@ -26,6 +27,8 @@ unicode-bidi = "0.3.18"
 serde_json = "1"
 tracing = "0.1"
 sys-locale = "0.3"
+# Local UTC offset for the file browser's "modified" column (Windows: GetTimeZoneInformation).
+time = { version = "0.3", default-features = false, features = ["std", "local-offset"] }
 # Rasterizes the vendored tlp-icons SVGs (ui::icons). No default features: icons have no text or
 # embedded raster images, so no font database (fontdb/system fonts) is pulled in.
 resvg = { version = "0.48", default-features = false }

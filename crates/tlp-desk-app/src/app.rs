@@ -355,6 +355,27 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- files (TLP-files) ---
+                BackendEvent::FsResult {
+                    side,
+                    request,
+                    result,
+                } => {
+                    if let Some(s) = self.session.as_mut() {
+                        s.files.on_result(side, request, result);
+                    }
+                }
+                BackendEvent::RemoteClipboardFiles { session, files } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.files.remote_clipboard = files;
+                    }
+                }
+                BackendEvent::FilesNotice { session, notice } => {
+                    let tx = self.tx;
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.files.on_notice(tx, &notice);
+                    }
+                }
             }
         }
     }

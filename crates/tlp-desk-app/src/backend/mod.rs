@@ -20,6 +20,9 @@
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
 pub mod fake;
+pub mod files;
+pub mod files_bridge;
+pub mod files_fake;
 pub mod real;
 
 use std::fmt;
@@ -344,7 +347,22 @@ pub enum BackendEvent {
     // in real.rs.
     // =======================================================================================
     // --- files: remote browser, transfers, Explorer copy/paste (TLP-files) ---
-
+    /// Answer to [Backend::fs_request].
+    FsResult {
+        side: files::FsSide,
+        request: files::FsRequestId,
+        result: Result<files::FsReply, files::FsFailure>,
+    },
+    /// The remote PC's clipboard now holds these copied files (None: nothing to paste).
+    RemoteClipboardFiles {
+        session: SessionId,
+        files: Option<files::RemoteClipboardFiles>,
+    },
+    /// Outcome of [Backend::fs_transfer] worth telling the user.
+    FilesNotice {
+        session: SessionId,
+        notice: files::FilesNotice,
+    },
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
 
     // --- chat (TLP-ux) ---
@@ -421,6 +439,23 @@ pub trait Backend: Send + Sync {
     // `RealBackend` only change where the lane actually implements it.
     // =======================================================================================
     // --- files (TLP-files) ---
+    /// Runs one file-system operation on side (this PC or the remote PC of a viewer session)
+    /// without blocking; the answer arrives as [BackendEvent::FsResult]. None if this
+    /// backend has no file access.
+    fn fs_request(&self, side: files::FsSide, op: files::FsOp) -> Option<files::FsRequestId> {
+        let _ = (side, op);
+        None
+    }
+
+    /// Starts copying files between this PC and the remote PC of session. Problems (and the
+    /// start) are reported as [BackendEvent::FilesNotice].
+    fn fs_transfer(&self, session: SessionId, request: files::TransferRequest) {
+        tracing::debug!(
+            session = session.0,
+            ?request,
+            "file transfers not supported by this backend"
+        );
+    }
 
     // --- clipboard (TLP-clipboard) ---
 
