@@ -37,6 +37,41 @@ TLP-Desk-cli chat 123456789 "مرحباً، hello" --code 042917 --wait 10   # s
 TLP-Desk-cli ls 123456789 --code 042917 D:\Shared   # also: mkdir, rm, mv (need the Files permission)
 ```
 
+## All commands
+
+| Command | What it does |
+|---|---|
+| `id` | This PC's device ID and key fingerprint |
+| `list [--json]` | Devices found on the network |
+| `serve` | Be a host (`--code`, `--allow-files`, `--allow-tunnels`, `--clipboard`, `--view-only` ...) |
+| `connect <target>` | Connect as a viewer; print statistics, optional `--snapshot` |
+| `info <target>` | The other PC's name, system, CPU, memory, disks and uptime |
+| `wol <MAC or alias>` (also `exec-wol`) | Wake a sleeping PC with Wake-on-LAN |
+| `chat <target> <message>` | Send one chat message and print the replies |
+| `clip-send <target> <text>` | Put text on the other PC's clipboard |
+| `ls`, `mkdir`, `rm`, `mv` `<target> <path>` | Browse and change folders on the other PC (Files permission) |
+| `send-file`, `get-file <target>` | Copy files and folders to or from the other PC |
+| `forward <target> <local:host:remote>` | Forward TCP ports until Ctrl+C |
+
+`<target>` is a device ID, an IP address or a device name. Every command accepts `--code <6
+digits>` or `--password` (see below), `--json`, `-q`, `-v` and `--lang`.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Done |
+| 1 | Any other error |
+| 2 | Bad command line |
+| 3 | Device or alias not found |
+| 4 | Host unreachable |
+| 5 | Rejected, wrong code or password, or locked out |
+| 6 | Host key does not match (possible attack) |
+| 7 | The session lacks the needed permission |
+| 8 | No answer in time |
+| 9 | The other side runs another protocol version |
+| 130 | Stopped with Ctrl+C |
+
 When `serve` receives a request without a code, it asks on the console: **Accept? [y/N]**.
 
 Notes:

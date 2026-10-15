@@ -132,6 +132,21 @@ Sends a Wake-on-LAN magic packet to every IPv4 subnet broadcast (port 9), or wit
 looked up in `wol-aliases.txt` in the data directory: one `name = MAC` per line, UTF-8 (Arabic names
 work), `#` starts a comment. Unknown alias: exit 3.
 
+### Commands from other lanes
+
+| Command | Needs | Notes |
+|---|---|---|
+| `chat <TARGET> <MESSAGE> [--wait N]` | `CHAT` | sends one message, prints replies for N seconds |
+| `clip-send <TARGET> [TEXT] [--file F]` | `CLIPBOARD` | text to the host clipboard; `serve --clipboard` is the receiving side |
+| `ls`, `mkdir`, `rm [-r]`, `mv` | `FILES` | remote file system; `serve --allow-files` |
+| `send-file`, `get-file` | `FILES` | transfers with progress lines; `--to` is the destination |
+| `forward <TARGET> <LOCAL:HOST:REMOTE>...` | `TUNNEL` | runs until Ctrl+C; `serve --allow-tunnels` |
+
+`--help` is bilingual: with `--lang ar` (or `TLP_DESK_LANG=ar`) the command summaries and the
+exit-code table are Arabic. The Arabic summaries live in `commands/help.rs` (`ARABIC`); a test
+fails when a subcommand has no row, so every new command must add one. On Windows the console
+is switched to UTF-8 at start (`console.rs`).
+
 ## Adding a command (other lanes)
 
 One file per subcommand in `src/commands/<name>.rs` with a clap `Args` struct and
