@@ -21,6 +21,19 @@ fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 tracing = "0.1"
 
+[target.'cfg(windows)'.dependencies]
+# Drives (labels, size, free space) and known folders (Desktop, Documents, ...) for the remote
+# file browser's starting points; wrapped in `fs::windows`, the crate's only unsafe module.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+# CF_HDROP (files copied in Explorer) for clipboard file sharing. No default features: we only
+# read file lists, never images.
+arboard = { version = "3.6", default-features = false }
+
 [dev-dependencies]
 tlp-desk-crypto.workspace = true
 proptest = "1"

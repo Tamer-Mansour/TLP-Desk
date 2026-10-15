@@ -103,7 +103,13 @@ pub(crate) struct Inner {
     pub events: broadcast::Sender<(u64, TransferEvent)>,
     pub hooks: TestHooks,
     specs: Mutex<HashMap<TransferId, (u64, Spec)>>,
+    /// Host: finds the source folder of an offer that names none (a paste of files the user
+    /// copied in Explorer), from `(session_key, offer id)`.
+    pub announced_source: Mutex<Option<SourceLookup>>,
 }
+
+/// See [`FileTransfer::set_announced_source`].
+pub type SourceLookup = Arc<dyn Fn(u64, u64) -> Option<String> + Send + Sync>;
 
 impl Inner {
     /// A new process-unique id (also used as wire id for offers we send).
@@ -142,8 +148,16 @@ impl FileTransfer {
                 events,
                 hooks: TestHooks::default(),
                 specs: Mutex::new(HashMap::new()),
+                announced_source: Mutex::new(None),
             }),
         })
+    }
+
+    /// Host: lets viewers download files by an id announced elsewhere (Explorer copy/paste).
+    /// `lookup(session_key, offer_id)` returns the folder the announced items are relative to;
+    /// it is consulted only for download offers with an empty `source_dir`.
+    pub fn set_announced_source(&self, lookup: SourceLookup) {
+        *lock(&self.inner.announced_source) = Some(lookup);
     }
 
     /// Every event of every session, as `(session_key, event)`.

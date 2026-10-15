@@ -12,6 +12,14 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
 
 ### Added
 
+- **Remote file browser and Explorer copy/paste.** A two-pane file manager (this PC | remote PC,
+  mirrored in Arabic) opens from the session toolbar: drives and known folders, breadcrumbs,
+  sorting, multi-select, new folder, rename, delete with confirmation, and copy between the panes
+  through the transfer engine. Files copied in Explorer on either PC can be pasted on the other
+  with a button (no delayed-render clipboard object, so not Ctrl+V inside Explorer). The host
+  serves the `FsRequest` messages only while the session holds `Files`, re-checked on every
+  request, and refuses traversal, alternate data streams, devices and network paths. CLI:
+  `ls`, `mkdir`, `rm`, `mv`.
 - **Wire protocol v4** — the message set for the rest of the roadmap, defined ahead of the
   features: remote file system (`FsRequest` / `FsResponse`), file transfer (`TransferOffer` …
   `TransferError`), clipboard HTML and files, chat, audio control, session and system control

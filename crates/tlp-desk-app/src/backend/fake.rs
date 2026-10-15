@@ -311,6 +311,11 @@ impl Inner {
             monitors: fake_monitors(),
             active: 0,
         });
+        // The fake remote PC has files copied in Explorer, ready to paste.
+        self.emit(BackendEvent::RemoteClipboardFiles {
+            session,
+            files: Some(super::files_fake::remote_clipboard()),
+        });
     }
 
     async fn run_video(
@@ -470,6 +475,37 @@ impl Backend for FakeBackend {
     }
 
     fn set_view_only(&self, _session: SessionId, _view_only: bool) {}
+
+    fn fs_request(
+        &self,
+        side: super::files::FsSide,
+        op: super::files::FsOp,
+    ) -> Option<super::files::FsRequestId> {
+        use super::files::{FsFailure, FsSide};
+        let request = super::files::FsRequestId(self.inner.next_id());
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || match side {
+                FsSide::Local => super::files_fake::local_request(&op),
+                FsSide::Remote(_) => super::files_fake::remote_request(&op),
+            })
+            .await
+            .unwrap_or_else(|e| Err(FsFailure::Other(e.to_string())));
+            me.emit(BackendEvent::FsResult {
+                side,
+                request,
+                result,
+            });
+        });
+        Some(request)
+    }
+
+    fn fs_transfer(&self, session: SessionId, request: super::files::TransferRequest) {
+        self.inner.emit(BackendEvent::FilesNotice {
+            session,
+            notice: super::files_fake::transfer_notice(&request),
+        });
+    }
 
     /// Pretends to send: 100 MB per file at ~50 MB/s, with live progress events.
     fn send_files(&self, session: SessionId, paths: Vec<std::path::PathBuf>) {

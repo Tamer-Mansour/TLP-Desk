@@ -9,6 +9,7 @@ use eframe::egui::{
 };
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
+use super::file_browser::FileBrowser;
 use super::icons::{self, Icon};
 use super::key_forward::KeyForwarder;
 use super::transfers::{self, TransferPanel};
@@ -58,6 +59,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Two-pane file browser (TLP-files), toggled from the toolbar.
+    pub files: FileBrowser,
     /// File transfer queue (lane files-transfer).
     pub transfers: TransferPanel,
 }
@@ -102,6 +105,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            files: FileBrowser::new(id),
             transfers: TransferPanel::new(),
         }
     }
@@ -225,6 +229,8 @@ impl ViewerSession {
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        self.files.ui(ui, tx, backend, self.permissions);
+        let modal_open = modal_open || self.files.modal_open() || self.files.owns_keyboard();
         self.transfers_ui(ui, tx, backend);
 
         egui::CentralPanel::default()
@@ -359,6 +365,7 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    self.files_buttons(ui, tx, backend);
                     if icons::icon_toggle(
                         ui,
                         tx,
@@ -413,6 +420,22 @@ impl ViewerSession {
         if disconnect {
             self.release_all(backend);
             backend.disconnect(self.id);
+        }
+    }
+
+    /// Files toggle, plus a paste button while the remote PC has copied files.
+    fn files_buttons(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
+        if icons::icon_toggle(ui, tx, self.files.open, Icon::Folder, tx.t(S::FsFiles)).clicked() {
+            self.files.open = !self.files.open;
+        }
+        if self.files.remote_clipboard.is_some()
+            && self.permissions.contains(Permissions::FILES)
+            && icons::icon_button(ui, tx, Icon::Clipboard, tx.t(S::FsPasteRemote)).clicked()
+        {
+            backend.fs_transfer(
+                self.id,
+                crate::backend::files::TransferRequest::PasteRemoteClipboard { local_dir: None },
+            );
         }
     }
 

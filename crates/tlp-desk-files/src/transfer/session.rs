@@ -353,7 +353,13 @@ async fn host_receive(state: &Arc<SessionState>, offer: TransferOffer) -> Result
 /// Host side of a download: check the sources, accept, send.
 async fn host_send(state: &Arc<SessionState>, offer: TransferOffer) -> Result<(), FilesError> {
     check_offer(&offer, state.inner.cfg.max_items)?;
-    let src = offer.source_dir.clone();
+    let mut src = offer.source_dir.clone();
+    if src.is_empty() {
+        let lookup = lock(&state.inner.announced_source).clone();
+        if let Some(dir) = lookup.and_then(|f| f(state.ctx.session_key, offer.id)) {
+            src = dir;
+        }
+    }
     let items = offer.items.clone();
     let paths = tokio::task::spawn_blocking(move || sender::resolve_sources(&src, &items))
         .await

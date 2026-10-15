@@ -7,6 +7,8 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
+use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
+use tlp_desk_files::fs::{FsConfig, FsFeature};
 use tlp_desk_files::{FileTransfer, TransferConfig, TransferEvent};
 use tlp_desk_host::{Host, HostConfig, HostEvent, RequestId, DEFAULT_PERMISSIONS};
 use tlp_desk_net::{Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
@@ -90,7 +92,13 @@ impl ServeArgs {
 /// The session features the CLI host serves.
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
 fn host_features() -> FeatureSet {
-    FeatureSet::new().with(FileTransfer::new(TransferConfig::default()))
+    FeatureSet::new()
+        // Uploads and downloads of files and folders.
+        .with(FileTransfer::new(TransferConfig::default()))
+        // Remote file browser; served only to sessions holding FILES.
+        .with(FsFeature::new(FsConfig::default()))
+        // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
+        .with(ClipFilesFeature::new(ClipFilesConfig::default()))
 }
 
 /// Prints the start and end of file transfers in sessions.

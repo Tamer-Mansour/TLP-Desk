@@ -30,6 +30,7 @@ TLP-Desk-cli id                     # this PC's device ID and key fingerprint
 TLP-Desk-cli list                   # devices on the network (5 seconds)
 TLP-Desk-cli serve --code           # be a host; print a one-time code
 TLP-Desk-cli connect 123456789 --code 042917 --seconds 10 --snapshot shot.png
+TLP-Desk-cli ls 123456789 --code 042917 D:\Shared   # also: mkdir, rm, mv (need the Files permission)
 ```
 
 When `serve` receives a request without a code, it asks on the console: **Accept? [y/N]**.

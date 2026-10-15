@@ -9,6 +9,11 @@ pub mod connect;
 pub mod get_file;
 pub mod id;
 pub mod list;
+pub mod ls;
+pub mod mkdir;
+pub mod mv;
+pub mod remote_fs;
+pub mod rm;
 pub mod send_file;
 pub mod serve;
 pub mod typing;
@@ -63,6 +68,14 @@ pub enum Cmd {
     Serve(serve::ServeArgs),
     /// Viewer: connect to a host and report fps / bitrate / RTT every second.
     Connect(connect::ConnectArgs),
+    /// List a folder on the remote PC (or its drives and known folders). Needs "files".
+    Ls(ls::LsArgs),
+    /// Create a folder on the remote PC. Needs "files".
+    Mkdir(mkdir::MkdirArgs),
+    /// Delete a file or folder on the remote PC (permanently). Needs "files".
+    Rm(rm::RmArgs),
+    /// Rename or move within one drive of the remote PC. Needs "files".
+    Mv(mv::MvArgs),
     /// Viewer: send local files and folders to a host (--to <host folder>).
     SendFile(send_file::SendFileArgs),
     /// Viewer: download files and folders from a host (--to <local folder>).
@@ -94,6 +107,10 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::List(a) => list::run(&ctx, a).await,
         Cmd::Serve(a) => serve::run(&ctx, a).await,
         Cmd::Connect(a) => connect::run(&ctx, a).await,
+        Cmd::Ls(a) => ls::run(&ctx, a).await,
+        Cmd::Mkdir(a) => mkdir::run(&ctx, a).await,
+        Cmd::Rm(a) => rm::run(&ctx, a).await,
+        Cmd::Mv(a) => mv::run(&ctx, a).await,
         Cmd::SendFile(a) => send_file::run(&ctx, a).await,
         Cmd::GetFile(a) => get_file::run(&ctx, a).await,
         // FEATURE HOOK: one arm per new subcommand.
@@ -206,6 +223,64 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("Exit codes:"));
         assert!(help.contains("TLP_DESK_PASSWORD"));
+    }
+
+    #[test]
+    fn file_commands_parse_with_arabic_paths() {
+        let Cmd::Ls(l) = parse(&["ls", "10.0.0.2", "C:\\Users\\مستخدم", "--code", "123456"])
+            .unwrap()
+            .cmd
+        else {
+            panic!("not ls")
+        };
+        assert_eq!(l.dial.target, "10.0.0.2");
+        assert_eq!(l.path.as_deref(), Some("C:\\Users\\مستخدم"));
+        assert_eq!(l.dial.auth.code.as_deref(), Some("123456"));
+        let Cmd::Ls(l) = parse(&["ls", "10.0.0.2"]).unwrap().cmd else {
+            panic!("not ls")
+        };
+        assert_eq!(l.path, None);
+        let Cmd::Mkdir(m) = parse(&["mkdir", "10.0.0.2", "D:\\مجلد جديد"]).unwrap().cmd
+        else {
+            panic!("not mkdir")
+        };
+        assert_eq!(m.path, "D:\\مجلد جديد");
+        let Cmd::Rm(r) = parse(&["rm", "10.0.0.2", "D:\\x", "-r"]).unwrap().cmd else {
+            panic!("not rm")
+        };
+        assert!(r.recursive);
+        let Cmd::Mv(m) = parse(&["mv", "10.0.0.2", "D:\\a.txt", "D:\\ب.txt"])
+            .unwrap()
+            .cmd
+        else {
+            panic!("not mv")
+        };
+        assert_eq!((m.from.as_str(), m.to.as_str()), ("D:\\a.txt", "D:\\ب.txt"));
+        assert!(parse(&["mv", "10.0.0.2", "D:\\a.txt"]).is_err());
+        let Cmd::Serve(s) = parse(&["serve", "--allow-files"]).unwrap().cmd else {
+            panic!("not serve")
+        };
+        assert!(s
+            .host_config()
+            .default_permissions
+            .contains(tlp_desk_proto::Permissions::FILES));
+    }
+
+    #[test]
+    fn file_errors_map_to_exit_codes_and_messages() {
+        use tlp_desk_files::fs::FsClientError;
+        use tlp_desk_proto::FsError;
+        let e = anyhow::Error::from(FsClientError::NoPermission);
+        assert_eq!(
+            crate::exit::Exit::of(&e),
+            crate::exit::Exit::PermissionDenied
+        );
+        let e = anyhow::Error::from(FsClientError::Timeout);
+        assert_eq!(crate::exit::Exit::of(&e), crate::exit::Exit::Timeout);
+        let e = anyhow::Error::from(FsClientError::Remote(FsError::NotFound));
+        assert_eq!(crate::exit::Exit::of(&e), crate::exit::Exit::Failure);
+        let ar = text::with_lang(text::Lang::Ar, || text::error_line(&e));
+        assert!(ar.contains("غير موجود"), "{ar}");
     }
 
     #[test]

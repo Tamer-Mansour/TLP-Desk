@@ -98,6 +98,12 @@ pub fn no_frame() -> &'static str {
 }
 
 pub fn error_line(err: &anyhow::Error) -> String {
+    if let Some(fs) = err.downcast_ref::<tlp_desk_files::fs::FsClientError>() {
+        return t(
+            format!("error: {}", fs_error(fs)),
+            format!("خطأ: {}", fs_error(fs)),
+        );
+    }
     t(format!("error: {err:#}"), format!("خطأ: {err:#}"))
 }
 
@@ -426,6 +432,123 @@ pub fn selecting_monitor(index: u32) -> String {
         format!("Switching to monitor {index}..."),
         format!("جارٍ التبديل إلى الشاشة {index}..."),
     )
+}
+
+// --- files: remote file system (TLP-files-fs) ---
+
+/// One line of `ls`: `<DIR>` or the size in bytes, then the name.
+pub fn fs_entry_row(e: &tlp_desk_proto::FsEntry) -> String {
+    let kind = if e.is_dir {
+        t("<DIR>".to_owned(), "<مجلد>".to_owned())
+    } else {
+        e.size.to_string()
+    };
+    let flags = match (e.hidden, e.readonly) {
+        (true, true) => t(" (hidden, read-only)", " (مخفي، للقراءة فقط)"),
+        (true, false) => t(" (hidden)", " (مخفي)"),
+        (false, true) => t(" (read-only)", " (للقراءة فقط)"),
+        (false, false) => "",
+    };
+    format!("{kind:>14}  {}{flags}", e.name)
+}
+
+/// One line of `ls` without a path: a drive or known folder.
+pub fn fs_root_row(r: &tlp_desk_proto::FsRoot) -> String {
+    use tlp_desk_proto::FsRootKind as K;
+    let kind = match r.kind {
+        K::Drive => t("drive", "قرص"),
+        K::Home => t("home", "المجلد الشخصي"),
+        K::Desktop => t("desktop", "سطح المكتب"),
+        K::Documents => t("documents", "المستندات"),
+        K::Downloads => t("downloads", "التنزيلات"),
+        K::Pictures => t("pictures", "الصور"),
+        K::Music => t("music", "الموسيقى"),
+        K::Videos => t("videos", "الفيديو"),
+        K::Other => t("shared folder", "مجلد مشترك"),
+    };
+    let space = match (r.free_bytes, r.total_bytes) {
+        (Some(f), Some(tot)) => t(
+            format!("  {} of {} GB free", f / 1_000_000_000, tot / 1_000_000_000),
+            format!(
+                "  {} من {} غيغابايت متاحة",
+                f / 1_000_000_000,
+                tot / 1_000_000_000
+            ),
+        ),
+        _ => String::new(),
+    };
+    let label = if r.label.is_empty() {
+        String::new()
+    } else {
+        format!(" \"{}\"", r.label)
+    };
+    format!("{}  [{kind}]{label}{space}", r.path)
+}
+
+pub fn fs_empty_folder() -> &'static str {
+    t("The folder is empty.", "المجلد فارغ.")
+}
+
+pub fn fs_created(path: &str) -> String {
+    t(format!("Created {path}"), format!("أُنشئ {path}"))
+}
+
+pub fn fs_deleted(path: &str) -> String {
+    t(format!("Deleted {path}"), format!("حُذف {path}"))
+}
+
+pub fn fs_moved(from: &str, to: &str) -> String {
+    t(
+        format!("Moved {from} -> {to}"),
+        format!("نُقل {from} <- {to}"),
+    )
+}
+
+pub fn fs_error(e: &tlp_desk_files::fs::FsClientError) -> String {
+    use tlp_desk_files::fs::FsClientError as C;
+    use tlp_desk_proto::FsError as F;
+    match e {
+        C::Remote(F::NotFound) => t("Not found on the remote PC.", "غير موجود على الجهاز البعيد.").into(),
+        C::Remote(F::PermissionDenied) => t(
+            "The remote PC denied access to this path.",
+            "رفض الجهاز البعيد الوصول إلى هذا المسار.",
+        )
+        .into(),
+        C::Remote(F::AlreadyExists) => t("It already exists.", "موجود بالفعل.").into(),
+        C::Remote(F::NotEmpty) => t(
+            "The folder is not empty (use --recursive).",
+            "المجلد ليس فارغاً (استخدم --recursive).",
+        )
+        .into(),
+        C::Remote(F::InvalidPath) => t(
+            "Invalid path: use an absolute path such as C:\\Users.",
+            "مسار غير صالح: استخدم مساراً كاملاً مثل C:\\Users.",
+        )
+        .into(),
+        C::Remote(F::NoSpace) => t("The remote disk is full.", "القرص البعيد ممتلئ.").into(),
+        C::Remote(F::Busy) => t(
+            "The file is in use on the remote PC.",
+            "الملف قيد الاستخدام على الجهاز البعيد.",
+        )
+        .into(),
+        C::Remote(other) => t(
+            format!("The remote PC reported an error: {other:?}"),
+            format!("أبلغ الجهاز البعيد عن خطأ: {other:?}"),
+        ),
+        C::NoPermission => t(
+            "The host does not allow file access in this session (it must grant \"files\").",
+            "لا يسمح الجهاز المضيف بالوصول إلى الملفات في هذه الجلسة (يجب أن يمنح صلاحية \"الملفات\").",
+        )
+        .into(),
+        C::Timeout => t("The remote PC did not answer in time.", "لم يرد الجهاز البعيد في الوقت المحدد.").into(),
+        C::Closed => t("The session ended.", "انتهت الجلسة.").into(),
+        C::Send(d) => t(format!("Cannot send the request: {d}"), format!("تعذّر إرسال الطلب: {d}")),
+        C::UnexpectedReply => t(
+            "The remote PC sent an unexpected answer.",
+            "أرسل الجهاز البعيد رداً غير متوقع.",
+        )
+        .into(),
+    }
 }
 
 // --- files-transfer lane: send-file / get-file ---
