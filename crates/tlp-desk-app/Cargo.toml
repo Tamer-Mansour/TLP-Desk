@@ -37,6 +37,8 @@ resvg = { version = "0.48", default-features = false }
 
 [dev-dependencies]
 tlp-desk-capture.workspace = true
+# Encodes real H.264 for the playback window tests.
+tlp-desk-codec.workspace = true
 tempfile = "3"
 # README media generator (`examples/readme_media`): renders the real UI headlessly with wgpu
 # (`wgpu`) and drives `App` through a real `eframe::CreationContext` (`eframe`).

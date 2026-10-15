@@ -14,6 +14,8 @@ enum Action {
     NewCode,
     OpenSettings,
     SetLang(Lang),
+    /// recording (TLP-recording)
+    OpenRecordings,
 }
 
 /// Top bar shared by home and settings: brand at the start, settings + language at the end.
@@ -59,6 +61,18 @@ fn top_bar(ui: &mut egui::Ui, tx: Tx, actions: &mut Vec<Action>, show_settings_b
                     {
                         actions.push(Action::OpenSettings);
                     }
+                    // recording (TLP-recording)
+                    if show_settings_button
+                        && ui
+                            .add(icons::icon_text_button(
+                                tx,
+                                Icon::Playback,
+                                tx.t(S::Recordings),
+                            ))
+                            .clicked()
+                    {
+                        actions.push(Action::OpenRecordings);
+                    }
                 });
             });
         });
@@ -91,6 +105,10 @@ impl App {
                 Action::NewCode => self.backend.refresh_one_time_code(),
                 Action::OpenSettings => self.screen = Screen::Settings,
                 Action::SetLang(l) => self.set_lang(ui.ctx(), l),
+                Action::OpenRecordings => {
+                    self.recordings.open = true;
+                    self.recordings.reload();
+                }
             }
         }
     }

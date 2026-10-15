@@ -392,6 +392,80 @@ fn changed_host_key_is_loud_and_can_be_forgotten() {
     let _ = &mut host;
 }
 
+/// TLP-recording: the viewer records the live H.264 stream to an MP4 that plays back.
+#[test]
+fn viewer_records_a_session_to_mp4() {
+    use tlp_desk_viewer::recording::{list_recordings, Player};
+
+    let rt = Runtime::new().unwrap();
+    let host = start(&rt, Arc::default(), 0, |_| {});
+    let mut viewer = start(&rt, Arc::default(), 0, |_| {});
+    let folder = tempfile::tempdir().unwrap();
+    viewer
+        .backend
+        .set_recordings_folder(folder.path().to_owned());
+    let code = host.backend.local_info().one_time_code;
+    let attempt = viewer.backend.connect(
+        ConnectTarget::Address(host.backend.local_addr().unwrap()),
+        Some(code),
+    );
+    let (session, frames) = viewer.events.wait(&rt, "session", |e| match e {
+        BackendEvent::SessionStarted {
+            attempt: a,
+            session,
+            frames,
+            ..
+        } if *a == attempt => Some((*session, frames.clone())),
+        _ => None,
+    });
+    wait_frame(&frames);
+
+    viewer.backend.start_recording(session);
+    let started_in = viewer.events.wait(&rt, "recording started", |e| match e {
+        BackendEvent::RecordingStarted { session: s, folder } if *s == session => {
+            Some(folder.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(started_in, folder.path());
+    // About a second of video (the fake screen runs at ~30 fps).
+    for _ in 0..25 {
+        wait_frame(&frames);
+    }
+    viewer.backend.stop_recording(session);
+    let (files, problem) = viewer.events.wait(&rt, "recording stopped", |e| match e {
+        BackendEvent::RecordingStopped {
+            session: s,
+            files,
+            problem,
+        } if *s == session => Some((files.clone(), problem.clone())),
+        _ => None,
+    });
+    assert_eq!(problem, None);
+    assert_eq!(files.len(), 1, "{files:?}");
+    let name = files[0].file_name().unwrap().to_str().unwrap().to_owned();
+    assert!(name.starts_with("TLP-Desk اختبار-pc "), "{name}");
+
+    let list = list_recordings(folder.path()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert!(list[0].complete);
+    assert!(list[0]
+        .duration
+        .is_some_and(|d| d >= Duration::from_millis(300)));
+
+    let player = Player::open(&files[0], tlp_desk_viewer::PixelFormat::Rgba, None).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let frame = loop {
+        if let Some(f) = player.take_frame() {
+            break f;
+        }
+        assert!(Instant::now() < deadline, "the recording does not decode");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!((frame.width, frame.height), (W, H));
+    let _ = &host;
+}
+
 #[test]
 fn busy_port_degrades_to_dial_only_with_a_clear_problem() {
     let rt = Runtime::new().unwrap();

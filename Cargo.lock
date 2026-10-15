@@ -4057,6 +4057,7 @@ dependencies = [
  "tempfile",
  "time",
  "tlp-desk-capture",
+ "tlp-desk-codec",
  "tlp-desk-crypto",
  "tlp-desk-files",
  "tlp-desk-host",
@@ -4206,8 +4207,10 @@ dependencies = [
 name = "tlp-desk-viewer"
 version = "0.1.0"
 dependencies = [
+ "fs4",
  "tempfile",
  "thiserror 2.0.21",
+ "time",
  "tlp-desk-capture",
  "tlp-desk-codec",
  "tlp-desk-crypto",

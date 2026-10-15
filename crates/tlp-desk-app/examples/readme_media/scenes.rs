@@ -99,6 +99,11 @@ pub const SCENES: &[Scene] = &[
         about: "host side: chat window that opened when the viewer wrote",
         setup: host_chat,
     },
+    Scene {
+        name: "recording",
+        about: "viewer session while recording: red indicator with the elapsed time",
+        setup: recording,
+    },
 ];
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
@@ -276,6 +281,17 @@ fn chat(app: &mut App, lang: Lang) {
             Lang::En => "One more question…".into(),
             Lang::Ar => "سؤال أخير…".into(),
         };
+    }
+}
+
+fn recording(app: &mut App, lang: Lang) {
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        // 12:34 into the recording (the clock only moves by milliseconds while rendering).
+        let since = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(12 * 60 + 34))
+            .unwrap_or_else(std::time::Instant::now);
+        s.recording = tlp_desk_app::ui::recordings::RecordState::On { since };
     }
 }
 

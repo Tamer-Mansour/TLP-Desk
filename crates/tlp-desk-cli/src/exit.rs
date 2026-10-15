@@ -114,7 +114,12 @@ fn of_viewer(e: &ViewerError) -> Exit {
         }
         ViewerError::VersionMismatch { .. } => Exit::VersionMismatch,
         ViewerError::Net(n) => of_net(n).unwrap_or(Exit::Failure),
-        ViewerError::KnownHosts(_) => Exit::Failure,
+        ViewerError::KnownHosts(_)
+        | ViewerError::RecordingIo(_)
+        | ViewerError::DiskFull { .. }
+        | ViewerError::BadRecording(_)
+        | ViewerError::BadVideo(_)
+        | ViewerError::Decoder(_) => Exit::Failure,
     }
 }
 

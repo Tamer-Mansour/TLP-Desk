@@ -19,6 +19,7 @@ use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
 use crate::ui::chat::{self as chat_ui, ChatState};
 use crate::ui::icons::{self, Icon};
+use crate::ui::recordings::{self, RecordState, RecordingsUi};
 use crate::ui::session::ViewerSession;
 use crate::ui::{theme, widgets};
 
@@ -111,6 +112,8 @@ pub struct App {
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    /// Recordings window and playback windows (TLP-recording).
+    pub recordings: RecordingsUi,
     /// Recent clipboard activity of host sessions (banner indicator, TLP-clipboard).
     pub host_clipboard: crate::ui::clipboard::HostClipboard,
 }
@@ -156,6 +159,7 @@ impl App {
             host_input_blocked: None,
             session: None,
             notice: None,
+            recordings: RecordingsUi::default(),
             host_clipboard: Default::default(),
         };
         app.backend
@@ -305,7 +309,7 @@ impl App {
                         }
                         self.session = Some(view);
                         let title =
-                            format!("{} — {}", self.tx.raw(S::AppTitle), self.session_title());
+                            format!("{} â€” {}", self.tx.raw(S::AppTitle), self.session_title());
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
                     } else {
                         // Attempt was cancelled locally; do not leak the session.
@@ -378,6 +382,25 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // recording (TLP-recording)
+                BackendEvent::RecordingStarted { session, .. } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.recording = RecordState::On {
+                            since: std::time::Instant::now(),
+                        };
+                    }
+                }
+                BackendEvent::RecordingStopped {
+                    session, problem, ..
+                } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.recording = RecordState::Off;
+                    }
+                    if let Some(p) = problem {
+                        self.notice = Some(recordings::problem_text(self.tx, &p));
+                    }
+                    self.recordings.reload();
+                }
                 // chat (TLP-chat)
                 BackendEvent::ChatReceived { session, line } => {
                     self.chat_received(ctx, session, line)
@@ -766,6 +789,11 @@ impl eframe::App for App {
             self.host_problem_banner(ui);
         }
         let modal_open = self.dialogs(&ctx);
+        let recording_now = self
+            .session
+            .as_ref()
+            .is_some_and(|s| s.recording != RecordState::Off);
+        self.recordings.show(&ctx, self.tx, recording_now);
         self.host_chat_windows(&ctx);
 
         if self.session.is_some() {

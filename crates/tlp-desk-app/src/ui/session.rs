@@ -60,6 +60,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Session recording (TLP-recording), driven by the backend's recording events.
+    pub recording: super::recordings::RecordState,
     /// Chat with the host user (side panel).
     pub chat: ChatState,
     /// "Sync clipboard" switch and toast (TLP-clipboard).
@@ -110,6 +112,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            recording: Default::default(),
             chat: ChatState::new(permissions.contains(Permissions::CHAT)),
             clipboard: Default::default(),
             files: FileBrowser::new(id),
@@ -426,6 +429,15 @@ impl ViewerSession {
                         );
                         if ui.add(b).clicked() {
                             disconnect = true;
+                        }
+                        // recording (TLP-recording)
+                        match super::recordings::record_toggle(ui, tx, self.recording) {
+                            Some(true) => {
+                                self.recording = super::recordings::RecordState::Starting;
+                                backend.start_recording(self.id);
+                            }
+                            Some(false) => backend.stop_recording(self.id),
+                            None => {}
                         }
                     });
                 });

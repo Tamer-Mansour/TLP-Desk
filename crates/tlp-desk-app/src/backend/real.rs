@@ -128,6 +128,8 @@ struct Inner {
     /// File transfer engine shared by host and viewer sessions (lane files-transfer).
     files: Arc<FileTransfer>,
     state: Mutex<State>,
+    /// Running session recordings (TLP-recording).
+    recorders: super::recording::Recorders,
     clipboard: Arc<tlp_desk_files::ClipboardFeature>,
     /// Files lane: remote file system + clipboard files features (TLP-files).
     fsb: FilesBridge,
@@ -299,6 +301,11 @@ impl RealBackend {
         self.inner.endpoint.as_ref()?.local_addr().ok()
     }
 
+    /// Records sessions into `folder` instead of `%USERPROFILE%\Videos\TLP-Desk` (tests).
+    pub fn set_recordings_folder(&self, folder: PathBuf) {
+        self.inner.recorders.set_folder(folder);
+    }
+
     /// Like [`RealBackend::start_with`] but returns the concrete type (tests).
     pub fn start_concrete(
         rt: &Handle,
@@ -460,6 +467,7 @@ impl RealBackend {
             chat,
             files,
             state: Mutex::default(),
+            recorders: Default::default(),
             clipboard,
             fsb,
         });
@@ -489,6 +497,16 @@ impl Inner {
         if self.tx.send(event).is_ok() {
             (self.repaint)();
         }
+    }
+
+    /// [`Inner::emit`] as a callback for other threads (a no-op once the backend is gone).
+    fn emitter(self: &Arc<Self>) -> super::recording::Emit {
+        let me = Arc::downgrade(self);
+        Arc::new(move |event| {
+            if let Some(me) = me.upgrade() {
+                me.emit(event);
+            }
+        })
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -957,6 +975,7 @@ impl Inner {
         }
         self.state().viewer_sessions.remove(&session);
         lock(&self.bridges).retain(|b| b.session != session);
+        self.recorders.stop(session, &self.rt, self.emitter());
         self.emit(BackendEvent::SessionEnded { session, reason });
     }
 }
@@ -1155,6 +1174,23 @@ impl Backend for RealBackend {
         }
     }
 
+    // --- power (TLP-power) ---
+    // recording (TLP-recording)
+    fn start_recording(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .recorders
+                .start(session, &s, self.inner.emitter());
+        }
+    }
+
+    fn stop_recording(&self, session: SessionId) {
+        self.inner
+            .recorders
+            .stop(session, &self.inner.rt, self.inner.emitter());
+    }
+
     // --- clipboard (TLP-clipboard) ---
     fn set_clipboard_sync(&self, session: SessionId, enabled: bool) {
         let (viewer, host) = {
@@ -1220,6 +1256,8 @@ impl RealBackend {
 impl Drop for RealBackend {
     /// App exit: say goodbye to every peer, then close the endpoint so they notice at once.
     fn drop(&mut self) {
+        // Close recording files properly before the sessions go away.
+        self.inner.recorders.stop_all_blocking();
         if let Some(h) = &self.inner.host {
             h.shutdown();
         }
