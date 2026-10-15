@@ -72,6 +72,9 @@ pub struct StartOptions {
     /// One-time code for `connect`.
     pub code: Option<String>,
     pub screen_settings: bool,
+    /// Keep the address book in memory only: nothing is read from or written to
+    /// `%APPDATA%` (screenshots, tests).
+    pub address_book_in_memory: bool,
 }
 
 pub struct App {
@@ -121,7 +124,12 @@ impl App {
         theme::install(&cc.egui_ctx);
         theme::apply_lang(&cc.egui_ctx, settings.lang);
         let local = backend.local_info();
-        let address_book = AddressBookUi::load_default(Tx::new(settings.lang, settings.digits));
+        let book_tx = Tx::new(settings.lang, settings.digits);
+        let address_book = if opts.address_book_in_memory {
+            AddressBookUi::load(None, book_tx)
+        } else {
+            AddressBookUi::load_default(book_tx)
+        };
         let mut app = Self {
             name_edit: local.device_name.clone(),
             backend,

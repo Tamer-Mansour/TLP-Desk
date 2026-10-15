@@ -157,6 +157,9 @@ pub struct AddressBookUi {
     pub offer_save: Option<PeerInfo>,
     /// Last discovery snapshot.
     devices: Vec<DiscoveredDevice>,
+    /// Fixed "now" for relative times and timestamps (deterministic screenshots); `None` =
+    /// the system clock.
+    pub fixed_now: Option<UnixTime>,
 }
 
 impl AddressBookUi {
@@ -177,6 +180,7 @@ impl AddressBookUi {
             toast: None,
             offer_save: None,
             devices: Vec::new(),
+            fixed_now: None,
         };
         if let Some(path) = &report.corrupt_backup {
             let name = path
@@ -204,8 +208,14 @@ impl AddressBookUi {
         });
     }
 
-    fn show_toast(&mut self, text: String, error: bool) {
+    /// Show a short display-ready message at the bottom of the window.
+    pub fn show_toast(&mut self, text: String, error: bool) {
         self.notice(text, error, TOAST_SECS);
+    }
+
+    /// The current time ([`AddressBookUi::fixed_now`] if set).
+    pub fn now(&self) -> UnixTime {
+        self.fixed_now.unwrap_or_else(ab::now)
     }
 
     fn persist(&mut self, tx: Tx) {
@@ -226,7 +236,7 @@ impl AddressBookUi {
     /// MACs of saved devices that have none yet.
     pub fn on_devices(&mut self, list: &[DiscoveredDevice], backend: &dyn Backend, tx: Tx) {
         self.devices = list.to_vec();
-        let mut changed = self.book.observe(list, ab::now());
+        let mut changed = self.book.observe(list, self.now());
         for d in list.iter().filter(|d| d.online) {
             let wants_mac = self.book.get(d.device_id).is_some_and(|e| e.mac.is_none());
             if wants_mac {
@@ -243,7 +253,7 @@ impl AddressBookUi {
     /// A viewer session started: update a saved device, or offer to save a new one.
     pub fn on_session_started(&mut self, peer: &PeerInfo, backend: &dyn Backend, tx: Tx) {
         if self.book.contains(peer.device_id) {
-            self.record(peer, backend, ab::now());
+            self.record(peer, backend, self.now());
             self.persist(tx);
         } else {
             self.offer_save = Some(peer.clone());
@@ -258,7 +268,7 @@ impl AddressBookUi {
 
     /// Save a device we connected to (the "save this device?" offer).
     pub fn save_peer(&mut self, peer: &PeerInfo, backend: &dyn Backend, tx: Tx) {
-        let now = ab::now();
+        let now = self.now();
         self.book
             .save_device(peer.device_id, &peer.name, Some(peer.address), now);
         self.record(peer, backend, now);
@@ -275,7 +285,7 @@ impl AddressBookUi {
     /// Save a device from the discovered list.
     pub fn save_discovered(&mut self, dev: &DiscoveredDevice, backend: &dyn Backend, tx: Tx) {
         self.book
-            .save_device(dev.device_id, &dev.name, Some(dev.address), ab::now());
+            .save_device(dev.device_id, &dev.name, Some(dev.address), self.now());
         if let Some(mac) = backend.neighbor_mac(dev.address) {
             self.book.learn_mac(dev.device_id, MacAddr(mac));
         }
@@ -319,7 +329,7 @@ impl AddressBookUi {
                     if let Some(d) = self.devices.iter().find(|d| d.device_id == e.device_id) {
                         e.name = d.name.clone();
                         e.push_ip(d.address);
-                        e.last_seen = Some(ab::now());
+                        e.last_seen = Some(self.now());
                     }
                 }
                 self.book.upsert(e);
@@ -462,7 +472,7 @@ impl AddressBookUi {
     pub fn list_ui(&mut self, ui: &mut Ui, tx: Tx, backend: &dyn Backend) -> Option<BookCommand> {
         self.toolbar_ui(ui, tx);
         ui.add_space(4.0);
-        let now = ab::now();
+        let now = self.now();
         let query = Query::new(&self.query);
         let mut actions = Vec::new();
         let view = self

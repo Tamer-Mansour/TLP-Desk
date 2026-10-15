@@ -5,7 +5,7 @@ use std::sync::Arc;
 use eframe::egui::{self, text::LayoutJob, Align, Galley, Id, RichText, TextBuffer, Ui};
 
 use super::{ago_raw, AddressBookUi, Dialog, EditForm};
-use crate::address_book::{self as ab, Entry, MacSource, UnixTime};
+use crate::address_book::{Entry, MacSource, UnixTime};
 use crate::backend::DeviceId;
 use crate::i18n::{has_rtl, shape_for_edit, BaseDir, Tx, S};
 use crate::ui::icons::{self, Icon};
@@ -30,6 +30,7 @@ impl AddressBookUi {
         let mut decision = None;
         let existing = form.original.and_then(|id| self.book.get(id)).cloned();
         let groups = self.book.groups();
+        let now = self.now();
         egui::Modal::new(Id::new("ab-edit")).show(ctx, |ui| {
             ui.set_width(460.0);
             theme::column(ui, tx.rtl(), |ui| {
@@ -90,7 +91,7 @@ impl AddressBookUi {
                     if e.mac.is_some() && e.mac_source == MacSource::Learned {
                         ui.label(theme::caption(ui, tx.t(S::AbMacLearned)));
                     }
-                    details(ui, tx, e);
+                    details(ui, tx, e, now);
                 }
                 if let Some(err) = form.error {
                     ui.label(RichText::new(tx.t(err)).color(theme::danger(ui.visuals().dark_mode)));
@@ -204,8 +205,7 @@ impl AddressBookUi {
 }
 
 /// Read-only facts in the edit dialog.
-fn details(ui: &mut Ui, tx: Tx, e: &Entry) {
-    let now = ab::now();
+fn details(ui: &mut Ui, tx: Tx, e: &Entry, now: UnixTime) {
     let when = |t: Option<UnixTime>| match t {
         Some(t) => tx.p(&ago_raw(tx, now, t)),
         None => tx.t(S::AbNever).to_owned(),

@@ -84,7 +84,13 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
 
-    let Args { start, fake, port } = args;
+    let Args {
+        mut start,
+        fake,
+        port,
+    } = args;
+    // Fake devices must not end up in the user's real address book.
+    start.address_book_in_memory |= fake;
     eframe::run_native(
         "TLP-Desk",
         options,
