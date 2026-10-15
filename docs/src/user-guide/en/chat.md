@@ -30,4 +30,4 @@ directions; **Allow chat** turns it back on.
 - Messages are kept only while the session is open. Nothing is saved to disk and nothing leaves
   your local network.
 - From the command line: `TLP-Desk-cli chat <target> "message"` (see
-  [Command line](../command-line.md)).
+  [Command line](command-line.md)).
