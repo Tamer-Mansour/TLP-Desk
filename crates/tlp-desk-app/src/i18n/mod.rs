@@ -156,6 +156,7 @@ strings! {
     Accept => "Accept", "قبول";
     Decline => "Decline", "رفض";
     HostBanner => "{name} is connected to this device", "{name} متصل بهذا الجهاز";
+    HostInputBlocked => "Remote typing and clicks are blocked by a window running as administrator (or a secure screen) on this PC. Switch to a normal window, or run TLP-Desk as a service.", "الكتابة والنقر عن بُعد محجوبان بسبب نافذة تعمل بصلاحيات المسؤول (أو شاشة آمنة) على هذا الجهاز. انتقل إلى نافذة عادية أو شغّل TLP-Desk كخدمة.";
     EndSession => "End session", "إنهاء الجلسة";
     HostPortInUse => "Port {port} is already in use, probably by another running TLP-Desk. This device cannot accept connections, but you can still connect to other devices.", "المنفذ {port} مستخدم بالفعل، وربما يعمل TLP-Desk مسبقاً. لا يستطيع هذا الجهاز استقبال اتصالات، لكن ما زال بإمكانك الاتصال بأجهزة أخرى.";
     HostUnavailable => "This device cannot accept connections: {detail}", "لا يستطيع هذا الجهاز استقبال اتصالات: {detail}";
@@ -213,10 +214,116 @@ strings! {
     // to your section avoids merge conflicts between parallel branches.
     // =======================================================================================
     // --- files ---
+    FsFiles => "Files: browse and copy between the two PCs", "الملفات: تصفّح وانسخ بين الجهازين";
+    FsTitle => "Files", "الملفات";
+    FsClose => "Close files", "إغلاق الملفات";
+    FsThisPc => "This PC", "هذا الجهاز";
+    FsRemotePc => "Remote PC", "الجهاز البعيد";
+    FsDrives => "Drives and folders", "الأقراص والمجلدات";
+    FsForward => "Forward", "إلى الأمام";
+    FsUp => "Up one folder", "المجلد الأعلى";
+    FsRefresh => "Refresh", "تحديث";
+    FsNewFolder => "New folder", "مجلد جديد";
+    FsRename => "Rename", "إعادة تسمية";
+    FsDelete => "Delete", "حذف";
+    FsUpload => "Copy to the remote PC", "نسخ إلى الجهاز البعيد";
+    FsDownload => "Copy to this PC", "نسخ إلى هذا الجهاز";
+    FsName => "Name", "الاسم";
+    FsSize => "Size", "الحجم";
+    FsModified => "Modified", "آخر تعديل";
+    FsSortHint => "Sort by this column (click again to reverse)", "رتّب حسب هذا العمود (انقر مرة أخرى لعكس الترتيب)";
+    FsEmpty => "This folder is empty.", "هذا المجلد فارغ.";
+    FsLoading => "Loading…", "جارٍ التحميل…";
+    FsLocalDisk => "Local disk", "قرص محلي";
+    FsHome => "Personal folder", "المجلد الشخصي";
+    FsDesktop => "Desktop", "سطح المكتب";
+    FsDocuments => "Documents", "المستندات";
+    FsDownloads => "Downloads", "التنزيلات";
+    FsPictures => "Pictures", "الصور";
+    FsMusic => "Music", "الموسيقى";
+    FsVideos => "Videos", "مقاطع الفيديو";
+    FsFreeOf => "{free} free of {total}", "{free} متاحة من {total}";
+    FsCreate => "Create", "إنشاء";
+    FsRenameTitle => "Rename “{name}”", "إعادة تسمية «{name}»";
+    FsInvalidName => "This name cannot be used for a file or folder.", "لا يمكن استخدام هذا الاسم لملف أو مجلد.";
+    FsDeleteTitle => "Delete permanently?", "حذف نهائي؟";
+    FsDeleteBody => "{n} item(s) will be deleted permanently from {where}, including everything inside folders. This cannot be undone.", "سيُحذف {n} من العناصر نهائياً من {where}، مع كل ما في داخل المجلدات. لا يمكن التراجع عن ذلك.";
+    FsDeleteConfirm => "Delete permanently", "احذف نهائياً";
+    FsPickFolder => "Open a folder in both panes first.", "افتح مجلداً في الجهتين أولاً.";
+    FsPasteRemote => "Paste files copied on the remote PC", "الصق الملفات المنسوخة على الجهاز البعيد";
+    FsPasteRemoteHint => "{n} item(s) were copied on the remote PC. They are pasted into the folder open on this PC (or Downloads).", "نُسخ {n} من العناصر على الجهاز البعيد. تُلصق في المجلد المفتوح على هذا الجهاز (أو في التنزيلات).";
+    FsPasteLocal => "Paste files copied on this PC", "الصق الملفات المنسوخة على هذا الجهاز";
+    FsTransferStarted => "Copying {n} item(s)…", "جارٍ نسخ {n} من العناصر…";
+    FsNothingToPaste => "No files are copied.", "لا توجد ملفات منسوخة.";
+    FsErrNotFound => "It no longer exists.", "لم يعد موجوداً.";
+    FsErrDenied => "Access denied.", "تم رفض الوصول.";
+    FsErrExists => "An item with this name already exists.", "يوجد عنصر بهذا الاسم بالفعل.";
+    FsErrNotEmpty => "The folder is not empty.", "المجلد ليس فارغاً.";
+    FsErrInvalidPath => "This path cannot be used.", "لا يمكن استخدام هذا المسار.";
+    FsErrNoSpace => "The disk is full.", "القرص ممتلئ.";
+    FsErrBusy => "The file is in use by another program.", "الملف قيد الاستخدام في برنامج آخر.";
+    FsErrNoPermission => "The remote PC does not allow file access in this session.", "لا يسمح الجهاز البعيد بالوصول إلى الملفات في هذه الجلسة.";
+    FsErrTimeout => "The remote PC did not answer in time.", "لم يستجب الجهاز البعيد في الوقت المحدد.";
+    FsErrTransfers => "Copying files is not available in this version yet.", "نسخ الملفات غير متاح في هذا الإصدار بعد.";
+    FsErrOther => "Error: {detail}", "خطأ: {detail}";
+    CloseTransfers => "Hide the transfer list", "إخفاء قائمة النقل";
+    FilesPanelTitle => "File transfer", "نقل الملفات";
+    SendFiles => "Send files…", "إرسال ملفات…";
+    SendFolder => "Send folder…", "إرسال مجلد…";
+    DropToSend => "Drop to send to {name}", "أفلت الملفات لإرسالها إلى {name}";
+    NoTransfers => "No transfers yet. Drag files onto the window or use the buttons.", "لا توجد عمليات نقل بعد. اسحب الملفات إلى النافذة أو استخدم الأزرار.";
+    TransferPreparing => "Preparing…", "جارٍ التحضير…";
+    TransferPaused => "Paused", "متوقف مؤقتاً";
+    TransferDone => "Done", "اكتمل";
+    TransferDoneFailures => "Done, {n} file(s) failed", "اكتمل، وتعذّر نقل {n} ملف";
+    TransferCancelled => "Cancelled", "أُلغي";
+    TransferLost => "Connection lost", "انقطع الاتصال";
+    TransferFailed => "Failed: {reason}", "فشل: {reason}";
+    TransferFiles => "{done} of {total} files", "{done} من {total} ملف";
+    TransferRate => "{size}/s", "{size}/ث";
+    TransferEta => "{time} left", "المتبقي {time}";
+    TransferRetry => "Retry (continues where it stopped)", "إعادة المحاولة (تكمل من حيث توقفت)";
+    TransferCancel => "Cancel transfer", "إلغاء النقل";
+    OpenFolder => "Open folder", "فتح المجلد";
+    ClearFinished => "Clear finished", "مسح المنتهية";
+    FilesNotAllowed => "The host has not allowed file transfer for this session.", "لم يسمح المضيف بنقل الملفات في هذه الجلسة.";
+    FailNoSpace => "not enough free disk space", "لا توجد مساحة كافية على القرص";
+    FailDeclined => "the other side declined", "رفض الطرف الآخر";
+    FailHash => "data was corrupted in transit", "تلفت البيانات أثناء النقل";
+    FailPath => "invalid file name or path", "اسم الملف أو مساره غير صالح";
+    FailPermission => "not allowed", "غير مسموح";
+    FailNotFound => "file not found", "الملف غير موجود";
+    FailBusy => "file is in use", "الملف قيد الاستخدام";
 
     // --- clipboard ---
+    ClipboardSync => "Sync clipboard", "مزامنة الحافظة";
+    ClipboardNotAllowed => "The other device does not allow clipboard sync.", "لا يسمح الجهاز الآخر بمزامنة الحافظة.";
+    ClipboardSent => "Clipboard sent", "أُرسلت الحافظة";
+    ClipboardReceived => "Clipboard received", "استُلمت الحافظة";
+    ClipboardTooLarge => "The clipboard content is too large to sync.", "محتوى الحافظة أكبر من أن تتم مزامنته.";
+    ClipboardFailed => "The clipboard could not be synced.", "تعذّرت مزامنة الحافظة.";
+    ClipboardSettings => "Clipboard", "الحافظة";
+    ClipboardSyncDefault => "Sync the clipboard in new sessions", "مزامنة الحافظة في الجلسات الجديدة";
+    ClipboardSyncHint => "Copied text, formatted text and images move between both devices while the host allows it.", "ينتقل النص المنسوخ والنص المنسّق والصور بين الجهازين ما دام المضيف يسمح بذلك.";
 
     // --- chat ---
+    Chat => "Chat", "الدردشة";
+    ChatWith => "Chat with {name}", "دردشة مع {name}";
+    ChatInputHint => "Write a message…", "اكتب رسالة…";
+    ChatSend => "Send", "إرسال";
+    ChatSendHint => "Enter sends, Shift+Enter starts a new line.", "يرسل Enter الرسالة، ويبدأ Shift+Enter سطراً جديداً.";
+    ChatEmpty => "No messages yet. Say hello!", "لا توجد رسائل بعد. ابدأ بالتحية!";
+    ChatOffViewer => "The other side has turned chat off.", "أوقف الطرف الآخر الدردشة.";
+    ChatOffHost => "Chat is turned off for this session.", "الدردشة متوقفة في هذه الجلسة.";
+    ChatTurnOff => "Turn off chat", "إيقاف الدردشة";
+    ChatTurnOn => "Allow chat", "السماح بالدردشة";
+    ChatTooLong => "Too long: at most {max} characters.", "الرسالة طويلة: الحد الأقصى {max} حرف.";
+    ChatCount => "{count} / {max}", "{count} / {max} حرف";
+    ChatRateLimited => "You are sending too fast. Wait a moment.", "ترسل بسرعة كبيرة. انتظر لحظة.";
+    ChatUnavailable => "Chat is not available in this session.", "الدردشة غير متاحة في هذه الجلسة.";
+    ChatUnread => "{count} unread", "{count} غير مقروءة";
+    TimeAm => "AM", "ص";
+    TimePm => "PM", "م";
 
     // --- audio ---
 
@@ -255,6 +362,32 @@ strings! {
     WbBlack => "Black", "أسود";
     WbWhite => "White", "أبيض";
     WbHostCleared => "The other side cleared the drawings.", "مسح الطرف الآخر الرسوم.";
+    // recording (TLP-recording)
+    RecStart => "Record this session to a video file on this computer", "تسجيل هذه الجلسة في ملف فيديو على هذا الجهاز";
+    RecStop => "Stop recording", "إيقاف التسجيل";
+    RecActive => "Recording {time}", "جارٍ التسجيل {time}";
+    RecStarting => "Starting the recording…", "جارٍ بدء التسجيل…";
+    RecErrDiskFull => "Recording stopped: the disk is almost full.", "توقف التسجيل: القرص ممتلئ تقريباً.";
+    RecErrNoFolder => "Recording is not possible: no folder for videos was found.", "التسجيل غير ممكن: لم يُعثر على مجلد للفيديو.";
+    RecErrFailed => "Recording failed: {detail}", "فشل التسجيل: {detail}";
+    Recordings => "Recordings", "التسجيلات";
+    RecordingsHint => "Recordings stay on this computer. The other side is not notified.", "تبقى التسجيلات على هذا الجهاز، ولا يُبلَّغ الطرف الآخر بها.";
+    RecordingsEmpty => "No recordings yet. Use the record button during a session.", "لا توجد تسجيلات بعد. استخدم زر التسجيل أثناء الجلسة.";
+    RecOpenFolder => "Open folder", "فتح المجلد";
+    RecRefresh => "Refresh", "تحديث";
+    RecPlay => "Play", "تشغيل";
+    RecPause => "Pause", "إيقاف مؤقت";
+    RecDelete => "Delete", "حذف";
+    RecDeleteTitle => "Delete this recording?", "حذف هذا التسجيل؟";
+    RecDeleteBody => "{name} will be deleted permanently.", "سيُحذف {name} نهائياً.";
+    RecIncomplete => "Interrupted", "منقطع";
+    RecRepair => "Repair", "إصلاح";
+    RecRepairHint => "The recording was interrupted. Repairing finishes the file so every player can open it.", "انقطع التسجيل. الإصلاح يُكمل الملف ليفتحه أي مشغّل.";
+    RecErrOpen => "Cannot open this recording: {detail}", "تعذّر فتح هذا التسجيل: {detail}";
+    RecErrAction => "The operation failed: {detail}", "فشلت العملية: {detail}";
+    PlayTitle => "Playback: {name}", "تشغيل: {name}";
+    PlaySpeed => "Speed", "السرعة";
+    PlayClose => "Close", "إغلاق";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.

@@ -282,6 +282,10 @@ pub enum HostEvent {
         peer: PeerInfo,
         reason: EndReason,
     },
+    /// The OS refused to inject this viewer's input, typically because an elevated (admin)
+    /// window or the secure desktop is in front. Rate limited; show a notice at the host.
+    /// Running the host as the TLP-Desk service lifts the limit.
+    InputBlocked { id: SessionId },
     /// Something a session feature reports (see [`FeatureEvent::payload`]).
     Feature { id: SessionId, event: FeatureEvent },
 }
@@ -782,6 +786,7 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
 
     let (input_tx, input_rx) = std::sync::mpsc::channel::<InputEvent>();
     let (prio_tx, mut prio_rx) = mpsc::unbounded_channel::<bool>();
+    let (blocked_tx, mut blocked_rx) = mpsc::unbounded_channel::<()>();
     let input_ctx = input::InputCtx {
         factory: inner.cfg.injector_factory.clone(),
         rect: rect_rx,
@@ -798,6 +803,7 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
             peer.name.clone()
         },
         priority: prio_tx,
+        blocked: blocked_tx,
     };
     let input_thread = std::thread::Builder::new()
         .name(format!("tlp-host-input-{}", id.0))
@@ -878,6 +884,9 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 }
                 None => priority_open = false,
             },
+            Some(()) = blocked_rx.recv() => {
+                inner.emit(HostEvent::InputBlocked { id });
+            }
             _ = ctl.stop.notified() => {
                 session.close(ByeReason::UserClosed).await;
                 break EndReason::Local;

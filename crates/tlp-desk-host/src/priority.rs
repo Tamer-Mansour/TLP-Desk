@@ -22,12 +22,26 @@ pub(crate) struct Step {
 pub(crate) struct PriorityGate {
     /// Zero disables local priority.
     grace: Duration,
-    local_active: bool,
+    keyboard_active: bool,
+    pointer_active: bool,
     last_remote_pointer: Option<Instant>,
 }
 
-fn is_remote_control(ev: &InputEvent) -> bool {
-    !matches!(ev, InputEvent::ReleaseAll)
+/// Time of the last physical local input, per device kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LocalInput {
+    pub keyboard: Option<Instant>,
+    pub pointer: Option<Instant>,
+}
+
+/// Any input (both kinds at the same time), for callers that do not tell them apart.
+impl From<Option<Instant>> for LocalInput {
+    fn from(t: Option<Instant>) -> Self {
+        Self {
+            keyboard: t,
+            pointer: t,
+        }
+    }
 }
 
 fn is_pointer(ev: &InputEvent) -> bool {
@@ -43,40 +57,55 @@ impl PriorityGate {
     pub fn new(grace: Duration) -> Self {
         Self {
             grace,
-            local_active: false,
+            keyboard_active: false,
+            pointer_active: false,
             last_remote_pointer: None,
         }
     }
 
     #[cfg(test)]
     pub fn local_active(&self) -> bool {
-        self.local_active
+        self.keyboard_active || self.pointer_active
+    }
+
+    fn within_grace(&self, now: Instant, t: Option<Instant>) -> bool {
+        !self.grace.is_zero() && t.is_some_and(|t| now.saturating_duration_since(t) < self.grace)
     }
 
     /// Re-evaluates the state at `now` given the last physical local input.
-    pub fn update(&mut self, now: Instant, last_local: Option<Instant>) -> Step {
-        let active = !self.grace.is_zero()
-            && last_local.is_some_and(|t| now.saturating_duration_since(t) < self.grace);
-        if active == self.local_active {
-            return Step::default();
-        }
-        self.local_active = active;
+    pub fn update(&mut self, now: Instant, local: impl Into<LocalInput>) -> Step {
+        let local = local.into();
+        let before = (self.keyboard_active, self.pointer_active);
+        let keyboard = self.within_grace(now, local.keyboard);
+        let pointer = self.within_grace(now, local.pointer);
+        self.keyboard_active = keyboard;
+        self.pointer_active = pointer;
+        let was_any = before.0 || before.1;
+        let any = keyboard || pointer;
         Step {
-            release_remote: active,
-            changed: Some(active),
+            // Entering priority for a device kind: whatever the remote holds goes up.
+            release_remote: (keyboard && !before.0) || (pointer && !before.1),
+            changed: (any != was_any).then_some(any),
         }
     }
 
     /// Decides whether a remote event may be injected. `ReleaseAll` always passes (it can
-    /// only help). Returns the state step (evaluated first) and the verdict.
+    /// only help). The local person wins per device: local typing blocks remote keys, local
+    /// mouse use blocks remote pointer events, but moving the mouse never stops remote
+    /// typing (a jittery pointer must not make the keyboard look dead). Returns the state
+    /// step (evaluated first) and the verdict.
     pub fn filter(
         &mut self,
         now: Instant,
-        last_local: Option<Instant>,
+        local: impl Into<LocalInput>,
         ev: &InputEvent,
     ) -> (Step, bool) {
-        let step = self.update(now, last_local);
-        let forward = !(self.local_active && is_remote_control(ev));
+        let step = self.update(now, local);
+        let forward = match ev {
+            InputEvent::ReleaseAll => true,
+            e if is_pointer(e) => !self.pointer_active,
+            _ => !self.keyboard_active,
+        };
         if forward && is_pointer(ev) {
             self.last_remote_pointer = Some(now);
         }
@@ -84,9 +113,9 @@ impl PriorityGate {
     }
 
     /// The marker shows while the remote moved the pointer recently and the local user is
-    /// not active.
+    /// not using the mouse.
     pub fn marker_visible(&self, now: Instant) -> bool {
-        !self.local_active
+        !self.pointer_active
             && self
                 .last_remote_pointer
                 .is_some_and(|t| now.saturating_duration_since(t) < MARKER_HOLD)
@@ -240,5 +269,75 @@ mod tests {
         // A dropped remote move does not bring it back.
         g.filter(c.at(2020), Some(c.at(2005)), &mv());
         assert!(!g.marker_visible(c.at(2020)));
+    }
+
+    fn at(c: &Clock, ms: u64) -> Option<Instant> {
+        Some(c.at(ms))
+    }
+
+    /// Regression: a local mouse (or jittery pointer device) used to put the whole session
+    /// in local priority and silently drop every remote key.
+    #[test]
+    fn local_mouse_does_not_block_remote_keys() {
+        let c = Clock(Instant::now());
+        let mut g = PriorityGate::new(GRACE);
+        let local = LocalInput {
+            keyboard: None,
+            pointer: at(&c, 100),
+        };
+        assert!(g.filter(c.at(200), local, &key()).1, "key must pass");
+        assert!(!g.filter(c.at(210), local, &mv()).1, "pointer is blocked");
+        assert!(g.filter(c.at(220), local, &InputEvent::ReleaseAll).1);
+    }
+
+    #[test]
+    fn local_typing_blocks_remote_keys_but_not_the_remote_pointer() {
+        let c = Clock(Instant::now());
+        let mut g = PriorityGate::new(GRACE);
+        let local = LocalInput {
+            keyboard: at(&c, 100),
+            pointer: None,
+        };
+        assert!(!g.filter(c.at(200), local, &key()).1);
+        assert!(g.filter(c.at(210), local, &mv()).1);
+        assert!(g.local_active());
+    }
+
+    #[test]
+    fn viewer_is_told_once_about_overall_priority() {
+        let c = Clock(Instant::now());
+        let mut g = PriorityGate::new(GRACE);
+        let kb = LocalInput {
+            keyboard: at(&c, 0),
+            pointer: None,
+        };
+        assert_eq!(g.update(c.at(10), kb).changed, Some(true));
+        // The mouse joins in: still "active", no second notification, but the remote's
+        // buttons are released.
+        let both = LocalInput {
+            keyboard: at(&c, 0),
+            pointer: at(&c, 500),
+        };
+        let step = g.update(c.at(510), both);
+        assert_eq!(step.changed, None);
+        assert!(step.release_remote);
+        // Everything idle: back to the remote.
+        assert_eq!(g.update(c.at(2000), both).changed, Some(false));
+    }
+
+    #[test]
+    fn injected_keys_never_start_priority() {
+        let c = Clock(Instant::now());
+        let stamp = ActivityStamp::new();
+        let mut g = PriorityGate::new(GRACE);
+        stamp.record_keyboard(true, c.at(10));
+        stamp.record_pointer(true, c.at(10));
+        let local = LocalInput {
+            keyboard: stamp.last_physical_keyboard(),
+            pointer: stamp.last_physical_pointer(),
+        };
+        assert!(g.filter(c.at(20), local, &key()).1);
+        assert!(g.filter(c.at(20), local, &mv()).1);
+        assert!(!g.local_active());
     }
 }
