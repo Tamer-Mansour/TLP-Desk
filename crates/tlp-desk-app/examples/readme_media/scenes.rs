@@ -73,6 +73,11 @@ pub const SCENES: &[Scene] = &[
         setup: monitors,
     },
     Scene {
+        name: "file-browser",
+        about: "two-pane file browser: this PC and the remote PC, Arabic and English names",
+        setup: file_browser,
+    },
+    Scene {
         name: "settings",
         about: "settings: language and digit style",
         setup: settings,
@@ -162,6 +167,44 @@ fn monitors(app: &mut App, lang: Lang) {
         // Screen buttons ١ / ٢ as described in the Arabic user guide.
         use_digits(app, DigitStyle::ArabicIndic);
     }
+}
+
+/// A fixed directory entry (dates in 2025, so nothing depends on the clock).
+fn fs_entry(name: &str, is_dir: bool, size: u64, day: i64) -> tlp_desk_proto::FsEntry {
+    tlp_desk_proto::FsEntry {
+        name: name.to_owned(),
+        is_dir,
+        size,
+        modified_unix_ms: (1_735_689_600 + day * 86_400 + 9 * 3_600) * 1000,
+        readonly: false,
+        hidden: false,
+    }
+}
+
+fn file_browser(app: &mut App, lang: Lang) {
+    home(app, lang);
+    start_session(app, lang, 0);
+    let Some(view) = app.session.as_mut() else {
+        return;
+    };
+    let local = vec![
+        fs_entry("Projects", true, 0, 40),
+        fs_entry("الصور", true, 0, 12),
+        fs_entry("invoice-2025.pdf", false, 482_113, 33),
+        fs_entry("تقرير الربع الأول.docx", false, 96_204, 28),
+        fs_entry("notes.txt", false, 2_048, 5),
+    ];
+    let remote = vec![
+        fs_entry("Backups", true, 0, 60),
+        fs_entry("المستندات", true, 0, 21),
+        fs_entry("اقرأني.txt", false, 612, 14),
+        fs_entry("photos.zip", false, 48_220_331, 30),
+        fs_entry("setup.exe", false, 12_883_968, 19),
+    ];
+    view.files.show_fixture(
+        (r"C:\Users\me\Documents", local, "invoice-2025.pdf"),
+        (r"D:\Shared", remote, "photos.zip"),
+    );
 }
 
 fn settings(app: &mut App, lang: Lang) {
