@@ -18,6 +18,7 @@
   - [Chat](user-guide/en/chat.md)
   - [Session recording](user-guide/en/recording.md)
   - [Whiteboard: draw on the remote screen](user-guide/en/whiteboard.md)
+  - [Port forwarding](user-guide/en/port-forwarding.md)
   - [View options](user-guide/en/view-options.md)
   - [The statistics overlay](user-guide/en/stats.md)
   - [Settings](user-guide/en/settings.md)
@@ -34,7 +35,6 @@
     - [Ctrl+Alt+Del and lock](user-guide/en/coming-soon/ctrl-alt-del.md)
     - [Privacy mode](user-guide/en/coming-soon/privacy-mode.md)
     - [Wake-on-LAN](user-guide/en/coming-soon/wake-on-lan.md)
-    - [Port forwarding](user-guide/en/coming-soon/port-forwarding.md)
     - [Remote device information](user-guide/en/coming-soon/device-info.md)
 
 # دليل المستخدم (العربية)
@@ -53,6 +53,7 @@
   - [المحادثة](user-guide/ar/chat.md)
   - [تسجيل الجلسة](user-guide/ar/recording.md)
   - [اللوح الأبيض: الرسم على الشاشة](user-guide/ar/whiteboard.md)
+  - [إعادة توجيه المنافذ (الأنفاق)](user-guide/ar/port-forwarding.md)
   - [خيارات العرض](user-guide/ar/view-options.md)
   - [لوحة الإحصاءات](user-guide/ar/stats.md)
   - [الإعدادات](user-guide/ar/settings.md)
@@ -69,7 +70,6 @@
     - [Ctrl+Alt+Del والقفل](user-guide/ar/coming-soon/ctrl-alt-del.md)
     - [وضع الخصوصية](user-guide/ar/coming-soon/privacy-mode.md)
     - [التشغيل عبر الشبكة (Wake-on-LAN)](user-guide/ar/coming-soon/wake-on-lan.md)
-    - [إعادة توجيه المنافذ (الأنفاق)](user-guide/ar/coming-soon/port-forwarding.md)
     - [معلومات الجهاز البعيد](user-guide/ar/coming-soon/device-info.md)
 
 # Security
