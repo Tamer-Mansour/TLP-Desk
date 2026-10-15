@@ -1039,6 +1039,29 @@ mod tests {
         assert!(sent.is_empty(), "{sent:?}");
     }
 
+    /// Typing in the real chat panel (Arabic included) must not leak a single input event to
+    /// the remote PC.
+    #[test]
+    fn typing_in_the_chat_box_sends_no_input_to_the_remote() {
+        let mut rig = Rig::new(None);
+        rig.session.chat.set_open(true);
+        rig.frame(vec![]);
+        rig.ctx
+            .memory_mut(|m| m.request_focus(egui::Id::new(("chat-input", SessionId(1).0))));
+        rig.frame(vec![]);
+        rig.frame(vec![]);
+        rig.take();
+        rig.frame(vec![
+            egui_key(egui::Key::H, true),
+            egui::Event::Text("مرحبا hi".into()),
+            egui_key(egui::Key::H, false),
+            egui_key(egui::Key::Backspace, true),
+            egui_key(egui::Key::Backspace, false),
+        ]);
+        let sent = rig.take();
+        assert!(sent.is_empty(), "{sent:?}");
+    }
+
     #[test]
     fn keyboard_grab_stays_off_in_view_only() {
         let log = Arc::new(Mutex::new(Vec::new()));
