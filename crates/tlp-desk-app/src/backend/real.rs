@@ -86,11 +86,12 @@ impl Default for RealConfig {
             device_name: None,
             known_hosts: KnownHostsStore::Default,
             host: HostConfig {
-                // Moving files and chatting are core uses: accepted sessions may do both.
-                // The host user can revoke either live.
+                // Moving files, chatting and pointing things out on screen are core uses:
+                // accepted sessions may do all three. The host user can revoke any live.
                 default_permissions: DEFAULT_PERMISSIONS
                     .union(Permissions::FILES)
-                    .union(Permissions::CHAT),
+                    .union(Permissions::CHAT)
+                    .union(Permissions::WHITEBOARD),
                 ..HostConfig::default()
             },
             fallback_discovery: true,
