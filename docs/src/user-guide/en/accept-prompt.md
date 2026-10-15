@@ -1,5 +1,7 @@
 # The Accept prompt and the connection banner
 
+![The Accept prompt on the host](../../media/incoming-en-light.png)
+
 This page is about the **host** — the PC someone wants to connect to.
 
 ## The Accept prompt

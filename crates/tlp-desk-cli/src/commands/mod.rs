@@ -4,12 +4,23 @@
 //! `Args` struct and a `run(ctx, args)` function, then add one line in each FEATURE HOOK below
 //! (`mod`, the [`Cmd`] variant, the [`run`] arm). Dial/auth helpers live in [`common`].
 
+pub mod chat;
+pub mod clip_send;
 pub mod common;
 pub mod connect;
+pub mod forward;
+pub mod get_file;
 pub mod id;
 pub mod info;
 pub mod list;
+pub mod ls;
+pub mod mkdir;
+pub mod mv;
+pub mod remote_fs;
+pub mod rm;
+pub mod send_file;
 pub mod serve;
+pub mod typing;
 pub mod wol;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
 
@@ -67,6 +78,25 @@ pub enum Cmd {
     /// Wake a sleeping PC on the LAN (Wake-on-LAN) by MAC address or alias.
     #[command(visible_alias = "exec-wol")]
     Wol(wol::WolArgs),
+    /// Viewer: forward local TCP ports to services on (or next to) the host until Ctrl+C,
+    /// e.g. `forward 192.168.1.20 8080:127.0.0.1:80`. The host must allow port forwarding.
+    Forward(forward::ForwardArgs),
+    /// Viewer: send one chat message to a host and print the replies.
+    Chat(chat::ChatArgs),
+    /// Viewer: put text on the host's clipboard (this PC's clipboard is not touched).
+    ClipSend(clip_send::ClipSendArgs),
+    /// List a folder on the remote PC (or its drives and known folders). Needs "files".
+    Ls(ls::LsArgs),
+    /// Create a folder on the remote PC. Needs "files".
+    Mkdir(mkdir::MkdirArgs),
+    /// Delete a file or folder on the remote PC (permanently). Needs "files".
+    Rm(rm::RmArgs),
+    /// Rename or move within one drive of the remote PC. Needs "files".
+    Mv(mv::MvArgs),
+    /// Viewer: send local files and folders to a host (--to <host folder>).
+    SendFile(send_file::SendFileArgs),
+    /// Viewer: download files and folders from a host (--to <local folder>).
+    GetFile(get_file::GetFileArgs),
     // FEATURE HOOK: one variant per new subcommand.
 }
 
@@ -96,6 +126,15 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::Connect(a) => connect::run(&ctx, a).await,
         Cmd::Info(a) => info::run(&ctx, a).await,
         Cmd::Wol(a) => wol::run(&ctx, a),
+        Cmd::Forward(a) => forward::run(&ctx, a).await,
+        Cmd::Chat(a) => chat::run(&ctx, a).await,
+        Cmd::ClipSend(a) => clip_send::run(&ctx, a).await,
+        Cmd::Ls(a) => ls::run(&ctx, a).await,
+        Cmd::Mkdir(a) => mkdir::run(&ctx, a).await,
+        Cmd::Rm(a) => rm::run(&ctx, a).await,
+        Cmd::Mv(a) => mv::run(&ctx, a).await,
+        Cmd::SendFile(a) => send_file::run(&ctx, a).await,
+        Cmd::GetFile(a) => get_file::run(&ctx, a).await,
         // FEATURE HOOK: one arm per new subcommand.
     }
 }
@@ -182,6 +221,36 @@ mod tests {
     }
 
     #[test]
+    fn clip_send_parses_text_or_file() {
+        let Cmd::ClipSend(c) =
+            parse(&["clip-send", "10.0.0.2", "مرحبا\u{200F}", "--code", "123456"])
+                .unwrap()
+                .cmd
+        else {
+            panic!("not clip-send")
+        };
+        assert_eq!(c.dial.target, "10.0.0.2");
+        assert_eq!(c.text.as_deref(), Some("مرحبا\u{200F}"));
+        assert_eq!(c.dial.auth.code.as_deref(), Some("123456"));
+        let Cmd::ClipSend(c) = parse(&["clip-send", "10.0.0.2", "--file", "نص.txt"])
+            .unwrap()
+            .cmd
+        else {
+            panic!("not clip-send")
+        };
+        assert_eq!(c.file, Some(PathBuf::from("نص.txt")));
+        assert!(parse(&["clip-send", "10.0.0.2", "x", "--file", "a.txt"]).is_err());
+        let Cmd::Serve(s) = parse(&["serve", "--clipboard"]).unwrap().cmd else {
+            panic!("not serve")
+        };
+        let cfg = s.host_config();
+        assert!(cfg
+            .default_permissions
+            .contains(tlp_desk_proto::Permissions::CLIPBOARD));
+        assert!(cfg.features.names().contains(&"clipboard"));
+    }
+
+    #[test]
     fn lang_is_global_and_validated() {
         assert_eq!(parse(&["--lang", "ar", "id"]).unwrap().lang, text::Lang::Ar);
         assert_eq!(parse(&["id", "--lang", "en"]).unwrap().lang, text::Lang::En);
@@ -242,6 +311,64 @@ mod tests {
             assert_eq!(w.target, "01:23:45:67:89:ab");
             assert_eq!(w.to.as_deref(), Some("192.168.1.255"));
         }
+    }
+
+    #[test]
+    fn file_commands_parse_with_arabic_paths() {
+        let Cmd::Ls(l) = parse(&["ls", "10.0.0.2", "C:\\Users\\مستخدم", "--code", "123456"])
+            .unwrap()
+            .cmd
+        else {
+            panic!("not ls")
+        };
+        assert_eq!(l.dial.target, "10.0.0.2");
+        assert_eq!(l.path.as_deref(), Some("C:\\Users\\مستخدم"));
+        assert_eq!(l.dial.auth.code.as_deref(), Some("123456"));
+        let Cmd::Ls(l) = parse(&["ls", "10.0.0.2"]).unwrap().cmd else {
+            panic!("not ls")
+        };
+        assert_eq!(l.path, None);
+        let Cmd::Mkdir(m) = parse(&["mkdir", "10.0.0.2", "D:\\مجلد جديد"]).unwrap().cmd
+        else {
+            panic!("not mkdir")
+        };
+        assert_eq!(m.path, "D:\\مجلد جديد");
+        let Cmd::Rm(r) = parse(&["rm", "10.0.0.2", "D:\\x", "-r"]).unwrap().cmd else {
+            panic!("not rm")
+        };
+        assert!(r.recursive);
+        let Cmd::Mv(m) = parse(&["mv", "10.0.0.2", "D:\\a.txt", "D:\\ب.txt"])
+            .unwrap()
+            .cmd
+        else {
+            panic!("not mv")
+        };
+        assert_eq!((m.from.as_str(), m.to.as_str()), ("D:\\a.txt", "D:\\ب.txt"));
+        assert!(parse(&["mv", "10.0.0.2", "D:\\a.txt"]).is_err());
+        let Cmd::Serve(s) = parse(&["serve", "--allow-files"]).unwrap().cmd else {
+            panic!("not serve")
+        };
+        assert!(s
+            .host_config()
+            .default_permissions
+            .contains(tlp_desk_proto::Permissions::FILES));
+    }
+
+    #[test]
+    fn file_errors_map_to_exit_codes_and_messages() {
+        use tlp_desk_files::fs::FsClientError;
+        use tlp_desk_proto::FsError;
+        let e = anyhow::Error::from(FsClientError::NoPermission);
+        assert_eq!(
+            crate::exit::Exit::of(&e),
+            crate::exit::Exit::PermissionDenied
+        );
+        let e = anyhow::Error::from(FsClientError::Timeout);
+        assert_eq!(crate::exit::Exit::of(&e), crate::exit::Exit::Timeout);
+        let e = anyhow::Error::from(FsClientError::Remote(FsError::NotFound));
+        assert_eq!(crate::exit::Exit::of(&e), crate::exit::Exit::Failure);
+        let ar = text::with_lang(text::Lang::Ar, || text::error_line(&e));
+        assert!(ar.contains("غير موجود"), "{ar}");
     }
 
     #[test]

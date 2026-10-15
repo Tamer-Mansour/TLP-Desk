@@ -17,6 +17,9 @@ pub struct Settings {
     /// Name announced on the LAN; `None` = the computer name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_name: Option<String>,
+    /// New sessions start with clipboard sync off (default: on, so stored as an opt-out).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub clipboard_sync_off: bool,
 }
 
 /// Settings folder name under `%APPDATA%`. Windows paths are case-insensitive, so this is the
@@ -50,6 +53,7 @@ impl Settings {
             lang: Lang::detect(),
             digits: DigitStyle::Western,
             device_name: None,
+            clipboard_sync_off: false,
         }
     }
 
@@ -79,6 +83,7 @@ mod tests {
             lang: Lang::Ar,
             digits: DigitStyle::ArabicIndic,
             device_name: None,
+            clipboard_sync_off: false,
         };
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(json, r#"{"lang":"ar","digits":"arabic_indic"}"#);
@@ -93,5 +98,12 @@ mod tests {
         };
         let json = serde_json::to_string(&named).unwrap();
         assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), named);
+        let clip_off = Settings {
+            clipboard_sync_off: true,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&clip_off).unwrap();
+        assert!(json.contains(r#""clipboard_sync_off":true"#), "{json}");
+        assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), clip_off);
     }
 }

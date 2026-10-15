@@ -11,9 +11,10 @@ use tlp_desk_app::backend::{
     HostProblem, SessionId,
 };
 use tlp_desk_capture::{BgraFrame, CaptureError, CursorState, MonitorInfo, ScreenCapturer};
-use tlp_desk_host::HostConfig;
+use tlp_desk_files::TransferConfig;
+use tlp_desk_host::{HostConfig, DEFAULT_PERMISSIONS};
 use tlp_desk_input::{InputError, InputInjector, MonitorRect};
-use tlp_desk_proto::{InputEvent, RejectReason};
+use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 use tlp_desk_viewer::KnownHostsStore;
 use tokio::runtime::Runtime;
 
@@ -107,9 +108,15 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
             // No real low-level hooks or on-screen marker in tests.
             local_input_grace: Duration::ZERO,
             remote_pointer_marker: false,
+            default_permissions: DEFAULT_PERMISSIONS.union(Permissions::FILES),
             ..HostConfig::default()
         },
         fallback_discovery: false,
+        clipboard: None,
+        transfer: TransferConfig {
+            default_upload_dir: Some(dir.join("received")),
+            ..TransferConfig::default()
+        },
     }
 }
 
@@ -392,6 +399,80 @@ fn changed_host_key_is_loud_and_can_be_forgotten() {
     let _ = &mut host;
 }
 
+/// TLP-recording: the viewer records the live H.264 stream to an MP4 that plays back.
+#[test]
+fn viewer_records_a_session_to_mp4() {
+    use tlp_desk_viewer::recording::{list_recordings, Player};
+
+    let rt = Runtime::new().unwrap();
+    let host = start(&rt, Arc::default(), 0, |_| {});
+    let mut viewer = start(&rt, Arc::default(), 0, |_| {});
+    let folder = tempfile::tempdir().unwrap();
+    viewer
+        .backend
+        .set_recordings_folder(folder.path().to_owned());
+    let code = host.backend.local_info().one_time_code;
+    let attempt = viewer.backend.connect(
+        ConnectTarget::Address(host.backend.local_addr().unwrap()),
+        Some(code),
+    );
+    let (session, frames) = viewer.events.wait(&rt, "session", |e| match e {
+        BackendEvent::SessionStarted {
+            attempt: a,
+            session,
+            frames,
+            ..
+        } if *a == attempt => Some((*session, frames.clone())),
+        _ => None,
+    });
+    wait_frame(&frames);
+
+    viewer.backend.start_recording(session);
+    let started_in = viewer.events.wait(&rt, "recording started", |e| match e {
+        BackendEvent::RecordingStarted { session: s, folder } if *s == session => {
+            Some(folder.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(started_in, folder.path());
+    // About a second of video (the fake screen runs at ~30 fps).
+    for _ in 0..25 {
+        wait_frame(&frames);
+    }
+    viewer.backend.stop_recording(session);
+    let (files, problem) = viewer.events.wait(&rt, "recording stopped", |e| match e {
+        BackendEvent::RecordingStopped {
+            session: s,
+            files,
+            problem,
+        } if *s == session => Some((files.clone(), problem.clone())),
+        _ => None,
+    });
+    assert_eq!(problem, None);
+    assert_eq!(files.len(), 1, "{files:?}");
+    let name = files[0].file_name().unwrap().to_str().unwrap().to_owned();
+    assert!(name.starts_with("TLP-Desk اختبار-pc "), "{name}");
+
+    let list = list_recordings(folder.path()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert!(list[0].complete);
+    assert!(list[0]
+        .duration
+        .is_some_and(|d| d >= Duration::from_millis(300)));
+
+    let player = Player::open(&files[0], tlp_desk_viewer::PixelFormat::Rgba, None).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let frame = loop {
+        if let Some(f) = player.take_frame() {
+            break f;
+        }
+        assert!(Instant::now() < deadline, "the recording does not decode");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!((frame.width, frame.height), (W, H));
+    let _ = &host;
+}
+
 #[test]
 fn busy_port_degrades_to_dial_only_with_a_clear_problem() {
     let rt = Runtime::new().unwrap();
@@ -417,4 +498,148 @@ fn busy_port_degrades_to_dial_only_with_a_clear_problem() {
         BackendEvent::SessionStarted { attempt: a, .. } if *a == attempt => Some(()),
         _ => None,
     });
+}
+
+/// Clipboard sync through the real backends, with in-memory clipboards on both sides (never the
+/// user's real clipboard): Arabic text copied on the viewer lands byte-exact on the host, both
+/// UIs get their events, and the viewer's "Sync clipboard" switch stops it.
+#[test]
+fn clipboard_syncs_through_the_backends() {
+    use tlp_desk_files::{ClipContent, ClipboardEvent, Direction, MemoryClipboard};
+    let rt = Runtime::new().unwrap();
+    let peer = |clip: Arc<MemoryClipboard>| {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(dir.path(), Arc::default(), 0);
+        cfg.clipboard = Some(clip);
+        cfg.host.default_permissions =
+            tlp_desk_host::DEFAULT_PERMISSIONS.union(tlp_desk_proto::Permissions::CLIPBOARD);
+        let (backend, rx) = RealBackend::start_concrete(rt.handle(), Arc::new(|| {}), cfg);
+        Peer {
+            backend,
+            events: Events::new(rx),
+            _dir: dir,
+        }
+    };
+    let host_clip = Arc::new(MemoryClipboard::new());
+    let viewer_clip = Arc::new(MemoryClipboard::new());
+    let mut host = peer(host_clip.clone());
+    let mut viewer = peer(viewer_clip.clone());
+    let code = host.backend.local_info().one_time_code;
+    let target = ConnectTarget::Address(host.backend.local_addr().unwrap());
+    viewer.backend.connect(target, Some(code));
+    let (session, _frames) = viewer.events.wait(&rt, "session started", started);
+    let host_session = host.events.wait(&rt, "host session", |e| match e {
+        BackendEvent::HostSessionStarted { session, .. } => Some(*session),
+        _ => None,
+    });
+
+    let text = "نسخ\u{200F} من العارض\r\nلا\u{200C}مي 👋";
+    viewer_clip.copy(ClipContent::Text(text.into()));
+    let ev = viewer.events.wait(&rt, "clipboard sent", |e| match e {
+        BackendEvent::Clipboard { session: s, event } if *s == session => Some(event.clone()),
+        _ => None,
+    });
+    assert!(matches!(
+        ev,
+        ClipboardEvent::Synced {
+            direction: Direction::Sent,
+            ..
+        }
+    ));
+    let ev = host.events.wait(&rt, "clipboard received", |e| match e {
+        BackendEvent::Clipboard { session: s, event } if *s == host_session => Some(event.clone()),
+        _ => None,
+    });
+    assert!(matches!(
+        ev,
+        ClipboardEvent::Synced {
+            direction: Direction::Received,
+            ..
+        }
+    ));
+    assert_eq!(host_clip.content(), Some(ClipContent::Text(text.into())));
+
+    // "Sync clipboard" off on the viewer: nothing moves any more.
+    viewer.backend.set_clipboard_sync(session, false);
+    std::thread::sleep(Duration::from_millis(200));
+    viewer_clip.copy(ClipContent::Text("لا يُرسل".into()));
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(host_clip.content(), Some(ClipContent::Text(text.into())));
+    assert_eq!(host_clip.write_count(), 1);
+}
+
+fn find_file(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_file(&path, name) {
+                return Some(found);
+            }
+        } else if path.file_name().is_some_and(|n| n == name) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+#[test]
+fn files_are_sent_through_the_backend_with_progress() {
+    use tlp_desk_app::backend::files::TransferStatus;
+
+    let rt = Runtime::new().unwrap();
+    let host = start(&rt, Arc::default(), 0, |d| {
+        std::fs::create_dir_all(d.join("received")).unwrap();
+    });
+    let mut viewer = start(&rt, Arc::default(), 0, |_| {});
+    let code = host.backend.local_info().one_time_code;
+    let attempt = viewer.backend.connect(
+        ConnectTarget::Address(host.backend.local_addr().unwrap()),
+        Some(code),
+    );
+    let (session, _frames) = viewer.events.wait(&rt, "session", |e| match e {
+        BackendEvent::SessionStarted {
+            attempt: a,
+            session,
+            frames,
+            ..
+        } if *a == attempt => Some((*session, frames.clone())),
+        _ => None,
+    });
+
+    // A nested folder with Arabic names plus a larger file.
+    let src = tempfile::tempdir().unwrap();
+    let folder = src.path().join("مجلد المشروع");
+    std::fs::create_dir_all(folder.join("فرعي")).unwrap();
+    std::fs::write(folder.join("فرعي").join("ملف.txt"), "مرحبا بالعالم").unwrap();
+    let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(folder.join("big.bin"), &big).unwrap();
+
+    viewer.backend.send_files(session, vec![folder]);
+    let view = viewer.events.wait(&rt, "transfer completed", |e| match e {
+        BackendEvent::Transfer { session: s, view }
+            if *s == session && view.status == TransferStatus::Completed =>
+        {
+            Some(view.clone())
+        }
+        _ => None,
+    });
+    assert_eq!(view.total_files, 2);
+    assert_eq!(view.failed_files, 0);
+    assert_eq!(view.bytes_done, view.total_bytes);
+
+    let received = host._dir.path().join("received");
+    let text = find_file(&received, "ملف.txt").expect("Arabic file arrived");
+    assert_eq!(std::fs::read_to_string(text).unwrap(), "مرحبا بالعالم");
+    let bin = find_file(&received, "big.bin").expect("big file arrived");
+    assert_eq!(std::fs::read(bin).unwrap(), big);
+
+    // A missing path is reported instead of silently ignored.
+    viewer
+        .backend
+        .send_files(session, vec![src.path().join("does-not-exist")]);
+    viewer.events.wait(&rt, "not started", |e| match e {
+        BackendEvent::TransferNotStarted { session: s, .. } if *s == session => Some(()),
+        _ => None,
+    });
+    viewer.backend.disconnect(session);
 }

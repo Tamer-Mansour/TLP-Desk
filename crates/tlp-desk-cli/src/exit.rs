@@ -5,7 +5,7 @@
 
 use tlp_desk_net::NetError;
 use tlp_desk_proto::RejectReason;
-use tlp_desk_viewer::ViewerError;
+use tlp_desk_viewer::{TunnelCloseReason, ViewerError};
 
 /// Why the CLI stopped. `as u8` is the process exit code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +84,9 @@ impl Exit {
             if let Some(e) = cause.downcast_ref::<CliError>() {
                 return e.exit();
             }
+            if let Some(e) = cause.downcast_ref::<tlp_desk_files::fs::FsClientError>() {
+                return of_fs(e);
+            }
             if let Some(e) = cause.downcast_ref::<ViewerError>() {
                 return of_viewer(e);
             }
@@ -91,6 +94,9 @@ impl Exit {
                 if let Some(x) = of_net(e) {
                     return x;
                 }
+            }
+            if let Some(e) = cause.downcast_ref::<tlp_desk_files::FilesError>() {
+                return of_files(e);
             }
         }
         Exit::Failure
@@ -108,7 +114,47 @@ fn of_viewer(e: &ViewerError) -> Exit {
         }
         ViewerError::VersionMismatch { .. } => Exit::VersionMismatch,
         ViewerError::Net(n) => of_net(n).unwrap_or(Exit::Failure),
-        ViewerError::KnownHosts(_) => Exit::Failure,
+        // --- tunnels (TLP-tunnel) ---
+        ViewerError::TunnelNotAllowed => Exit::PermissionDenied,
+        ViewerError::TunnelRefused(r) => match r {
+            TunnelCloseReason::TargetNotAllowed
+            | TunnelCloseReason::PermissionDenied
+            | TunnelCloseReason::PermissionRevoked => Exit::PermissionDenied,
+            TunnelCloseReason::NoAnswer => Exit::Timeout,
+            _ => Exit::Failure,
+        },
+        ViewerError::TunnelSpec(_) | ViewerError::TunnelLanBind(_) => Exit::Usage,
+        ViewerError::TunnelBind { .. } | ViewerError::TunnelLimit => Exit::Failure,
+        ViewerError::SessionEnded => Exit::Unreachable,
+        ViewerError::KnownHosts(_)
+        | ViewerError::RecordingIo(_)
+        | ViewerError::DiskFull { .. }
+        | ViewerError::BadRecording(_)
+        | ViewerError::BadVideo(_)
+        | ViewerError::Decoder(_) => Exit::Failure,
+    }
+}
+
+fn of_fs(e: &tlp_desk_files::fs::FsClientError) -> Exit {
+    use tlp_desk_files::fs::FsClientError as C;
+    match e {
+        C::NoPermission | C::Remote(tlp_desk_proto::FsError::PermissionDenied) => {
+            Exit::PermissionDenied
+        }
+        C::Timeout => Exit::Timeout,
+        _ => Exit::Failure,
+    }
+}
+
+fn of_files(e: &tlp_desk_files::FilesError) -> Exit {
+    use tlp_desk_files::FilesError as F;
+    use tlp_desk_proto::FsError;
+    match e {
+        F::PermissionDenied | F::Remote(FsError::PermissionDenied) => Exit::PermissionDenied,
+        F::Remote(FsError::NotFound) => Exit::NotFound,
+        F::Cancelled => Exit::Interrupted,
+        F::Net(n) => of_net(n).unwrap_or(Exit::Failure),
+        _ => Exit::Failure,
     }
 }
 

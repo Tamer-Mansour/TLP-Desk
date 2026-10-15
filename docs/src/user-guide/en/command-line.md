@@ -33,6 +33,8 @@ TLP-Desk-cli connect 123456789 --code 042917 --seconds 10 --snapshot shot.png
 TLP-Desk-cli info 123456789 --code 042917   # the other PC's system, CPU, memory, disks, uptime
 TLP-Desk-cli wol 01:23:45:67:89:ab          # wake a sleeping PC (Wake-on-LAN)
 TLP-Desk-cli list --json                    # machine-readable output for scripts
+TLP-Desk-cli chat 123456789 "مرحباً، hello" --code 042917 --wait 10   # send a chat message, print replies
+TLP-Desk-cli ls 123456789 --code 042917 D:\Shared   # also: mkdir, rm, mv (need the Files permission)
 ```
 
 When `serve` receives a request without a code, it asks on the console: **Accept? [y/N]**.

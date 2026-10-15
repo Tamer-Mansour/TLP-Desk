@@ -51,6 +51,6 @@ From the Arabic section of the roadmap: clipboard sync must preserve Arabic text
 the UI and on disk.
 
 When you implement it, update this page, the user guide pages for
-[file transfer](../../user-guide/en/coming-soon/file-transfer.md) and
-[clipboard](../../user-guide/en/coming-soon/clipboard.md), and the
+[file transfer](../../user-guide/en/file-transfer.md) and
+[clipboard](../../user-guide/en/clipboard.md), and the
 [changelog](../../changelog.md).
