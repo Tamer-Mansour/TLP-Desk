@@ -23,6 +23,8 @@ use tlp_desk_proto::{InputEvent, Permissions};
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::chat::{ChatLine, ChatSendError};
+use super::tunnels::{TunnelProblem, TunnelRequest, TunnelRow};
 use super::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
     EndReason, EventReceiver, EventSender, FrameSlot, LocalInfo, MonitorDesc, PeerInfo, RepaintFn,
@@ -77,6 +79,8 @@ struct State {
     /// The simulated "reinstalled" host at 192.168.1.66 has a changed key until forgotten.
     key_changed: bool,
     rng: u64,
+    /// Simulated port forwarding rules per viewer session (TLP-tunnel).
+    tunnels: HashMap<SessionId, Vec<TunnelRow>>,
 }
 
 /// Address of the simulated host whose key changed.
@@ -129,12 +133,20 @@ impl FakeBackend {
                 requests: HashMap::new(),
                 key_changed: true,
                 rng,
+                tunnels: HashMap::new(),
             }),
         });
         inner.spawn_discovery();
         inner.spawn_incoming_request();
         (Arc::new(FakeBackend { inner }), rx)
     }
+}
+
+fn unix_ms_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 fn device(id: u32, name: &str, ip: [u8; 4], online: bool) -> DiscoveredDevice {
@@ -311,6 +323,36 @@ impl Inner {
             monitors: fake_monitors(),
             active: 0,
         });
+        self.emit(BackendEvent::ChatAvailability {
+            session,
+            allowed: true,
+        });
+        // The fake remote PC has files copied in Explorer, ready to paste.
+        self.emit(BackendEvent::RemoteClipboardFiles {
+            session,
+            files: Some(super::files_fake::remote_clipboard()),
+        });
+    }
+
+    /// The simulated peer writes `text` to `session` after `delay` (chat, TLP-chat).
+    fn fake_chat_reply(self: &Arc<Self>, session: SessionId, delay: Duration, text: String) {
+        let me = Arc::clone(self);
+        self.rt.spawn(async move {
+            tokio::time::sleep(delay).await;
+            let id = me.next_id();
+            if !me.state().sessions.contains_key(&session) {
+                return;
+            }
+            me.emit(BackendEvent::ChatReceived {
+                session,
+                line: ChatLine {
+                    id,
+                    mine: false,
+                    text,
+                    at_unix_ms: unix_ms_now(),
+                },
+            });
+        });
     }
 
     async fn run_video(
@@ -430,6 +472,52 @@ impl Backend for FakeBackend {
             );
             self.inner
                 .emit(BackendEvent::HostSessionStarted { session, peer });
+            // The simulated viewer writes to the host user, which opens the chat window.
+            self.inner.emit(BackendEvent::ChatAvailability {
+                session,
+                allowed: true,
+            });
+            self.inner.fake_chat_reply(
+                session,
+                Duration::from_secs(3),
+                "مرحباً! هل يمكنني فتح ملف report-2026.pdf؟".into(),
+            );
+        }
+    }
+
+    fn send_chat(&self, session: SessionId, text: &str) -> Result<ChatLine, ChatSendError> {
+        let viewer = match self.inner.state().sessions.get(&session) {
+            Some(ctl) => ctl.task.is_some(),
+            None => return Err(ChatSendError::Unavailable),
+        };
+        if text.trim().is_empty() {
+            return Err(ChatSendError::Empty);
+        }
+        let max = super::chat::max_chat_chars();
+        if text.chars().count() > max {
+            return Err(ChatSendError::TooLong { max });
+        }
+        if viewer {
+            // The simulated host user answers in Arabic, quoting the start of the message.
+            let quote: String = text.chars().take(40).collect();
+            self.inner.fake_chat_reply(
+                session,
+                Duration::from_millis(1200),
+                format!("وصلت رسالتك: «{quote}» ✓"),
+            );
+        }
+        Ok(ChatLine {
+            id: self.inner.next_id(),
+            mine: true,
+            text: text.to_owned(),
+            at_unix_ms: unix_ms_now(),
+        })
+    }
+
+    fn set_chat_allowed(&self, session: SessionId, allowed: bool) {
+        if self.inner.state().sessions.contains_key(&session) {
+            self.inner
+                .emit(BackendEvent::ChatAvailability { session, allowed });
         }
     }
 
@@ -471,6 +559,79 @@ impl Backend for FakeBackend {
 
     fn set_view_only(&self, _session: SessionId, _view_only: bool) {}
 
+    fn fs_request(
+        &self,
+        side: super::files::FsSide,
+        op: super::files::FsOp,
+    ) -> Option<super::files::FsRequestId> {
+        use super::files::{FsFailure, FsSide};
+        let request = super::files::FsRequestId(self.inner.next_id());
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            let result = tokio::task::spawn_blocking(move || match side {
+                FsSide::Local => super::files_fake::local_request(&op),
+                FsSide::Remote(_) => super::files_fake::remote_request(&op),
+            })
+            .await
+            .unwrap_or_else(|e| Err(FsFailure::Other(e.to_string())));
+            me.emit(BackendEvent::FsResult {
+                side,
+                request,
+                result,
+            });
+        });
+        Some(request)
+    }
+
+    fn fs_transfer(&self, session: SessionId, request: super::files::TransferRequest) {
+        self.inner.emit(BackendEvent::FilesNotice {
+            session,
+            notice: super::files_fake::transfer_notice(&request),
+        });
+    }
+
+    /// Pretends to send: 100 MB per file at ~50 MB/s, with live progress events.
+    fn send_files(&self, session: SessionId, paths: Vec<std::path::PathBuf>) {
+        use super::files::{TransferDir, TransferId, TransferStatus, TransferView};
+        let inner = Arc::clone(&self.inner);
+        let id = TransferId(inner.next_id.fetch_add(1, Ordering::Relaxed));
+        let label = match paths.as_slice() {
+            [one] => one
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
+            many => format!("{} items", many.len()),
+        };
+        let files = paths.len().max(1) as u32;
+        let total = u64::from(files) * 100_000_000;
+        self.inner.rt.spawn(async move {
+            let mut view = TransferView {
+                id,
+                dir: TransferDir::Send,
+                label,
+                status: TransferStatus::Running,
+                bytes_done: 0,
+                total_bytes: total,
+                files_done: 0,
+                total_files: files,
+                failed_files: 0,
+                bytes_per_sec: 50_000_000,
+                local_dest: None,
+            };
+            while view.bytes_done < total {
+                inner.emit(BackendEvent::Transfer {
+                    session,
+                    view: view.clone(),
+                });
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                view.bytes_done = (view.bytes_done + 12_500_000).min(total);
+                view.files_done = (view.bytes_done / 100_000_000) as u32;
+            }
+            view.status = TransferStatus::Completed;
+            view.bytes_per_sec = 0;
+            inner.emit(BackendEvent::Transfer { session, view });
+        });
+    }
+
     fn select_monitor(&self, session: SessionId, index: u32) {
         if !fake_monitors().iter().any(|m| m.index == index) {
             return; // like the real host: unknown index ignored
@@ -491,7 +652,100 @@ impl Backend for FakeBackend {
         });
     }
 
+    // --- power: port forwarding (TLP-tunnel), simulated: rules appear, no traffic ---
+
+    fn add_tunnel(&self, session: SessionId, request: TunnelRequest) {
+        let event = {
+            let mut st = self.inner.state();
+            if !st.sessions.contains_key(&session) {
+                return;
+            }
+            let target_ip = request
+                .target_host
+                .as_deref()
+                .map_or(Some(IpAddr::V4(Ipv4Addr::LOCALHOST)), |h| h.parse().ok());
+            let rules = st.tunnels.entry(session).or_default();
+            let problem = match target_ip {
+                None => Some(TunnelProblem::BadTarget),
+                Some(ip) if !is_lan(ip) => Some(TunnelProblem::TargetNotAllowed),
+                Some(_) if rules.iter().any(|r| r.local.port() == request.local_port) => {
+                    Some(TunnelProblem::LocalPort("address in use (fake)".into()))
+                }
+                Some(_) => None,
+            };
+            match (problem, target_ip) {
+                (Some(problem), _) => BackendEvent::TunnelProblem { session, problem },
+                (None, ip) => {
+                    let bind = if request.lan_bind {
+                        Ipv4Addr::UNSPECIFIED
+                    } else {
+                        Ipv4Addr::LOCALHOST
+                    };
+                    let target = match ip {
+                        Some(ip) if request.target_host.is_some() => {
+                            std::net::SocketAddr::new(ip, request.target_port).to_string()
+                        }
+                        _ => format!("localhost:{}", request.target_port),
+                    };
+                    rules.push(TunnelRow {
+                        id: self.inner.next_id(),
+                        local: std::net::SocketAddr::new(IpAddr::V4(bind), request.local_port),
+                        target,
+                        active: 0,
+                        connections: 0,
+                        failed: 0,
+                        bytes_sent: 0,
+                        bytes_received: 0,
+                    });
+                    BackendEvent::Tunnels {
+                        session,
+                        rules: rules.clone(),
+                    }
+                }
+            }
+        };
+        self.inner.emit(event);
+    }
+
+    fn stop_tunnel(&self, session: SessionId, id: u64) {
+        let rules = {
+            let mut st = self.inner.state();
+            let Some(rules) = st.tunnels.get_mut(&session) else {
+                return;
+            };
+            rules.retain(|r| r.id != id);
+            rules.clone()
+        };
+        self.inner.emit(BackendEvent::Tunnels { session, rules });
+    }
+
+    fn allow_tunnels(&self, session: SessionId, allowed: bool) {
+        self.inner.emit(BackendEvent::HostTunnels {
+            session,
+            allowed,
+            tunnels: Vec::new(),
+        });
+    }
+
+    fn request_device_info(&self, session: SessionId) {
+        if !self.inner.state().sessions.contains_key(&session) {
+            return;
+        }
+        let inner = self.inner.clone();
+        self.inner.rt.spawn(async move {
+            // A short delay so the "asking…" state is visible, like a real round trip.
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            if inner.state().sessions.contains_key(&session) {
+                inner.emit(BackendEvent::DeviceInfo {
+                    session,
+                    info: super::device_info::fake_info(),
+                });
+            }
+        });
+    }
+
     fn disconnect(&self, session: SessionId) {
+        self.inner.state().tunnels.remove(&session);
         let removed = self.inner.state().sessions.remove(&session);
         if let Some(ctl) = removed {
             if let Some(task) = ctl.task {
@@ -535,6 +789,26 @@ impl Backend for FakeBackend {
     fn wake_on_lan(&self, mac: [u8; 6], last_ips: &[IpAddr]) -> Result<(), String> {
         tracing::info!(?mac, ?last_ips, "fake backend: Wake-on-LAN (nothing sent)");
         Ok(())
+    }
+
+    // --- power (TLP-power) ---
+    // recording (TLP-recording): simulated; the fake session's frames are not H.264, so no
+    // file is written.
+    fn start_recording(&self, session: SessionId) {
+        if self.inner.state().sessions.contains_key(&session) {
+            self.inner.emit(BackendEvent::RecordingStarted {
+                session,
+                folder: super::recording::recordings_folder().unwrap_or_default(),
+            });
+        }
+    }
+
+    fn stop_recording(&self, session: SessionId) {
+        self.inner.emit(BackendEvent::RecordingStopped {
+            session,
+            files: Vec::new(),
+            problem: None,
+        });
     }
 }
 
@@ -723,6 +997,42 @@ mod tests {
         assert_eq!(fp.split(' ').count(), 4);
         assert_eq!(backend.pinned_fingerprint(DeviceId(1)), None);
         assert_eq!(backend.wake_on_lan([0x02, 0, 1, 2, 3, 4], &[ip]), Ok(()));
+    }
+
+    #[test]
+    fn fake_host_user_answers_chat_in_arabic() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (backend, mut rx) = FakeBackend::start(rt.handle(), Arc::new(|| {}));
+        backend.connect(
+            ConnectTarget::Address("192.168.1.30:47400".parse().unwrap()),
+            Some("123456".into()),
+        );
+        let session = rt.block_on(async {
+            loop {
+                if let BackendEvent::SessionStarted { session, .. } = rx.recv().await.unwrap() {
+                    return session;
+                }
+            }
+        });
+        let sent = backend.send_chat(session, "مرحبا").unwrap();
+        assert!(sent.mine);
+        assert_eq!(backend.send_chat(session, " "), Err(ChatSendError::Empty));
+        let reply = rt.block_on(async {
+            loop {
+                if let BackendEvent::ChatReceived { session: s, line } = rx.recv().await.unwrap() {
+                    assert_eq!(s, session);
+                    return line;
+                }
+            }
+        });
+        assert!(!reply.mine && reply.text.contains("مرحبا"), "{reply:?}");
+        assert_eq!(
+            backend.send_chat(SessionId(424242), "x"),
+            Err(ChatSendError::Unavailable)
+        );
     }
 
     #[test]

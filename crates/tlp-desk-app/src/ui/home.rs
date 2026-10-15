@@ -14,11 +14,15 @@ enum Action {
     ConnectAddress,
     NewCode,
     OpenSettings,
+    /// connection log (TLP-settings-tray)
+    OpenConnectionLog,
     SetLang(Lang),
     /// Save a discovered device to the address book.
     SaveDevice(DiscoveredDevice),
     /// Switch to the address book tab.
     ShowAddressBook,
+    /// recording (TLP-recording)
+    OpenRecordings,
 }
 
 /// Top bar shared by home and settings: brand at the start, settings + language at the end.
@@ -64,6 +68,30 @@ fn top_bar(ui: &mut egui::Ui, tx: Tx, actions: &mut Vec<Action>, show_settings_b
                     {
                         actions.push(Action::OpenSettings);
                     }
+                    // recording (TLP-recording)
+                    if show_settings_button
+                        && ui
+                            .add(icons::icon_text_button(
+                                tx,
+                                Icon::Playback,
+                                tx.t(S::Recordings),
+                            ))
+                            .clicked()
+                    {
+                        actions.push(Action::OpenRecordings);
+                    }
+                    // connection log (TLP-settings-tray)
+                    if show_settings_button
+                        && ui
+                            .add(icons::icon_text_button(
+                                tx,
+                                Icon::Log,
+                                tx.t(S::ConnectionLog),
+                            ))
+                            .clicked()
+                    {
+                        actions.push(Action::OpenConnectionLog);
+                    }
                 });
             });
         });
@@ -98,12 +126,17 @@ impl App {
                 Action::ConnectAddress => self.connect_from_address(),
                 Action::NewCode => self.backend.refresh_one_time_code(),
                 Action::OpenSettings => self.screen = Screen::Settings,
+                Action::OpenConnectionLog => self.open_connection_log(),
                 Action::SetLang(l) => self.set_lang(ui.ctx(), l),
                 Action::SaveDevice(d) => {
                     self.address_book
                         .save_discovered(&d, self.backend.as_ref(), tx);
                 }
                 Action::ShowAddressBook => self.address_book.tab = HomeTab::AddressBook,
+                Action::OpenRecordings => {
+                    self.recordings.open = true;
+                    self.recordings.reload();
+                }
             }
         }
     }

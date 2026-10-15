@@ -17,6 +17,7 @@ tlp-desk-crypto.workspace = true
 tlp-desk-net.workspace = true
 tlp-desk-host.workspace = true
 tlp-desk-viewer.workspace = true
+tlp-desk-files.workspace = true
 tlp-desk-input.workspace = true
 if-addrs = "0.13"
 raw-window-handle = "0.6"
@@ -26,12 +27,26 @@ unicode-bidi = "0.3.18"
 serde_json = "1"
 tracing = "0.1"
 sys-locale = "0.3"
+# Local UTC offset for the file browser's "modified" column and chat timestamps (Windows: GetTimeZoneInformation).
+time = { version = "0.3", default-features = false, features = ["std", "local-offset"] }
 # Rasterizes the vendored tlp-icons SVGs (ui::icons). No default features: icons have no text or
 # embedded raster images, so no font database (fontdb/system fonts) is pulled in.
+# Native file / folder picker for sending files (Win32 dialogs; no GTK or portals on Windows).
+rfd = { version = "0.15", default-features = false }
 resvg = { version = "0.48", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+# HKCU Run key for "start with Windows" (settings::autostart). Safe API: this crate stays
+# forbid(unsafe_code).
+windows-registry = "0.6"
+# Notification-area icon + menu (tray::system). No default features: they only add the Linux
+# libappindicator backend (and an MPL-licensed dependency through dirs).
+tray-icon = { version = "0.26", default-features = false }
 
 [dev-dependencies]
 tlp-desk-capture.workspace = true
+# Encodes real H.264 for the playback window tests.
+tlp-desk-codec.workspace = true
 tempfile = "3"
 # README media generator (`examples/readme_media`): renders the real UI headlessly with wgpu
 # (`wgpu`) and drives `App` through a real `eframe::CreationContext` (`eframe`).

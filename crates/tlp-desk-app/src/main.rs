@@ -106,11 +106,21 @@ fn main() -> anyhow::Result<()> {
                         IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                         port.unwrap_or(tlp_desk_net::DEFAULT_PORT),
                     ),
+                    clipboard: Some(std::sync::Arc::new(tlp_desk_files::SystemClipboard::new())),
+                    // Default permissions, timeouts and the allow-list come from settings.json
+                    // (Settings screen), not from constants here.
+                    host_settings: Some(settings.host.clone()),
+                    connection_log: tlp_desk_app::settings::app_data_dir(),
                     ..Default::default()
                 };
                 backend::real::RealBackend::start_with(&rt, repaint, cfg)
             };
-            Ok(Box::new(App::new(cc, backend, events, settings, start)))
+            #[cfg_attr(not(windows), allow(unused_mut))]
+            let mut app = App::new(cc, backend, events, settings, start);
+            // Notification-area icon: only the real GUI creates one (never tests or media).
+            #[cfg(windows)]
+            app.enable_tray(&cc.egui_ctx);
+            Ok(Box::new(app))
         }),
     )
     .map_err(|e| anyhow::anyhow!("GUI failed: {e}"))?;

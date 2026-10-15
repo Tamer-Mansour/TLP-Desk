@@ -9,7 +9,12 @@ use eframe::egui::{
 };
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
+use super::chat::{self, ChatState};
+use super::file_browser::FileBrowser;
 use super::icons::{self, Icon};
+use super::key_forward::KeyForwarder;
+use super::transfers::{self, TransferPanel};
+use super::whiteboard::WhiteboardUi;
 use super::{theme, widgets};
 use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, SessionStats};
 use crate::i18n::{format, ltr_isolate, Tx, S};
@@ -47,11 +52,31 @@ pub struct ViewerSession {
     grab: Option<Box<dyn KeyGrab>>,
     /// Whether the grab is currently switched on.
     grab_on: bool,
+    /// Keys the window path holds down on the host (fallback when the grab leaks).
+    keys: KeyForwarder,
+    /// The grab let a key through: it is not capturing (reported to it once per episode).
+    grab_leak_reported: bool,
     /// The host user is using their own mouse/keyboard; our input is being ignored.
     pub host_input_priority: bool,
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Remote device-info window (toolbar button).
+    pub device_info: super::device_info::DeviceInfoPanel,
+    /// Port forwarding window (TLP-tunnel).
+    pub tunnels: super::tunnels::TunnelsPanel,
+    /// Draw-on-screen state (TLP-whiteboard).
+    pub whiteboard: WhiteboardUi,
+    /// Session recording (TLP-recording), driven by the backend's recording events.
+    pub recording: super::recordings::RecordState,
+    /// Chat with the host user (side panel).
+    pub chat: ChatState,
+    /// "Sync clipboard" switch and toast (TLP-clipboard).
+    pub clipboard: super::clipboard::ClipboardUi,
+    /// Two-pane file browser (TLP-files), toggled from the toolbar.
+    pub files: FileBrowser,
+    /// File transfer queue (lane files-transfer).
+    pub transfers: TransferPanel,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -89,9 +114,19 @@ impl ViewerSession {
             input_dirty: false,
             grab: None,
             grab_on: false,
+            keys: KeyForwarder::default(),
+            grab_leak_reported: false,
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            device_info: Default::default(),
+            tunnels: Default::default(),
+            whiteboard: WhiteboardUi::new(),
+            recording: Default::default(),
+            chat: ChatState::new(permissions.contains(Permissions::CHAT)),
+            clipboard: Default::default(),
+            files: FileBrowser::new(id),
+            transfers: TransferPanel::new(),
         }
     }
 
@@ -100,6 +135,7 @@ impl ViewerSession {
         if active != self.active_monitor {
             // New surface: re-send the pointer position on the next move.
             self.last_pos = None;
+            self.whiteboard.monitor_changed();
         }
         self.monitors = monitors;
         self.active_monitor = active;
@@ -135,6 +171,7 @@ impl ViewerSession {
         if let Some(g) = self.grab.as_mut() {
             g.set_active(on);
             self.grab_on = on;
+            self.grab_leak_reported = false;
         }
     }
 
@@ -156,7 +193,25 @@ impl ViewerSession {
             backend.send_input(self.id, InputEvent::ReleaseAll);
         }
         self.pressed.clear();
+        self.keys.clear();
         self.input_dirty = false;
+    }
+
+    /// Sends a key event from the window path (see [`KeyForwarder`]).
+    fn send_key(&mut self, backend: &dyn Backend, ev: InputEvent) {
+        let verdict = self.keys.on_event(self.grab_on, ev);
+        if verdict.grab_leaked && !self.grab_leak_reported {
+            // The OS grab did not swallow this key, so it is not capturing keys. Typing still
+            // works through the window path; ask the grab to repair itself.
+            self.grab_leak_reported = true;
+            tracing::warn!("keyboard grab is on but keys reach the window; using window events");
+            if let Some(g) = self.grab.as_mut() {
+                g.report_leak();
+            }
+        }
+        if let Some(ev) = verdict.event {
+            self.send(backend, ev);
+        }
     }
 
     /// Upload the newest decoded frame, reusing the texture.
@@ -191,10 +246,30 @@ impl ViewerSession {
     pub fn ui(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend, modal_open: bool) {
         let ctx = ui.ctx().clone();
         self.update_texture(&ctx);
+        self.whiteboard
+            .update(self.permissions, backend, self.id, Instant::now());
         self.toolbar(ui, tx, backend);
+        self.device_info.window(&ctx, tx, backend, self.id);
+        if self.whiteboard.is_active() {
+            self.whiteboard.tools_bar(ui, tx, backend, self.id);
+        }
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
+        // Clicks in the floating port forwarding window are not remote input. (Typing there is
+        // not either: keys go to the remote PC only while the remote view has keyboard focus.)
+        let window = self
+            .tunnels
+            .window(&ctx, tx, backend, self.id, self.permissions);
+        let over_window = window.is_some_and(|r| {
+            ctx.input(|i| i.pointer.hover_pos())
+                .is_some_and(|p| r.expand(4.0).contains(p))
+        });
+        let modal_open = modal_open || over_window;
+        self.files.ui(ui, tx, backend, self.permissions);
+        let modal_open = modal_open || self.files.modal_open() || self.files.owns_keyboard();
+        self.transfers_ui(ui, tx, backend);
+        chat::side_panel(ui, tx, &mut self.chat, backend, self.id);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
@@ -235,11 +310,50 @@ impl ViewerSession {
                             .inner
                     }
                 };
+                self.whiteboard
+                    .paint(ui, image_rect, visible, self.frame_size);
                 if self.show_stats {
                     self.stats_overlay(ui, tx, ui.clip_rect());
                 }
-                self.handle_input(ui, backend, &resp, image_rect, visible, modal_open);
+                if self.whiteboard.is_active() && !modal_open {
+                    // The pointer draws; nothing is sent as input (keys neither).
+                    self.set_grab(false);
+                    self.whiteboard.handle_pointer(
+                        ui,
+                        image_rect,
+                        visible,
+                        self.frame_size,
+                        backend,
+                        self.id,
+                        Instant::now(),
+                    );
+                } else {
+                    self.handle_input(ui, backend, &resp, image_rect, visible, modal_open);
+                }
             });
+    }
+
+    /// File transfer panel, drag and drop of files onto the window, and applying the panel's
+    /// requests to the backend.
+    fn transfers_ui(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
+        let allowed = self.permissions.contains(Permissions::FILES);
+        let ctx = ui.ctx().clone();
+        TransferPanel::drop_overlay(&ctx, tx, &self.peer.name, allowed);
+        let dropped = TransferPanel::take_dropped(&ctx);
+        if !dropped.is_empty() {
+            self.transfers.open = true;
+            if allowed {
+                backend.send_files(self.id, dropped);
+            }
+        }
+        for action in self.transfers.ui(ui, tx, allowed) {
+            match action {
+                transfers::Action::Send(paths) => backend.send_files(self.id, paths),
+                transfers::Action::Cancel(id) => backend.cancel_transfer(self.id, id),
+                transfers::Action::Retry(id) => backend.retry_transfer(self.id, id),
+                transfers::Action::OpenFolder(dir) => transfers::open_folder(&dir),
+            }
+        }
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
@@ -305,6 +419,31 @@ impl ViewerSession {
                     {
                         self.show_stats = !self.show_stats;
                     }
+                    self.device_info.toolbar_button(ui, tx, backend, self.id);
+                    self.tunnels.toolbar_button(ui, tx);
+                    let wb_allowed = self.permissions.contains(Permissions::WHITEBOARD);
+                    if self.whiteboard.toggle_button(ui, tx, wb_allowed) == Some(true) {
+                        // Drawing takes the pointer: nothing may stay pressed on the remote PC.
+                        self.set_grab(false);
+                        self.release_all(backend);
+                    }
+                    let (id, perms) = (self.id, self.permissions);
+                    self.clipboard.toolbar(ui, tx, id, perms, backend);
+                    self.files_buttons(ui, tx, backend);
+                    if icons::icon_toggle(
+                        ui,
+                        tx,
+                        self.transfers.open,
+                        Icon::Upload,
+                        tx.t(S::FilesPanelTitle),
+                    )
+                    .clicked()
+                    {
+                        self.transfers.open = !self.transfers.open;
+                    }
+                    if chat::chat_toggle(ui, tx, &self.chat) {
+                        self.chat.set_open(!self.chat.is_open());
+                    }
                     if let Some(index) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
                         self.release_all(backend);
@@ -342,12 +481,37 @@ impl ViewerSession {
                         if ui.add(b).clicked() {
                             disconnect = true;
                         }
+                        // recording (TLP-recording)
+                        match super::recordings::record_toggle(ui, tx, self.recording) {
+                            Some(true) => {
+                                self.recording = super::recordings::RecordState::Starting;
+                                backend.start_recording(self.id);
+                            }
+                            Some(false) => backend.stop_recording(self.id),
+                            None => {}
+                        }
                     });
                 });
             });
         if disconnect {
             self.release_all(backend);
             backend.disconnect(self.id);
+        }
+    }
+
+    /// Files toggle, plus a paste button while the remote PC has copied files.
+    fn files_buttons(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
+        if icons::icon_toggle(ui, tx, self.files.open, Icon::Folder, tx.t(S::FsFiles)).clicked() {
+            self.files.open = !self.files.open;
+        }
+        if self.files.remote_clipboard.is_some()
+            && self.permissions.contains(Permissions::FILES)
+            && icons::icon_button(ui, tx, Icon::Clipboard, tx.t(S::FsPasteRemote)).clicked()
+        {
+            backend.fs_transfer(
+                self.id,
+                crate::backend::files::TransferRequest::PasteRemoteClipboard { local_dir: None },
+            );
         }
     }
 
@@ -515,7 +679,23 @@ impl ViewerSession {
             self.release_all(backend);
             return;
         }
-        if !self.focus_requested || resp.clicked() || resp.drag_started() {
+        let events = ui.input(|i| i.events.clone());
+        let window_focused = ui.input(|i| i.viewport().focused).unwrap_or(true)
+            && !events
+                .iter()
+                .any(|e| matches!(e, egui::Event::WindowFocused(false)));
+        // The session view owns the keyboard unless a text field (chat, a dialog) has it.
+        // Toolbar buttons take focus when clicked and the window may have been alt-tabbed
+        // away and back: both must hand the keyboard back, or typing silently stops.
+        let reclaim = window_focused && !resp.has_focus() && !ui.ctx().text_edit_focused();
+        if !self.focus_requested
+            || resp.clicked()
+            || resp.drag_started()
+            || reclaim
+            || events
+                .iter()
+                .any(|e| matches!(e, egui::Event::WindowFocused(true)))
+        {
             resp.request_focus();
             self.focus_requested = true;
         }
@@ -537,15 +717,11 @@ impl ViewerSession {
 
         let mouse_ok = self.can_mouse();
         let hover = ui.input(|i| i.pointer.hover_pos());
-        let events = ui.input(|i| i.events.clone());
         // OS keyboard grab: only while this view has keyboard focus inside a focused window.
-        let window_focused = ui.input(|i| i.viewport().focused).unwrap_or(true)
-            && !events
-                .iter()
-                .any(|e| matches!(e, egui::Event::WindowFocused(false)));
         self.set_grab(self.can_keyboard() && resp.has_focus() && window_focused);
-        // While grabbed, keys reach the host through the grab; egui key events would duplicate.
-        let keys_ok = self.can_keyboard() && resp.has_focus() && !self.grab_on;
+        // While grabbed, the hook swallows the keys it forwards, so any key that still reaches
+        // the window was not captured and goes through `send_key` (no duplicates possible).
+        let keys_ok = self.can_keyboard() && resp.has_focus();
         for ev in events {
             match ev {
                 egui::Event::WindowFocused(false) => self.release_all(backend),
@@ -606,7 +782,7 @@ impl ViewerSession {
                     ..
                 } if keys_ok => {
                     if let Some(k) = input_map::key_event(key, physical_key, pressed) {
-                        self.send(backend, k);
+                        self.send_key(backend, k);
                     }
                 }
                 // egui turns Ctrl+C/X/V presses into clipboard events; forward them as the
@@ -618,7 +794,7 @@ impl ViewerSession {
                         _ => egui::Key::V,
                     };
                     if let Some(k) = input_map::key_event(key, None, true) {
-                        self.send(backend, k);
+                        self.send_key(backend, k);
                     }
                 }
                 _ => {}
@@ -646,6 +822,13 @@ mod tests {
         fn set_active(&mut self, active: bool) {
             self.0.lock().unwrap().push(active);
         }
+        fn report_leak(&mut self) {
+            LEAKS.with(|l| l.set(l.get() + 1));
+        }
+    }
+
+    thread_local! {
+        static LEAKS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     }
 
     impl Backend for Recorder {
@@ -762,21 +945,184 @@ mod tests {
         assert_eq!(drive(true), vec![]);
     }
 
+    /// Regression: with the grab on, egui keys used to be dropped even when the hook had not
+    /// captured them (hook removed by Windows, wrong target window), so nothing could be
+    /// typed. A key that reaches the window proves the hook did not swallow it: forward it.
     #[test]
-    fn keyboard_grab_follows_focus_and_suppresses_egui_keys() {
+    fn keyboard_grab_follows_focus_and_forwards_keys_it_did_not_capture() {
+        LEAKS.with(|l| l.set(0));
         let log = Arc::new(Mutex::new(Vec::new()));
         let sent = drive_with(false, Some(Box::new(FakeGrab(log.clone()))));
         // On while focused, off when the window lost focus; switched only on changes.
         assert_eq!(*log.lock().unwrap(), vec![true, false]);
-        // Mouse still goes through egui, keys do not (the grab forwards them).
         assert!(sent.contains(&InputEvent::MouseButton {
             button: MouseButton::Left,
             down: true
         }));
-        assert!(
-            !sent.iter().any(|e| matches!(e, InputEvent::Key { .. })),
-            "{sent:?}"
-        );
+        assert!(sent.contains(&key_ev(0x1E, true)), "{sent:?}");
+        assert_eq!(LEAKS.with(|l| l.get()), 1, "the grab is told it leaks");
+    }
+
+    fn key_ev(scancode: u16, down: bool) -> InputEvent {
+        InputEvent::Key {
+            scancode,
+            extended: false,
+            down,
+        }
+    }
+
+    fn egui_key(key: egui::Key, pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// A headless session in a live egui context.
+    struct Rig {
+        ctx: egui::Context,
+        backend: Recorder,
+        session: ViewerSession,
+        /// A text field shown next to the session (stands in for a chat box).
+        edit: Option<String>,
+    }
+
+    impl Rig {
+        fn new(grab: Option<Box<dyn KeyGrab>>) -> Self {
+            let ctx = egui::Context::default();
+            icons::install(&ctx);
+            let frames = FrameSlot::new();
+            frames.publish(VideoImage {
+                width: 100,
+                height: 50,
+                rgba: vec![255; 100 * 50 * 4],
+                seq: 0,
+            });
+            let peer = PeerInfo {
+                device_id: DeviceId(2),
+                name: "peer".into(),
+                address: "192.168.1.2".parse().unwrap(),
+            };
+            let mut session = ViewerSession::new(SessionId(1), peer, Permissions::ALL, frames);
+            if let Some(g) = grab {
+                session.set_key_grab(g);
+            }
+            let mut rig = Self {
+                ctx,
+                backend: Recorder::default(),
+                session,
+                edit: None,
+            };
+            rig.frame(vec![]);
+            rig.frame(vec![]);
+            rig
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            let tx = Tx::new(Lang::En, DigitStyle::Western);
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 700.0))),
+                events,
+                ..Default::default()
+            };
+            let (session, backend, edit) = (&mut self.session, &self.backend, &mut self.edit);
+            let mut out = self.ctx.run_ui(input, |ui| {
+                if let Some(text) = edit {
+                    egui::Panel::bottom("chat").show(ui, |ui| {
+                        ui.add(egui::TextEdit::singleline(text).id(egui::Id::new("chat-input")));
+                    });
+                }
+                session.ui(ui, tx, backend, false)
+            });
+            out.textures_delta.clear();
+        }
+
+        fn take(&self) -> Vec<InputEvent> {
+            std::mem::take(&mut *self.backend.0.lock().unwrap())
+        }
+    }
+
+    /// Grab capturing: the hook swallows keys, egui sees none, nothing is sent twice. A key-up
+    /// the grab let through (key held before the grab) must not become a stray event.
+    #[test]
+    fn capturing_grab_causes_no_duplicates_or_stray_key_ups() {
+        LEAKS.with(|l| l.set(0));
+        let mut rig = Rig::new(Some(Box::new(FakeGrab(Default::default()))));
+        rig.frame(vec![]);
+        assert!(rig.session.key_grab_active());
+        rig.take();
+        rig.frame(vec![egui_key(egui::Key::AltLeft, false)]);
+        assert!(!rig
+            .take()
+            .iter()
+            .any(|e| matches!(e, InputEvent::Key { .. })));
+        assert_eq!(LEAKS.with(|l| l.get()), 0);
+    }
+
+    /// Regression: clicking a toolbar button moves egui focus to it; typing must then still
+    /// reach the host (the view takes the keyboard back), with and without the grab.
+    #[test]
+    fn keys_flow_after_a_toolbar_widget_took_focus() {
+        for grab in [false, true] {
+            let g: Option<Box<dyn KeyGrab>> =
+                grab.then(|| Box::new(FakeGrab(Default::default())) as Box<dyn KeyGrab>);
+            let mut rig = Rig::new(g);
+            rig.frame(vec![]);
+            rig.take();
+            // What a click on a toolbar button does.
+            rig.ctx
+                .memory_mut(|m| m.request_focus(egui::Id::new("toolbar-button")));
+            rig.frame(vec![]);
+            rig.frame(vec![
+                egui_key(egui::Key::H, true),
+                egui_key(egui::Key::H, false),
+            ]);
+            let sent = rig.take();
+            assert!(sent.contains(&key_ev(0x23, true)), "grab={grab}: {sent:?}");
+            assert!(sent.contains(&key_ev(0x23, false)), "grab={grab}: {sent:?}");
+        }
+    }
+
+    /// A focused text field (e.g. a chat box) keeps the keyboard.
+    #[test]
+    fn text_field_focus_is_not_stolen() {
+        let mut rig = Rig::new(None);
+        rig.edit = Some(String::new());
+        rig.frame(vec![]);
+        rig.ctx
+            .memory_mut(|m| m.request_focus(egui::Id::new("chat-input")));
+        rig.frame(vec![]);
+        rig.frame(vec![]);
+        rig.take();
+        rig.frame(vec![egui_key(egui::Key::H, true)]);
+        let sent = rig.take();
+        assert!(sent.is_empty(), "{sent:?}");
+    }
+
+    /// Typing in the real chat panel (Arabic included) must not leak a single input event to
+    /// the remote PC.
+    #[test]
+    fn typing_in_the_chat_box_sends_no_input_to_the_remote() {
+        let mut rig = Rig::new(None);
+        rig.session.chat.set_open(true);
+        rig.frame(vec![]);
+        rig.ctx
+            .memory_mut(|m| m.request_focus(egui::Id::new(("chat-input", SessionId(1).0))));
+        rig.frame(vec![]);
+        rig.frame(vec![]);
+        rig.take();
+        rig.frame(vec![
+            egui_key(egui::Key::H, true),
+            egui::Event::Text("مرحبا hi".into()),
+            egui_key(egui::Key::H, false),
+            egui_key(egui::Key::Backspace, true),
+            egui_key(egui::Key::Backspace, false),
+        ]);
+        let sent = rig.take();
+        assert!(sent.is_empty(), "{sent:?}");
     }
 
     #[test]

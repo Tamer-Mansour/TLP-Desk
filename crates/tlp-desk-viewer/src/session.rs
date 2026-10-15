@@ -98,6 +98,8 @@ struct Shared {
     on_frame: Option<RepaintFn>,
     format: PixelFormat,
     started: Instant,
+    /// Sees every received frame before decoding (session recording).
+    tap: Mutex<Option<crate::recording::VideoTap>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -187,6 +189,7 @@ impl ViewerSession {
             on_frame,
             format,
             started: Instant::now(),
+            tap: Mutex::new(None),
         });
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         // Capacity 1: if decoding falls behind, the network layer's small queue overflows and
@@ -299,6 +302,18 @@ impl ViewerSession {
         self.ended.borrow().is_none() && self.input.send(msg).is_ok()
     }
 
+    /// Installs (or with `None` removes) a tap that sees every received video frame before
+    /// it is decoded; used by [`crate::Recording`]. One tap at a time.
+    pub fn set_video_tap(&self, tap: Option<crate::recording::VideoTap>) {
+        *lock(&self.shared.tap) = tap;
+    }
+
+    /// Asks the host for a keyframe (non-blocking). Returns `false` once the session has
+    /// ended.
+    pub fn request_keyframe(&self) -> bool {
+        self.send_message(Message::RequestKeyframe)
+    }
+
     /// Whether the host user currently has input priority (our input is being ignored).
     pub fn host_input_priority(&self) -> bool {
         self.shared.host_priority.load(Ordering::Acquire)
@@ -354,6 +369,10 @@ async fn video_task(shared: Arc<Shared>, jobs: mpsc::Sender<Job>) {
             .counters
             .bytes
             .fetch_add(frame.data.len() as u64, Ordering::Relaxed);
+        let tap = lock(&shared.tap).clone();
+        if let Some(tap) = tap {
+            tap(&frame);
+        }
         let job = Job {
             frame,
             queue_delay_us: (offset - min) as u64,

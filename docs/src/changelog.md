@@ -12,6 +12,29 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
 
 ### Added
 
+- **Settings, tray, host banner and connection log.** Settings now has sections for incoming connections (default permission checkboxes, Accept timeout, one-time code on/off, local-input grace, remote-pointer marker), an allowed-networks (CIDR) editor with a public-range warning, quality presets (Speed / Balanced / Quality), start with Windows (HKCU Run key behind a trait), start minimised and close-to-tray, and applies host options live (`Host::set_live_options`). `settings.json` is versioned and migrates older files; the settings are the source of truth for the host's default permissions (files, chat, whiteboard and clipboard on, port forwarding off). A notification-area icon (`tray-icon`) has Open, Copy ID, New code, Pause incoming, Settings, Connection log and Quit, an ID tooltip, and brings the window forward for an incoming request. A small topmost banner window shows who is connected while the main window is minimised (not excluded from screen capture, on purpose). A JSON-lines connection log (`%APPDATA%\TLP-Desk\connections.log`, rotated) records every session and refused attempt, with a viewer screen (search, filter, CSV export). No wire change.
+
+- **Remote device info and CLI completion.** The host answers a viewer's `DeviceInfoRequest` (needs `View`) with its computer name, OS, CPU, memory, disks and uptime; the viewer toolbar has a Device info window with refresh, Arabic digits and units. CLI: `info <target>`, `wol <MAC|alias>` (alias `exec-wol`), `list --json`, a stable exit-code table in `--help`, `--lang ar` with Arabic `--help` and UTF-8 console output, password only through `TLP_DESK_PASSWORD`. No wire change (v4 messages).
+- **Port forwarding (tunnels).** The viewer listens on a local port (loopback by default; LAN binding needs an explicit choice and shows a warning) and pipes each accepted TCP connection through the session to a host:port on the remote PC or its own LAN, over a `Tunnel` side stream per connection with half-close. The host side is gated by the `Tunnel` permission, which is off by default: the host banner has an **Allow port forwarding** switch, and revoking it closes every tunnel at once. Targets are limited to loopback and the host's own local network (never public addresses), with caps on tunnels and connections and an idle timeout. App: a port forwarding window with rules, connection counts and bytes. CLI: `forward <target> <local>:<host>:<port>` and `serve --allow-tunnels`. No wire change (v5 messages).
+- **Whiteboard (draw on screen).** The viewer's Draw button turns the pointer into a pen, highlighter, arrow, rectangle or eraser with colors, widths, undo/redo, clear and optional fade-out; no input reaches the remote PC while it is on. Strokes are simplified (Ramer-Douglas-Peucker), streamed in chunks while drawing and drawn again locally on the viewer. The host shows them in a topmost, click-through layered window over the streamed monitor (excluded from capture) with a clear button; revoking `Whiteboard` or ending the session removes it. Sessions get `Whiteboard` by default in the app. No wire change (v4 messages).
+- **Session recording and playback.** The viewer records a session into a standard fragmented MP4 (H.264 stored as received, no re-encoding, no wire change) at `%USERPROFILE%\Videos\TLP-Desk\TLP-Desk <peer> <date time>.mp4`. Crash-safe (one-second fragments, interrupted files can be repaired), a new file starts when the remote picture size changes, a keyframe is requested at the start and every 4 seconds, and recording refuses to start on a nearly full disk. The toolbar has a record toggle with a red indicator and elapsed time; the home screen has a Recordings list (play, open folder, delete, repair) and a playback window (play/pause, keyframe seek, 0.5x-4x, fit/actual size). The host is not notified; the indicator is viewer-only.
+- **Clipboard sharing.** Text, formatted text (HTML) and images are copied between the two PCs
+  in both directions while the host grants `Clipboard`; the permission is re-checked on every
+  send and apply, so revoking it stops sharing at once. The viewer toolbar has a "Sync clipboard"
+  switch and Settings has the default for new sessions. Change detection is event-driven on
+  Windows (`AddClipboardFormatListener`, no polling). Arabic text is exact (RLM/LRM, ZWJ/ZWNJ,
+  harakat, CRLF). Images travel as PNG (`ClipboardData::Png`, protocol v5); payloads over 1 MiB
+  use a clipboard side stream; caps are 16 MiB for text and HTML and 64 MiB decoded for images,
+  checked before allocating. Echo loops are prevented, duplicates are dropped, and only kinds and
+  sizes are ever logged. CLI: `clip-send`, `serve --clipboard`.
+- **Remote file browser and Explorer copy/paste.** A two-pane file manager (this PC | remote PC,
+  mirrored in Arabic) opens from the session toolbar: drives and known folders, breadcrumbs,
+  sorting, multi-select, new folder, rename, delete with confirmation, and copy between the panes
+  through the transfer engine. Files copied in Explorer on either PC can be pasted on the other
+  with a button (no delayed-render clipboard object, so not Ctrl+V inside Explorer). The host
+  serves the `FsRequest` messages only while the session holds `Files`, re-checked on every
+  request, and refuses traversal, alternate data streams, devices and network paths. CLI:
+  `ls`, `mkdir`, `rm`, `mv`.
 - **Wire protocol v4** — the message set for the rest of the roadmap, defined ahead of the
   features: remote file system (`FsRequest` / `FsResponse`), file transfer (`TransferOffer` …
   `TransferError`), clipboard HTML and files, chat, audio control, session and system control
@@ -54,6 +77,19 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
   (`_tlpdesk._udp.local.`) with a UDP 47401 broadcast fallback.
 - Wire protocol v1–v3: v2 added SPAKE2 key confirmation, keyframe requests and one QUIC stream
   per video frame; v3 added local input priority notices and the monitor list.
+
+### Fixed
+
+- **Typing on the host did not arrive.** The viewer dropped window key events whenever the OS
+  keyboard grab was on, even when the grab had not captured the key (hook removed by Windows,
+  mismatched window handle), and a toolbar click left keyboard focus on the button. Keys the
+  grab misses are now sent from the window, the grab reinstalls its hook, and the session view
+  takes keyboard focus back (unless a text field has it).
+- **A local mouse blocked remote keys.** Host-side "local user wins" priority is now per device:
+  local typing holds back remote keys, local mouse use holds back only the remote pointer.
+- The host shows a notice (and the CLI prints a line) when Windows refuses injected input because
+  an administrator window or secure screen is in front; the service lane lifts that limit.
+- `connect --type TEXT --then-ctrl S` types US-layout scancodes into the host for testing.
 
 ### Changed
 
