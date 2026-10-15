@@ -10,11 +10,13 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use tlp_desk_app::app::{App, KeyWarning, Pending, Screen};
+use tlp_desk_app::backend::chat::ChatLine;
 use tlp_desk_app::backend::fake::{fake_monitors, test_pattern_frame};
 use tlp_desk_app::backend::{
     AttemptId, ConnectTarget, DeviceId, FrameSlot, RequestId, SessionId, SessionStats,
 };
 use tlp_desk_app::i18n::{DigitStyle, Lang, Tx};
+use tlp_desk_app::ui::chat::ChatState;
 use tlp_desk_app::ui::session::ViewerSession;
 use tlp_desk_proto::Permissions;
 
@@ -73,6 +75,11 @@ pub const SCENES: &[Scene] = &[
         setup: monitors,
     },
     Scene {
+        name: "file-browser",
+        about: "two-pane file browser: this PC and the remote PC, Arabic and English names",
+        setup: file_browser,
+    },
+    Scene {
         name: "settings",
         about: "settings: language and digit style",
         setup: settings,
@@ -82,8 +89,27 @@ pub const SCENES: &[Scene] = &[
         about: "loud warning when a host's key changed",
         setup: key_changed,
     },
+    Scene {
+        name: "chat",
+        about: "viewer session with the chat panel: Arabic and English messages",
+        setup: chat,
+    },
+    Scene {
+        name: "host-chat",
+        about: "host side: chat window that opened when the viewer wrote",
+        setup: host_chat,
+    },
+    Scene {
+        name: "recording",
+        about: "viewer session while recording: red indicator with the elapsed time",
+        setup: recording,
+    },
+    Scene {
+        name: "whiteboard",
+        about: "viewer session in drawing mode: tools bar and a few strokes on the remote screen",
+        setup: whiteboard,
+    },
 ];
-
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
     SCENES.iter().find(|s| s.name == name)
@@ -164,6 +190,44 @@ fn monitors(app: &mut App, lang: Lang) {
     }
 }
 
+/// A fixed directory entry (dates in 2025, so nothing depends on the clock).
+fn fs_entry(name: &str, is_dir: bool, size: u64, day: i64) -> tlp_desk_proto::FsEntry {
+    tlp_desk_proto::FsEntry {
+        name: name.to_owned(),
+        is_dir,
+        size,
+        modified_unix_ms: (1_735_689_600 + day * 86_400 + 9 * 3_600) * 1000,
+        readonly: false,
+        hidden: false,
+    }
+}
+
+fn file_browser(app: &mut App, lang: Lang) {
+    home(app, lang);
+    start_session(app, lang, 0);
+    let Some(view) = app.session.as_mut() else {
+        return;
+    };
+    let local = vec![
+        fs_entry("Projects", true, 0, 40),
+        fs_entry("الصور", true, 0, 12),
+        fs_entry("invoice-2025.pdf", false, 482_113, 33),
+        fs_entry("تقرير الربع الأول.docx", false, 96_204, 28),
+        fs_entry("notes.txt", false, 2_048, 5),
+    ];
+    let remote = vec![
+        fs_entry("Backups", true, 0, 60),
+        fs_entry("المستندات", true, 0, 21),
+        fs_entry("اقرأني.txt", false, 612, 14),
+        fs_entry("photos.zip", false, 48_220_331, 30),
+        fs_entry("setup.exe", false, 12_883_968, 19),
+    ];
+    view.files.show_fixture(
+        (r"C:\Users\me\Documents", local, "invoice-2025.pdf"),
+        (r"D:\Shared", remote, "photos.zip"),
+    );
+}
+
 fn settings(app: &mut App, lang: Lang) {
     home(app, lang);
     app.screen = Screen::Settings;
@@ -185,4 +249,107 @@ fn key_changed(app: &mut App, lang: Lang) {
         previous: "3f9a 1c07 e2b4 58d1".into(),
         presented: "b70e 44a2 9c13 0f6e".into(),
     });
+}
+
+/// A short conversation mixing Arabic and English in both directions (fixed times). On the
+/// host side (`host`) the authors are swapped.
+fn conversation(host: bool) -> ChatState {
+    let mut chat = ChatState::new(true);
+    chat.set_open(true);
+    let lines = [
+        (
+            false,
+            "مرحباً! هل ترى ملف report-2026.pdf على الشاشة؟",
+            (10, 41),
+        ),
+        (true, "Yes, opening it now.", (10, 42)),
+        (false, "Thanks 👍 page 3 please", (10, 42)),
+        (true, "تم، الصفحة 3 جاهزة الآن.", (10, 43)),
+    ];
+    for (id, (mine, text, hm)) in (1..).zip(lines) {
+        let line = ChatLine {
+            id,
+            mine: mine != host,
+            text: text.into(),
+            at_unix_ms: 0,
+        };
+        chat.push_at(line, hm);
+    }
+    chat
+}
+
+fn chat(app: &mut App, lang: Lang) {
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        s.chat = conversation(false);
+        s.chat.draft = match lang {
+            Lang::En => "One more question…".into(),
+            Lang::Ar => "سؤال أخير…".into(),
+        };
+    }
+}
+
+fn recording(app: &mut App, lang: Lang) {
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        // 12:34 into the recording (the clock only moves by milliseconds while rendering).
+        let since = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(12 * 60 + 34))
+            .unwrap_or_else(std::time::Instant::now);
+        s.recording = tlp_desk_app::ui::recordings::RecordState::On { since };
+    }
+}
+
+fn whiteboard(app: &mut App, lang: Lang) {
+    use tlp_desk_input::whiteboard::{Rgba, Stroke, WhiteboardOp};
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        s.whiteboard.set_active(true);
+        let now = std::time::Instant::now();
+        // A red circle around something, and a blue arrow pointing at it.
+        let circle: Vec<(u16, u16)> = (0..=36u32)
+            .map(|i| {
+                let a = f64::from(i) * std::f64::consts::TAU / 36.0;
+                (
+                    (30_000.0 + 7_000.0 * a.cos()) as u16,
+                    (26_000.0 + 9_000.0 * a.sin()) as u16,
+                )
+            })
+            .collect();
+        let strokes = [
+            (1, circle, Rgba::new(0xE5, 0x39, 0x35, 0xFF), 90),
+            (
+                2,
+                vec![(48_000, 12_000), (40_500, 21_000)],
+                Rgba::new(0x1E, 0x88, 0xE5, 0xFF),
+                90,
+            ),
+            (
+                3,
+                vec![(40_500, 21_000), (43_500, 20_300)],
+                Rgba::new(0x1E, 0x88, 0xE5, 0xFF),
+                90,
+            ),
+            (
+                4,
+                vec![(40_500, 21_000), (41_300, 17_800)],
+                Rgba::new(0x1E, 0x88, 0xE5, 0xFF),
+                90,
+            ),
+        ];
+        for (id, points, color, width) in strokes {
+            let stroke = Stroke {
+                id,
+                points,
+                color,
+                width,
+            };
+            s.whiteboard.remote(&WhiteboardOp::Stroke(stroke), now);
+        }
+    }
+}
+
+fn host_chat(app: &mut App, lang: Lang) {
+    host_banner(app, lang);
+    app.host_chats.insert(SessionId(2), conversation(true));
 }

@@ -94,6 +94,7 @@ pub fn harness(look: Look) -> Harness<'static, App> {
         lang: look.lang,
         digits: DigitStyle::Western,
         device_name: None,
+        ..Settings::default()
     };
     let opts = StartOptions {
         lang: Some(look.lang),

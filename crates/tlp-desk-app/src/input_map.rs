@@ -229,6 +229,174 @@ mod tests {
         assert_eq!(scancode(Key::Copy), None);
     }
 
+    /// Every key a typist needs maps to its PC/AT set-1 position (typing is by scancode, so
+    /// the host's layout, Arabic included, decides the character).
+    #[test]
+    fn typing_keys_have_the_standard_scancodes() {
+        let rows: [(&[Key], u16); 5] = [
+            (
+                &[
+                    Key::Num1,
+                    Key::Num2,
+                    Key::Num3,
+                    Key::Num4,
+                    Key::Num5,
+                    Key::Num6,
+                    Key::Num7,
+                    Key::Num8,
+                    Key::Num9,
+                    Key::Num0,
+                    Key::Minus,
+                    Key::Equals,
+                    Key::Backspace,
+                    Key::Tab,
+                ],
+                0x02,
+            ),
+            (
+                &[
+                    Key::Q,
+                    Key::W,
+                    Key::E,
+                    Key::R,
+                    Key::T,
+                    Key::Y,
+                    Key::U,
+                    Key::I,
+                    Key::O,
+                    Key::P,
+                    Key::OpenBracket,
+                    Key::CloseBracket,
+                    Key::Enter,
+                ],
+                0x10,
+            ),
+            (
+                &[
+                    Key::A,
+                    Key::S,
+                    Key::D,
+                    Key::F,
+                    Key::G,
+                    Key::H,
+                    Key::J,
+                    Key::K,
+                    Key::L,
+                    Key::Semicolon,
+                    Key::Quote,
+                    Key::Backtick,
+                ],
+                0x1E,
+            ),
+            (
+                &[
+                    Key::Backslash,
+                    Key::Z,
+                    Key::X,
+                    Key::C,
+                    Key::V,
+                    Key::B,
+                    Key::N,
+                    Key::M,
+                    Key::Comma,
+                    Key::Period,
+                    Key::Slash,
+                ],
+                0x2B,
+            ),
+            (
+                &[
+                    Key::F1,
+                    Key::F2,
+                    Key::F3,
+                    Key::F4,
+                    Key::F5,
+                    Key::F6,
+                    Key::F7,
+                ],
+                0x3B,
+            ),
+        ];
+        // The rows are contiguous runs, except where noted by the gaps below.
+        for (keys, first) in rows {
+            let mut expect = first;
+            for key in keys {
+                // Enter ends the QWERTY row at 0x1C (after the brackets at 0x1A/0x1B), the
+                // home row starts at 0x1E, and the bottom row skips left Shift (0x2A).
+                let code = scancode(*key).expect("mapped");
+                match key {
+                    Key::Enter => assert_eq!(code, (0x1C, false)),
+                    Key::A => assert_eq!(code, (0x1E, false)),
+                    Key::Backtick => assert_eq!(code, (0x29, false)),
+                    Key::Backslash => assert_eq!(code, (0x2B, false)),
+                    Key::Z => assert_eq!(code, (0x2C, false)),
+                    _ => assert_eq!(code, (expect, false), "{key:?}"),
+                }
+                expect = match key {
+                    Key::Enter | Key::Backtick => expect,
+                    Key::Backslash => 0x2C,
+                    _ => expect + 1,
+                };
+            }
+        }
+        for (key, code) in [
+            (Key::Space, 0x39),
+            (Key::ShiftLeft, 0x2A),
+            (Key::ShiftRight, 0x36),
+            (Key::IntlBackslash, 0x56),
+            (Key::F10, 0x44),
+            (Key::F11, 0x57),
+            (Key::F12, 0x58),
+        ] {
+            assert_eq!(scancode(key), Some((code, false)), "{key:?}");
+        }
+        // Navigation cluster and arrows are extended (E0).
+        for (key, code) in [
+            (Key::Insert, 0x52),
+            (Key::Home, 0x47),
+            (Key::PageUp, 0x49),
+            (Key::End, 0x4F),
+            (Key::PageDown, 0x51),
+            (Key::ArrowLeft, 0x4B),
+            (Key::ArrowRight, 0x4D),
+        ] {
+            assert_eq!(scancode(key), Some((code, true)), "{key:?}");
+        }
+    }
+
+    /// Every egui key is either mapped or deliberately unmapped (logical-only keys that no
+    /// physical key sends), so a new egui version cannot silently drop a key.
+    #[test]
+    fn every_key_is_mapped_or_known_unmapped() {
+        let unmapped: Vec<Key> = Key::ALL
+            .iter()
+            .copied()
+            .filter(|k| scancode(*k).is_none())
+            .collect();
+        for k in &unmapped {
+            assert!(
+                matches!(
+                    k,
+                    Key::Copy
+                        | Key::Cut
+                        | Key::Paste
+                        | Key::F25
+                        | Key::F26
+                        | Key::F27
+                        | Key::F28
+                        | Key::F29
+                        | Key::F30
+                        | Key::F31
+                        | Key::F32
+                        | Key::F33
+                        | Key::F34
+                        | Key::F35
+                ),
+                "{k:?} has no scancode"
+            );
+        }
+    }
+
     #[test]
     fn every_mapped_key_has_unique_scancode() {
         use std::collections::HashMap;

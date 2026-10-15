@@ -10,6 +10,7 @@
 //!   [`Session::accept_side_stream`] carry typed side streams ([`StreamKind`]) next to the
 //!   control and video streams.
 //! * [`Feature`] / [`FeatureSet`] / [`FeatureDispatch`]: how feature lanes plug into sessions.
+//! * [`ChatFeature`]: chat between the viewer and the host user (both roles).
 //! * [`Discovery`]: mDNS `_tlpdesk._udp.local.` + broadcast fallback on UDP 47401.
 //! * [`send_wake_on_lan`].
 //! * Port forwarding helpers: [`pipe_tcp`] (TCP <-> tunnel stream) and [`resolve_target`]
@@ -19,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 mod allow;
+mod chat;
 mod discovery;
 mod endpoint;
 mod error;
@@ -29,6 +31,9 @@ mod tunnel;
 mod wol;
 
 pub use allow::{normalize, AllowList, BadCidr, Cidr};
+pub use chat::{
+    ChatAuthor, ChatEntry, ChatEvent, ChatFeature, ChatLimits, ChatRejected, CHAT_FEATURE,
+};
 pub use discovery::{
     broadcast_targets, Advertisement, BroadcastPacket, DiscoveredDevice, Discovery,
     DiscoveryConfig, DiscoveryEvent, PacketKind, BROADCAST_MAGIC, MDNS_SERVICE_TYPE,

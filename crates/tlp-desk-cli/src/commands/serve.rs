@@ -7,12 +7,16 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
+use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
+use tlp_desk_files::fs::{FsConfig, FsFeature};
+use tlp_desk_files::{FileTransfer, TransferConfig, TransferEvent};
 use tlp_desk_host::{
     Host, HostConfig, HostEvent, HostTunnelEvent, HostTunnels, RequestId, TunnelHostConfig,
     DEFAULT_PERMISSIONS,
 };
-use tlp_desk_net::{Endpoint, EndpointConfig, FeatureSet};
+use tlp_desk_net::{ChatEvent, ChatFeature, Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
 use tlp_desk_proto::Permissions;
+use tlp_desk_proto::TransferDirection;
 
 use super::common::{any_addr, id_str, load_identity, peer_json, Ctx};
 use crate::output::Output;
@@ -56,6 +60,13 @@ pub struct ServeArgs {
     /// off by default).
     #[arg(long)]
     pub allow_tunnels: bool,
+    /// Sync this PC's clipboard with viewers (grants the clipboard permission).
+    #[arg(long)]
+    pub clipboard: bool,
+    /// Let viewers send and receive files (grants the files permission; uploads go to the
+    /// folder the viewer names, or this user's Desktop).
+    #[arg(long)]
+    pub allow_files: bool,
 }
 
 impl ServeArgs {
@@ -67,24 +78,32 @@ impl ServeArgs {
             monitor: self.monitor,
             fps: self.fps,
             allow_one_time_code: self.code,
-            default_permissions: {
-                let base = if self.view_only {
-                    Permissions::VIEW
-                } else {
-                    DEFAULT_PERMISSIONS
-                };
-                if self.allow_tunnels {
-                    base | Permissions::TUNNEL
-                } else {
-                    base
-                }
-            },
+            default_permissions: if self.view_only {
+                Permissions::VIEW
+            } else {
+                DEFAULT_PERMISSIONS.union(Permissions::CHAT)
+            }
+            .union(if self.clipboard {
+                Permissions::CLIPBOARD
+            } else {
+                Permissions::NONE
+            })
+            .union(if self.allow_files {
+                Permissions::FILES
+            } else {
+                Permissions::NONE
+            })
+            .union(if self.allow_tunnels {
+                Permissions::TUNNEL
+            } else {
+                Permissions::NONE
+            }),
             advertise: !self.no_discovery,
             device_name: self
                 .name
                 .clone()
                 .unwrap_or_else(tlp_desk_net::default_device_name),
-            features: host_features(),
+            features: host_features(self),
             ..HostConfig::default()
         }
     }
@@ -92,8 +111,105 @@ impl ServeArgs {
 
 /// The session features the CLI host serves.
 // FEATURE HOOK: each lane registers its host-side feature here, e.g. `.with(files)`.
-fn host_features() -> FeatureSet {
-    FeatureSet::new().with(HostTunnels::new(TunnelHostConfig::default()))
+fn host_features(args: &ServeArgs) -> FeatureSet {
+    let mut set = FeatureSet::new()
+        // Uploads and downloads of files and folders.
+        .with(FileTransfer::new(TransferConfig::default()))
+        // Remote file browser; served only to sessions holding FILES.
+        .with(FsFeature::new(FsConfig::default()))
+        // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
+        .with(ClipFilesFeature::new(ClipFilesConfig::default()))
+        // Chat: received messages are printed; the CLI host does not reply (TLP-chat).
+        .with(ChatFeature::new())
+        // Port forwarding; served only to sessions holding TUNNEL.
+        .with(HostTunnels::new(TunnelHostConfig::default()));
+    if args.clipboard {
+        // Text, HTML and images; served only to sessions holding CLIPBOARD.
+        set.push(tlp_desk_files::ClipboardFeature::new(
+            Arc::new(tlp_desk_files::SystemClipboard::new()),
+            tlp_desk_files::ClipboardConfig::default(),
+        ));
+    }
+    set
+}
+
+/// Prints the start and end of file transfers in sessions.
+fn transfer_event(out: Output, event: &FeatureEvent) {
+    match event.payload::<TransferEvent>() {
+        Some(TransferEvent::Started(info)) => out.event(
+            text::serve_transfer(&info.label, info.direction == TransferDirection::Upload),
+            &json!({
+                "type": "transfer_started",
+                "label": info.label,
+                "direction": format!("{:?}", info.direction),
+                "files": info.total_files,
+                "bytes": info.total_bytes,
+                "destination": info.dest_dir,
+            }),
+        ),
+        Some(TransferEvent::Finished {
+            state,
+            failed_items,
+            ..
+        }) => out.event(
+            text::transfer_stopped(&format!("{state:?}")),
+            &json!({
+                "type": "transfer_finished",
+                "state": format!("{state:?}"),
+                "failed": failed_items,
+            }),
+        ),
+        _ => {}
+    }
+}
+
+/// Prints changes to a session's port-forwarding tunnels and refused targets.
+fn tunnel_event(
+    out: Output,
+    id: tlp_desk_host::SessionId,
+    event: &HostTunnelEvent,
+    shape_seen: &mut Vec<(u64, usize)>,
+) {
+    match event {
+        HostTunnelEvent::Changed(list) => {
+            let shape: Vec<_> = list.iter().map(|t| (t.id, t.active)).collect();
+            if shape != *shape_seen {
+                let tunnels: Vec<_> = list
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "tunnel": t.id,
+                            "target": t.target.to_string(),
+                            "active": t.active,
+                            "connections": t.connections,
+                            "failed": t.failed,
+                        })
+                    })
+                    .collect();
+                out.event(
+                    text::host_tunnels(list),
+                    &json!({ "type": "tunnels", "session": id.0, "tunnels": tunnels }),
+                );
+                *shape_seen = shape;
+            }
+        }
+        HostTunnelEvent::Refused {
+            id: tunnel,
+            target_host,
+            target_port,
+            reason,
+        } => out.event(
+            text::host_tunnel_refused(target_host.as_deref(), *target_port, reason),
+            &json!({
+                "type": "tunnel_refused",
+                "session": id.0,
+                "tunnel": tunnel,
+                "target_host": target_host,
+                "target_port": target_port,
+                "reason": reason,
+            }),
+        ),
+    }
 }
 
 /// Runs `serve` until Ctrl+C.
@@ -197,6 +313,10 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     HostEvent::PermissionsChanged { .. } => {}
+                    HostEvent::InputBlocked { id } => out.event(
+                        text::input_blocked(),
+                        &json!({ "type": "input_blocked", "session": id.0 }),
+                    ),
                     HostEvent::SessionEnded { id, peer, reason } => out.event(
                         text::viewer_left(&peer, &reason),
                         &json!({
@@ -207,37 +327,26 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         }),
                     ),
                     // FEATURE HOOK: CLI commands (send-file, ...) print their feature events here.
-                    HostEvent::Feature { id, event } => match event.payload::<HostTunnelEvent>() {
-                        Some(HostTunnelEvent::Changed(list)) => {
-                            let shape: Vec<_> = list.iter().map(|t| (t.id, t.active)).collect();
-                            if shape != tunnel_shape {
-                                let tunnels: Vec<_> = list.iter().map(|t| json!({
-                                    "tunnel": t.id,
-                                    "target": t.target.to_string(),
-                                    "active": t.active,
-                                    "connections": t.connections,
-                                    "failed": t.failed,
-                                })).collect();
-                                out.event(
-                                    text::host_tunnels(list),
-                                    &json!({ "type": "tunnels", "session": id.0, "tunnels": tunnels }),
-                                );
-                                tunnel_shape = shape;
-                            }
+                    HostEvent::Feature { id, event } => {
+                        if let Some(t) = event.payload::<HostTunnelEvent>() {
+                            tunnel_event(out, id, t, &mut tunnel_shape);
+                        } else if let Some((line, value)) = super::clip_send::event_line(&event) {
+                            out.event(line, &value);
+                        } else if let Some(ChatEvent::Received(m)) = event.payload::<ChatEvent>() {
+                            let name = host
+                                .sessions()
+                                .into_iter()
+                                .find(|v| v.id == id)
+                                .map(|v| v.peer.name)
+                                .unwrap_or_default();
+                            out.event(
+                                text::chat_received(&name, &m.text),
+                                &json!({ "type": "chat", "session": id.0, "text": m.text }),
+                            );
+                        } else {
+                            transfer_event(out, &event);
                         }
-                        Some(HostTunnelEvent::Refused { id: tunnel, target_host, target_port, reason }) => out.event(
-                            text::host_tunnel_refused(target_host.as_deref(), *target_port, reason),
-                            &json!({
-                                "type": "tunnel_refused",
-                                "session": id.0,
-                                "tunnel": tunnel,
-                                "target_host": target_host,
-                                "target_port": target_port,
-                                "reason": reason,
-                            }),
-                        ),
-                        None => {}
-                    },
+                    }
                 }
             }
         }

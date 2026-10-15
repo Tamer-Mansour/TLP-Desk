@@ -7,18 +7,13 @@ until it arrives.
 
 | Feature | Milestone |
 |---|---|
-| [File transfer and remote file browser](file-transfer.md) | M2 |
-| [Clipboard sharing](clipboard.md) | M2 |
-| [Chat](chat.md) | M2 |
 | [Sound from the remote PC](audio.md) | M2 |
 | [Address book](address-book.md) | M2 |
 | [Unattended access](unattended-access.md) | M3 |
 | [Ctrl+Alt+Del and lock](ctrl-alt-del.md) | M3 |
 | [Privacy mode](privacy-mode.md) | M3 |
 | [Wake-on-LAN](wake-on-lan.md) | M4 |
-| [Session recording](recording.md) | M4 |
 | [Port forwarding (tunnels)](port-forwarding.md) | M4 |
-| [Whiteboard](whiteboard.md) | M4 |
 | [Remote device information](device-info.md) | M4 |
 
 ## Permissions

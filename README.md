@@ -101,8 +101,8 @@ All images and videos are generated from the real UI by
 
 Very fast file transfer and a remote file browser, clipboard sync (text, images, files), chat,
 system audio, unattended access as a Windows service (lock screen, UAC, Ctrl+Alt+Del), privacy mode,
-address book, adaptive quality and hardware encoding, Wake-on-LAN, session recording, port
-forwarding, whiteboard, connection log, device info, and a full CLI.
+address book, adaptive quality and hardware encoding, Wake-on-LAN, port
+forwarding, connection log, device info, and a full CLI.
 
 ---
 
