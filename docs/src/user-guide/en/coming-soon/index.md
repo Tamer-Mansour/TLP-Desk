@@ -14,7 +14,6 @@ until it arrives.
 | [Privacy mode](privacy-mode.md) | M3 |
 | [Wake-on-LAN](wake-on-lan.md) | M4 |
 | [Port forwarding (tunnels)](port-forwarding.md) | M4 |
-| [Whiteboard](whiteboard.md) | M4 |
 | [Remote device information](device-info.md) | M4 |
 
 ## Permissions

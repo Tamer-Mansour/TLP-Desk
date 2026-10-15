@@ -104,7 +104,8 @@ fn main() -> anyhow::Result<()> {
                     // Clipboard sync is part of a normal session (revocable live by the host).
                     host: tlp_desk_host::HostConfig {
                         default_permissions: tlp_desk_host::DEFAULT_PERMISSIONS
-                            .union(tlp_desk_proto::Permissions::CLIPBOARD),
+                            .union(tlp_desk_proto::Permissions::CLIPBOARD)
+                            .union(tlp_desk_proto::Permissions::WHITEBOARD),
                         ..Default::default()
                     },
                     ..Default::default()

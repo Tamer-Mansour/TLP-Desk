@@ -26,7 +26,7 @@ use tlp_desk_files::fs::FsConfig;
 use tlp_desk_files::{FileTransfer, FilesError, TransferConfig, TransferSnapshot, TransferState};
 use tlp_desk_host::{
     EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, RequestId as HostRequestId,
-    SessionId as HostSessionId, DEFAULT_PERMISSIONS,
+    SessionId as HostSessionId, WhiteboardHost, DEFAULT_PERMISSIONS,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
@@ -47,9 +47,9 @@ use super::files::{
 };
 use super::files_bridge::{EngineStarter, FilesBridge};
 use super::{
-    AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
-    EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
-    RequestId, SessionId, SessionStats, VideoImage,
+    whiteboard, AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId,
+    DiscoveredDevice, EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo,
+    PeerInfo, RepaintFn, RequestId, SessionId, SessionStats, VideoImage, WhiteboardOp,
 };
 
 /// How often host sessions are reconciled with [`Host::sessions`] and LAN addresses re-read.
@@ -86,11 +86,12 @@ impl Default for RealConfig {
             device_name: None,
             known_hosts: KnownHostsStore::Default,
             host: HostConfig {
-                // Moving files and chatting are core uses: accepted sessions may do both.
-                // The host user can revoke either live.
+                // Moving files, chatting and pointing things out on screen are core uses:
+                // accepted sessions may do all three. The host user can revoke any live.
                 default_permissions: DEFAULT_PERMISSIONS
                     .union(Permissions::FILES)
-                    .union(Permissions::CHAT),
+                    .union(Permissions::CHAT)
+                    .union(Permissions::WHITEBOARD),
                 ..HostConfig::default()
             },
             fallback_discovery: true,
@@ -390,8 +391,11 @@ impl RealBackend {
                 ..cfg.host.clone()
             };
             chat.register_host(&mut host_cfg);
+            let whiteboard = Arc::new(WhiteboardHost::new());
+            host_cfg.features.push(whiteboard.clone());
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
                 Ok((h, ev)) => {
+                    whiteboard.set_monitor_source(h.streamed_monitor_fn());
                     host = Some(h);
                     host_events = Some(ev);
                 }
@@ -435,7 +439,11 @@ impl RealBackend {
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
                 features: super::clipboard::register(
-                    fsb.register(FeatureSet::new().with(files.clone())),
+                    fsb.register(
+                        FeatureSet::new()
+                            .with(files.clone())
+                            .with(whiteboard::viewer_feature()),
+                    ),
                     &clipboard,
                 ),
                 ..ViewerConfig::default()
@@ -949,6 +957,10 @@ impl Inner {
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
                 ViewerEvent::Feature(event) => {
+                    if let Some(op) = whiteboard::remote_op(&event) {
+                        self.emit(BackendEvent::WhiteboardRemote { session, op });
+                        continue;
+                    }
                     // chat (TLP-chat)
                     if let Some(ev) = chat::backend_event(session, &event) {
                         self.emit(ev);
@@ -1066,6 +1078,15 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn send_whiteboard(&self, session: SessionId, ops: Vec<WhiteboardOp>) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            for msg in whiteboard::messages(&ops) {
+                s.send_message(msg);
+            }
         }
     }
 

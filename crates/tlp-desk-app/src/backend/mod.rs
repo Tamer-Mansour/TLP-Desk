@@ -27,6 +27,7 @@ pub mod files_bridge;
 pub mod files_fake;
 pub mod real;
 pub mod recording;
+pub mod whiteboard;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
@@ -36,6 +37,7 @@ use std::path::PathBuf;
 
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 
+pub use tlp_desk_input::whiteboard::WhiteboardOp;
 pub use tlp_desk_proto::MonitorDesc;
 
 /// Callback the backend calls (from any thread) to make the UI repaint.
@@ -410,6 +412,13 @@ pub enum BackendEvent {
     // --- perf: quality presets, latency overlay, all monitors (TLP-perf) ---
 
     // --- power: WOL, recording, tunnels, whiteboard, connection log, device info (TLP-power) ---
+    // whiteboard (TLP-whiteboard)
+    /// Viewer side: the host sent a whiteboard op (its user cleared the drawings, or a
+    /// host-side stroke). Apply it to the session's whiteboard.
+    WhiteboardRemote {
+        session: SessionId,
+        op: WhiteboardOp,
+    },
     // recording (TLP-recording)
     /// Viewer side: the session is being recorded into `folder` (show the red indicator).
     RecordingStarted {
@@ -576,6 +585,17 @@ pub trait Backend: Send + Sync {
     // --- perf (TLP-perf) ---
 
     // --- power (TLP-power) ---
+    // whiteboard (TLP-whiteboard)
+    /// Viewer side: send whiteboard ops (strokes, clear) to the host, in order. The host
+    /// enforces `WHITEBOARD`; the UI only offers drawing while it is granted.
+    fn send_whiteboard(&self, session: SessionId, ops: Vec<WhiteboardOp>) {
+        tracing::debug!(
+            session = session.0,
+            ops = ops.len(),
+            "whiteboard not supported by this backend"
+        );
+    }
+
     // recording (TLP-recording)
     /// Viewer side: start recording the session's video to a file in the recordings folder.
     /// Answered by [`BackendEvent::RecordingStarted`] or [`BackendEvent::RecordingStopped`].

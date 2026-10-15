@@ -14,6 +14,7 @@ use super::file_browser::FileBrowser;
 use super::icons::{self, Icon};
 use super::key_forward::KeyForwarder;
 use super::transfers::{self, TransferPanel};
+use super::whiteboard::WhiteboardUi;
 use super::{theme, widgets};
 use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, SessionStats};
 use crate::i18n::{format, ltr_isolate, Tx, S};
@@ -60,6 +61,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Draw-on-screen state (TLP-whiteboard).
+    pub whiteboard: WhiteboardUi,
     /// Session recording (TLP-recording), driven by the backend's recording events.
     pub recording: super::recordings::RecordState,
     /// Chat with the host user (side panel).
@@ -112,6 +115,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            whiteboard: WhiteboardUi::new(),
             recording: Default::default(),
             chat: ChatState::new(permissions.contains(Permissions::CHAT)),
             clipboard: Default::default(),
@@ -125,6 +129,7 @@ impl ViewerSession {
         if active != self.active_monitor {
             // New surface: re-send the pointer position on the next move.
             self.last_pos = None;
+            self.whiteboard.monitor_changed();
         }
         self.monitors = monitors;
         self.active_monitor = active;
@@ -235,7 +240,12 @@ impl ViewerSession {
     pub fn ui(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend, modal_open: bool) {
         let ctx = ui.ctx().clone();
         self.update_texture(&ctx);
+        self.whiteboard
+            .update(self.permissions, backend, self.id, Instant::now());
         self.toolbar(ui, tx, backend);
+        if self.whiteboard.is_active() {
+            self.whiteboard.tools_bar(ui, tx, backend, self.id);
+        }
         if self.host_input_priority {
             self.priority_banner(ui, tx);
         }
@@ -283,10 +293,26 @@ impl ViewerSession {
                             .inner
                     }
                 };
+                self.whiteboard
+                    .paint(ui, image_rect, visible, self.frame_size);
                 if self.show_stats {
                     self.stats_overlay(ui, tx, ui.clip_rect());
                 }
-                self.handle_input(ui, backend, &resp, image_rect, visible, modal_open);
+                if self.whiteboard.is_active() && !modal_open {
+                    // The pointer draws; nothing is sent as input (keys neither).
+                    self.set_grab(false);
+                    self.whiteboard.handle_pointer(
+                        ui,
+                        image_rect,
+                        visible,
+                        self.frame_size,
+                        backend,
+                        self.id,
+                        Instant::now(),
+                    );
+                } else {
+                    self.handle_input(ui, backend, &resp, image_rect, visible, modal_open);
+                }
             });
     }
 
@@ -375,6 +401,12 @@ impl ViewerSession {
                         .clicked()
                     {
                         self.show_stats = !self.show_stats;
+                    }
+                    let wb_allowed = self.permissions.contains(Permissions::WHITEBOARD);
+                    if self.whiteboard.toggle_button(ui, tx, wb_allowed) == Some(true) {
+                        // Drawing takes the pointer: nothing may stay pressed on the remote PC.
+                        self.set_grab(false);
+                        self.release_all(backend);
                     }
                     let (id, perms) = (self.id, self.permissions);
                     self.clipboard.toolbar(ui, tx, id, perms, backend);

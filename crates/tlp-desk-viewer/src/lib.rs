@@ -25,6 +25,7 @@
 mod frame;
 pub mod recording;
 mod session;
+mod whiteboard;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -43,6 +44,7 @@ pub use tlp_desk_net::{
     AuthMethod, AwaitingAcceptFn, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo,
 };
 pub use tlp_desk_proto::MonitorDesc;
+pub use whiteboard::{WhiteboardEvent, WhiteboardViewer};
 
 /// Callback invoked (from any thread) when a new frame or event is available, e.g. to wake
 /// the GUI for a repaint.
