@@ -237,11 +237,22 @@ mod tests {
     }
 
     #[test]
-    fn host_defaults_match_the_host_crate() {
+    fn host_defaults_match_the_host_crate_apart_from_the_app_permissions() {
         let h = HostSettings::default();
         let live = h.live_options();
         let host = tlp_desk_host::HostConfig::default();
-        assert_eq!(live.default_permissions, host.default_permissions);
+        // The app grants more than the library's minimum (files, chat, whiteboard, clipboard)
+        // but never port forwarding.
+        assert!(live.default_permissions.contains(host.default_permissions));
+        for bit in [
+            Permissions::FILES,
+            Permissions::CHAT,
+            Permissions::WHITEBOARD,
+            Permissions::CLIPBOARD,
+        ] {
+            assert!(live.default_permissions.contains(bit));
+        }
+        assert!(!live.default_permissions.contains(Permissions::TUNNEL));
         assert_eq!(live.accept_timeout, host.accept_timeout);
         assert_eq!(live.allow_one_time_code, host.allow_one_time_code);
         assert_eq!(live.local_input_grace, host.local_input_grace);
