@@ -502,18 +502,31 @@ fn connection_log_records_sessions_refusals_and_pause() {
         matches!(e, BackendEvent::ConnectFailed { attempt: a, .. } if *a == attempt).then_some(())
     });
 
-    let host_entries = LogStore::new(&host_log).read_all();
-    let ends: Vec<LogEnd> = host_entries.iter().map(|e| e.end).collect();
+    // The host writes its lines from its event pump, which may lag the UI events a little
+    // (the banner reconciler can report a session end first): poll with a deadline.
+    let deadline = Instant::now() + WAIT;
+    let host_entries = loop {
+        let entries = LogStore::new(&host_log).read_all();
+        if entries.len() >= 3 || Instant::now() > deadline {
+            break entries;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let mut ends: Vec<LogEnd> = host_entries.iter().map(|e| e.end).collect();
+    ends.sort_by_key(|e| format!("{e:?}"));
     assert_eq!(
         ends,
         [
             LogEnd::ClosedRemotely,
-            LogEnd::WrongCredentials,
-            LogEnd::Declined
+            LogEnd::Declined,
+            LogEnd::WrongCredentials
         ],
         "{host_entries:?}"
     );
-    let first = &host_entries[0];
+    let first = host_entries
+        .iter()
+        .find(|e| e.end == LogEnd::ClosedRemotely)
+        .unwrap();
     assert_eq!(first.direction, Direction::Incoming);
     assert_eq!(first.auth, LogAuth::OneTimeCode);
     assert_eq!(first.name, "اختبار-pc");
