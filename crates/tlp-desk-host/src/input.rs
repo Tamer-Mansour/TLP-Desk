@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use tlp_desk_input::{InputEvent, InputInjector, LocalActivity, MonitorRect, PointerMarker};
 use tokio::sync::{mpsc, watch};
 
-use crate::priority::PriorityGate;
+use crate::priority::{LocalInput, PriorityGate};
 use crate::{InjectorFactory, LocalActivityFactory, PointerMarkerFactory};
 
 /// How often the thread re-evaluates priority / marker visibility without remote input.
@@ -131,7 +131,12 @@ pub(crate) fn run(ctx: InputCtx) {
             }
         }
         let now = Instant::now();
-        let last_local = activity.as_ref().and_then(|a| a.last_physical_input());
+        let last_local = activity
+            .as_ref()
+            .map_or_else(LocalInput::default, |a| LocalInput {
+                keyboard: a.last_physical_keyboard(),
+                pointer: a.last_physical_pointer(),
+            });
 
         let (step, ev) = match received {
             Some(ev) => {
@@ -198,11 +203,19 @@ mod tests {
     use std::sync::Mutex;
     use tlp_desk_input::InputError;
 
+    /// `.0`: time of the last local input; `.1`: it was a mouse (the keyboard stayed idle).
     #[derive(Default)]
-    struct FakeLocal(Mutex<Option<Instant>>);
+    struct FakeLocal(Mutex<Option<Instant>>, std::sync::atomic::AtomicBool);
     impl LocalActivity for FakeLocal {
         fn last_physical_input(&self) -> Option<Instant> {
             *self.0.lock().unwrap()
+        }
+        fn last_physical_keyboard(&self) -> Option<Instant> {
+            if self.1.load(std::sync::atomic::Ordering::SeqCst) {
+                None
+            } else {
+                self.last_physical_input()
+            }
         }
     }
 
@@ -353,5 +366,33 @@ mod tests {
         let log = r.log.lock().unwrap();
         assert_eq!(log.last().map(String::as_str), Some("ReleaseAll"));
         assert!(!log.iter().any(|l| l == "MouseMove { x: 9, y: 9 }"));
+    }
+
+    /// Regression: local mouse activity used to drop every remote key. Typing keeps working
+    /// while the host user only moves the mouse; the pointer is still held back.
+    #[test]
+    fn local_mouse_does_not_stop_remote_typing() {
+        let r = rig(Duration::from_millis(300));
+        r.local.1.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Start the activity monitor with a first event, then "move the mouse" locally.
+        r.tx.send(InputEvent::ReleaseAll).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        *r.local.0.lock().unwrap() = Some(Instant::now());
+        std::thread::sleep(Duration::from_millis(100));
+        let key = InputEvent::Key {
+            scancode: 0x1e,
+            extended: false,
+            down: true,
+        };
+        r.tx.send(InputEvent::MouseMove { x: 3, y: 3 }).unwrap();
+        r.tx.send(key.clone()).unwrap();
+        wait_for(&r.log, &format!("{key:?}"));
+        drop(r.tx);
+        r.thread.join().unwrap();
+        let log = r.log.lock().unwrap();
+        assert!(
+            !log.iter().any(|l| l == "MouseMove { x: 3, y: 3 }"),
+            "{log:?}"
+        );
     }
 }
