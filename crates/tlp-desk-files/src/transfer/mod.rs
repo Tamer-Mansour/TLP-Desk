@@ -106,6 +106,9 @@ pub(crate) struct Inner {
     /// Host: finds the source folder of an offer that names none (a paste of files the user
     /// copied in Explorer), from `(session_key, offer id)`.
     pub announced_source: Mutex<Option<SourceLookup>>,
+    /// Host: where an upload offer with an empty `dest_dir` goes when its id was announced by
+    /// the viewer's Explorer copy (the staging folder of the virtual clipboard files).
+    pub announced_dest: Mutex<Option<SourceLookup>>,
 }
 
 /// See [`FileTransfer::set_announced_source`].
@@ -149,6 +152,7 @@ impl FileTransfer {
                 hooks: TestHooks::default(),
                 specs: Mutex::new(HashMap::new()),
                 announced_source: Mutex::new(None),
+                announced_dest: Mutex::new(None),
             }),
         })
     }
@@ -158,6 +162,13 @@ impl FileTransfer {
     /// it is consulted only for download offers with an empty `source_dir`.
     pub fn set_announced_source(&self, lookup: SourceLookup) {
         *lock(&self.inner.announced_source) = Some(lookup);
+    }
+
+    /// Host: lets the viewer upload files its Explorer copy announced into a folder chosen by
+    /// this PC. `lookup(session_key, offer_id)` returns the destination folder; it is consulted
+    /// only for upload offers with an empty `dest_dir`.
+    pub fn set_announced_dest(&self, lookup: SourceLookup) {
+        *lock(&self.inner.announced_dest) = Some(lookup);
     }
 
     /// Every event of every session, as `(session_key, event)`.
