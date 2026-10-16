@@ -535,6 +535,11 @@ impl App {
                         s.unattended.on_restarting();
                     }
                 }
+                BackendEvent::Reconnecting { session } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.on_network_lost();
+                    }
+                }
                 BackendEvent::ReconnectAttempt { session, attempt } => {
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
                         s.unattended.attempt = attempt;

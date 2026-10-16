@@ -477,6 +477,10 @@ pub enum BackendEvent {
         session: SessionId,
         error: ConnectError,
     },
+    /// Viewer (TLP-multiviewer): the connection dropped without a goodbye; the backend is
+    /// resuming the session with the host's resume ticket (no new Accept). `ReconnectAttempt`,
+    /// `Reconnected` and `ReconnectFailed` follow as for a restart.
+    Reconnecting { session: SessionId },
 
     // --- device info (TLP-cli-devinfo) ---
     /// The host answered [`Backend::request_device_info`] (already sanitized).

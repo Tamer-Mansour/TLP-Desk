@@ -581,6 +581,9 @@ strings! {
     RestartingNote => "Before anyone signs in, this works only if the TLP-Desk service is installed on the remote PC.", "قبل أن يسجّل أحد الدخول، لا يعمل هذا إلا إذا كانت خدمة TLP-Desk مثبتة على الحاسوب البعيد.";
     StopWaiting => "Stop waiting", "إيقاف الانتظار";
     ReconnectFailedText => "The remote PC did not come back: {detail}", "لم يعد الحاسوب البعيد: {detail}";
+    // --- multi-viewer: reconnect after a network drop, per-viewer input pause (TLP-multiviewer) ---
+    Reconnecting => "Connection lost. Reconnecting…", "انقطع الاتصال. جارٍ إعادة الاتصال…";
+    ReconnectingNote => "The session continues automatically when the network is back (up to 2 minutes).", "تُستأنف الجلسة تلقائيًا عند عودة الشبكة (حتى دقيقتين).";
     // --- address book + Wake-on-LAN (TLP-addressbook) ---
     AbTitle => "Address book", "دفتر العناوين";
     AbSearchHint => "Search by name, group, ID or IP", "ابحث بالاسم أو المجموعة أو المعرّف أو IP";

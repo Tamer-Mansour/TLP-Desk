@@ -216,6 +216,9 @@ struct State {
     reconnects: HashMap<SessionId, AbortHandle>,
     /// Who is behind each open accept prompt (to log declines and timeouts).
     request_peers: HashMap<HostRequestId, tlp_desk_net::PeerInfo>,
+    /// Viewer sessions that asked their host to restart: their ticket is a restart ticket
+    /// (TLP-multiviewer: any other ticket only resumes after a network drop).
+    restart_requested: std::collections::HashSet<SessionId>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
