@@ -61,6 +61,20 @@ is focused does the same as the second button.
 Drop files onto the session window to send them to the remote PC (they land in the Desktop
 folder unless you pick a folder in the browser).
 
+## When a file already exists
+
+If a file with the same name is already in the destination, TLP-Desk asks before it writes anything. The dialog shows the existing and the new version of each file (size, how long ago it changed, and whether the new one is newer or older) and lets you choose per file: **Keep both** (the new file gets a number, `report (2).docx`), **Replace**, **Skip**, or **Resume** when an earlier copy of that very file was interrupted. **Apply to all** sets one choice for every file; **Cancel transfer** stops before anything is copied. A file that is already identical (same size and time) is never asked about.
+
+When a viewer sends files to a host, the host keeps both files by default and nobody is interrupted. Turn on **Ask before replacing files a viewer sends** in Settings, Incoming connections, and the person at the host PC gets the same dialog; declining rejects the upload. With no answer after two minutes, both files are kept.
+
+## The transfer list
+
+Every transfer in the session is listed at the bottom of the window (the toolbar button shows the combined progress and speed while files move). Each row shows the name, size, speed and time left, with buttons to pause, resume, cancel and retry (a retry continues where it stopped), **Show files** for the progress of each file, and **Open folder** or **Open file** once files arrived. Programs and scripts are never launched from here; **Show in folder** selects them instead. You can sort by status, newest, name, size or progress, and **Clear finished** tidies the list. The **Recent** tab keeps the last 100 transfers across restarts, with **Send again** while you are connected to the same PC.
+
+## On the host PC
+
+Files moving to or from a host are never hidden from the person sitting at it. The banner shows **Files: n active**; click it for the **File transfers** window, which lists who is sending or fetching what, with progress and a **Cancel** button. A notice with **Open folder** appears when files have arrived. The window opens by itself when a transfer starts.
+
 ## From the command line
 
 `TLP-Desk-cli` can do the same without a window; see [Command line](command-line.md):

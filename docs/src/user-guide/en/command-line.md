@@ -51,7 +51,7 @@ TLP-Desk-cli ls 123456789 --code 042917 D:\Shared   # also: mkdir, rm, mv (need 
 | `chat <target> <message>` | Send one chat message and print the replies |
 | `clip-send <target> <text>` | Put text on the other PC's clipboard |
 | `ls`, `mkdir`, `rm`, `mv` `<target> <path>` | Browse and change folders on the other PC (Files permission) |
-| `send-file`, `get-file <target>` | Copy files and folders to or from the other PC |
+| `send-file`, `get-file <target>` | Copy files and folders to or from the other PC (`get-file --on-conflict keep-both|overwrite|skip`) |
 | `forward <target> <local:host:remote>` | Forward TCP ports until Ctrl+C |
 
 `<target>` is a device ID, an IP address or a device name. Every command accepts `--code <6

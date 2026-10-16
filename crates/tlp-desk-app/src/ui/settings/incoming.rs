@@ -125,6 +125,13 @@ impl App {
                     &mut host.remote_pointer_marker,
                     tx.t(S::PointerMarker),
                 );
+                changed |= check_row(
+                    ui,
+                    tx,
+                    &mut host.ask_on_upload_conflict,
+                    tx.t(S::HostAskOnConflict),
+                );
+                ui.label(theme::caption(ui, tx.t(S::HostAskOnConflictHint)));
             });
         });
         if changed {

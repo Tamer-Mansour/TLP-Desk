@@ -1,5 +1,6 @@
-//! File transfer queue of a viewer session: send files or a folder (picker or drag and drop),
-//! progress with speed and time left, cancel, retry, open the destination folder.
+//! File transfer panel of a viewer session: send files or a folder (picker or drag and drop)
+//! and the transfer queue ([`super::transfer_queue`]) with progress, speed, time left, pause,
+//! cancel, retry, per-file details and recent transfers.
 //!
 //! The panel holds no engine state: [`TransferPanel::update`] receives
 //! [`BackendEvent::Transfer`](crate::backend::BackendEvent::Transfer) views and
@@ -7,14 +8,16 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
+use std::time::Instant;
 
-use eframe::egui::{self, Color32, CornerRadius, RichText, Sense};
+use eframe::egui::{self, Color32, RichText};
 
 use super::icons::{self, Icon};
 use super::theme;
-use crate::backend::files::{
-    FsError, TransferDir, TransferId, TransferStartError, TransferStatus, TransferView,
-};
+use super::transfer_queue::{Queue, QueueAction, QueueEnv};
+use super::transfer_toast::Toasts;
+use crate::backend::files::{FsError, TransferStartError, TransferStatus, TransferView};
+use crate::backend::Backend;
 use crate::i18n::{format, ltr_isolate, Tx, S};
 
 /// What the user asked for in the panel; the session forwards these to the backend.
@@ -22,23 +25,19 @@ use crate::i18n::{format, ltr_isolate, Tx, S};
 pub enum Action {
     /// Send these local files and folders to the host.
     Send(Vec<PathBuf>),
-    /// Cancel a running transfer.
-    Cancel(TransferId),
-    /// Continue a stopped transfer from its partial data.
-    Retry(TransferId),
-    /// Show this local folder in the file manager.
-    OpenFolder(PathBuf),
+    /// Something in the queue (cancel, pause, resume, open, repeat...).
+    Queue(QueueAction),
 }
 
-/// Most transfers kept in the list (oldest finished ones are dropped first).
-const MAX_ITEMS: usize = 200;
-
-/// State of the transfer queue panel.
+/// State of the transfer panel.
 #[derive(Default)]
 pub struct TransferPanel {
     /// Whether the panel is shown.
     pub open: bool,
-    items: Vec<TransferView>,
+    /// The queue of this session's transfers.
+    pub queue: Queue,
+    /// Notices when a transfer ends.
+    pub toasts: Toasts,
     error: Option<TransferStartError>,
     /// Result of the native picker running on its own thread.
     picker: Option<Receiver<Vec<PathBuf>>>,
@@ -50,20 +49,20 @@ impl TransferPanel {
         Self::default()
     }
 
-    /// Records the newest state of a transfer and opens the panel for new ones.
+    /// Records the newest state of a transfer, opens the panel for new ones and queues a
+    /// notice when one ends.
     pub fn update(&mut self, view: TransferView) {
         self.error = None;
-        match self.items.iter_mut().find(|v| v.id == view.id) {
-            Some(slot) => *slot = view,
-            None => {
-                self.items.push(view);
-                self.open = true;
-                if self.items.len() > MAX_ITEMS {
-                    if let Some(i) = self.items.iter().position(|v| v.status.is_final()) {
-                        self.items.remove(i);
-                    }
-                }
-            }
+        let was_finished = self
+            .queue
+            .entries()
+            .iter()
+            .find(|e| e.view.id == view.id)
+            .is_some_and(|e| super::transfer_queue::finished(&e.view));
+        self.toasts
+            .on_update(&view, "", was_finished, Instant::now());
+        if self.queue.update(view, "") {
+            self.open = true;
         }
     }
 
@@ -74,13 +73,8 @@ impl TransferPanel {
     }
 
     /// The transfers currently listed, oldest first.
-    pub fn items(&self) -> &[TransferView] {
-        &self.items
-    }
-
-    fn clear_finished(&mut self) {
-        self.items.retain(|v| !v.status.is_final());
-        self.error = None;
+    pub fn items(&self) -> Vec<&TransferView> {
+        self.queue.entries().iter().map(|e| &e.view).collect()
     }
 
     /// Local paths dropped onto the window this frame.
@@ -138,10 +132,68 @@ impl TransferPanel {
         });
     }
 
-    /// Draws the panel (if open) and returns what the user asked for. `allowed` is whether the
-    /// session has the files permission.
-    pub fn ui(&mut self, ui: &mut egui::Ui, tx: Tx, allowed: bool) -> Vec<Action> {
-        let mut actions = Vec::new();
+    /// The toolbar button: the panel toggle, with the combined progress and speed of running
+    /// transfers next to the icon while any run. `true` when clicked.
+    pub fn toolbar_button(&self, ui: &mut egui::Ui, tx: Tx) -> bool {
+        let active = self.queue.active_count();
+        if active == 0 {
+            return icons::icon_toggle(ui, tx, self.open, Icon::Upload, tx.t(S::FilesPanelTitle))
+                .clicked();
+        }
+        let pct = (self.queue.active_fraction() * 100.0).round() as u32;
+        let speed = ltr_isolate(&format::file_size(
+            self.queue.total_rate(),
+            tx.lang,
+            tx.digits,
+        ));
+        let text = format!(
+            "{}%  {}",
+            tx.digits(&pct.to_string()),
+            tx.raw(S::TransferRate).replace("{size}", &speed)
+        );
+        let tip = format!(
+            "{}\n{}",
+            tx.t(S::FilesPanelTitle),
+            tx.f(S::TqActiveCount, &[("n", &tx.digits(&active.to_string()))])
+        );
+        let resp = ui.add(icons::icon_text_selectable(
+            tx,
+            self.open,
+            Icon::Upload,
+            tx.p(&text),
+        ));
+        // A thin progress line under the button.
+        let r = resp.rect;
+        let w = (r.width() - 8.0) * self.queue.active_fraction();
+        let y = r.max.y - 3.0;
+        let (x0, x1) = if tx.rtl() {
+            (r.max.x - 4.0 - w, r.max.x - 4.0)
+        } else {
+            (r.min.x + 4.0, r.min.x + 4.0 + w)
+        };
+        ui.painter().line_segment(
+            [egui::pos2(x0, y), egui::pos2(x1, y)],
+            egui::Stroke::new(2.0, theme::accent(ui.visuals().dark_mode)),
+        );
+        resp.on_hover_text(tip).clicked()
+    }
+
+    /// Draws the panel (if open) and the notices; returns what the user asked for. `allowed`
+    /// is whether the session has the files permission; `peer` is the host's (name, device ID).
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        tx: Tx,
+        allowed: bool,
+        backend: &dyn Backend,
+        peer: (&str, u32),
+    ) -> Vec<Action> {
+        let mut actions: Vec<Action> = self
+            .toasts
+            .show(ui.ctx(), tx, "session-transfers")
+            .into_iter()
+            .map(Action::Queue)
+            .collect();
         if let Some(rx) = &self.picker {
             match rx.try_recv() {
                 Ok(paths) => {
@@ -158,7 +210,16 @@ impl TransferPanel {
             return actions;
         }
         let ctx = ui.ctx().clone();
+        let env = QueueEnv {
+            backend,
+            session_peer: Some(peer.1),
+            session_peer_name: peer.0,
+            can_start: allowed,
+        };
         egui::Panel::bottom("session-transfers")
+            .resizable(true)
+            .default_size(250.0)
+            .size_range(130.0..=520.0)
             .frame(
                 egui::Frame::new()
                     .fill(ui.visuals().window_fill)
@@ -195,11 +256,6 @@ impl TransferPanel {
                         {
                             self.open = false;
                         }
-                        if self.items.iter().any(|v| v.status.is_final())
-                            && ui.button(tx.t(S::ClearFinished)).clicked()
-                        {
-                            self.clear_finished();
-                        }
                     });
                 });
                 if !allowed {
@@ -215,83 +271,15 @@ impl TransferPanel {
                     };
                     ui.label(RichText::new(text).color(theme::danger(ui.visuals().dark_mode)));
                 }
-                if self.items.is_empty() {
-                    ui.label(theme::caption(ui, tx.t(S::NoTransfers)));
-                    return;
-                }
                 egui::ScrollArea::vertical()
-                    .max_height(220.0)
-                    .auto_shrink([false, true])
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        for v in self.items.iter().rev() {
-                            transfer_row(ui, tx, v, &mut actions);
+                        for a in self.queue.ui(ui, tx, &env) {
+                            actions.push(Action::Queue(a));
                         }
                     });
             });
         actions
-    }
-}
-
-fn transfer_row(ui: &mut egui::Ui, tx: Tx, v: &TransferView, actions: &mut Vec<Action>) {
-    ui.add_space(4.0);
-    theme::row(ui, tx.rtl(), |ui| {
-        let dir_icon = match v.dir {
-            TransferDir::Send => Icon::Upload,
-            TransferDir::Receive => Icon::Download,
-        };
-        icons::icon(
-            ui,
-            tx,
-            dir_icon,
-            icons::BUTTON_ICON,
-            ui.visuals().text_color(),
-        );
-        theme::column(ui, tx.rtl(), |ui| {
-            ui.label(RichText::new(tx.d(&v.label)).strong());
-            ui.label(theme::caption(ui, &status_line(v, tx)));
-        });
-        theme::row_end(ui, tx.rtl(), |ui| {
-            if !v.status.is_final() {
-                if icons::icon_button(ui, tx, Icon::Stop, tx.t(S::TransferCancel)).clicked() {
-                    actions.push(Action::Cancel(v.id));
-                }
-            } else if v.status.can_retry()
-                && icons::icon_button(ui, tx, Icon::Refresh, tx.t(S::TransferRetry)).clicked()
-            {
-                actions.push(Action::Retry(v.id));
-            }
-            if let (TransferDir::Receive, Some(dest)) = (v.dir, &v.local_dest) {
-                if v.status != TransferStatus::Preparing
-                    && icons::icon_button(ui, tx, Icon::FolderOpen, tx.t(S::OpenFolder)).clicked()
-                {
-                    actions.push(Action::OpenFolder(dest.clone()));
-                }
-            }
-        });
-    });
-    progress_bar(ui, tx.rtl(), v);
-}
-
-/// A thin progress bar that fills from the reading-start side (right in Arabic).
-fn progress_bar(ui: &mut egui::Ui, rtl: bool, v: &TransferView) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 6.0), Sense::hover());
-    let dark = ui.visuals().dark_mode;
-    let round = CornerRadius::same(3);
-    ui.painter()
-        .rect_filled(rect, round, ui.visuals().extreme_bg_color);
-    let w = rect.width() * v.fraction();
-    if w > 0.5 {
-        let filled = if rtl {
-            egui::Rect::from_min_max(egui::pos2(rect.max.x - w, rect.min.y), rect.max)
-        } else {
-            egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + w, rect.max.y))
-        };
-        let color = match v.status {
-            TransferStatus::Completed if v.failed_files == 0 => theme::success(dark),
-            TransferStatus::Failed(_) | TransferStatus::Disconnected => theme::danger(dark),
-            _ => theme::accent(dark),
-        };
-        ui.painter().rect_filled(filled, round, color);
     }
 }
 
@@ -373,6 +361,7 @@ pub fn open_folder(path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::files::{TransferDir, TransferId};
     use crate::i18n::{DigitStyle, Lang};
 
     fn view(status: TransferStatus) -> TransferView {
@@ -388,6 +377,8 @@ mod tests {
             failed_files: 0,
             bytes_per_sec: 100 << 20,
             local_dest: None,
+            local: true,
+            started_unix_ms: 0,
         }
     }
 
@@ -418,10 +409,11 @@ mod tests {
         p.update(view(TransferStatus::Running));
         assert_eq!(p.items().len(), 1);
         assert_eq!(p.items()[0].status, TransferStatus::Running);
-        p.clear_finished();
+        p.queue.clear_finished();
         assert_eq!(p.items().len(), 1, "running transfers stay");
         p.update(view(TransferStatus::Completed));
-        p.clear_finished();
+        assert_eq!(p.toasts.len(), 1, "a notice when it ends");
+        p.queue.clear_finished();
         assert!(p.items().is_empty());
     }
 

@@ -146,6 +146,10 @@ pub struct App {
     pub recordings: RecordingsUi,
     /// Recent clipboard activity of host sessions (banner indicator, TLP-clipboard).
     pub host_clipboard: crate::ui::clipboard::HostClipboard,
+    /// "These files already exist" questions (viewer downloads, viewer uploads to this host).
+    pub conflicts: crate::ui::transfer_conflict::ConflictDialogs,
+    /// Files moving to and from this host: list, window and notices (TLP-transfer-ux).
+    pub host_transfers: crate::ui::host_transfers::HostTransfers,
 }
 
 impl App {
@@ -209,6 +213,8 @@ impl App {
             conn_log: Default::default(),
             recordings: RecordingsUi::default(),
             host_clipboard: Default::default(),
+            conflicts: Default::default(),
+            host_transfers: Default::default(),
         };
         // The Run key is the truth for "start with Windows" (it can be removed outside the app).
         if let Ok(on) = app.autostart.is_enabled() {
@@ -659,14 +665,48 @@ impl App {
                 BackendEvent::Transfer { session, view } => {
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
                         s.transfers.update(view);
+                    } else if let Some(who) = self.host_peer_label(session) {
+                        if self.host_transfers.update(view, &who) {
+                            chat_ui::notify_if_unfocused(ctx);
+                        }
                     }
                 }
+                BackendEvent::TransferConflict { session, prompt } => {
+                    let who = self.host_peer_label(session).unwrap_or_default();
+                    self.conflicts.push(prompt, &who);
+                    bring_to_front(ctx);
+                }
+                BackendEvent::TransferConflictClosed { id } => self.conflicts.close(id),
                 BackendEvent::TransferNotStarted { session, error } => {
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
                         s.transfers.not_started(error);
                     }
                 }
             }
+        }
+    }
+
+    /// "Name (123 456 789)" of the viewer behind a host session, name sanitized.
+    fn host_peer_label(&self, session: SessionId) -> Option<String> {
+        self.host_sessions
+            .iter()
+            .find(|(id, _)| *id == session)
+            .map(|(_, p)| {
+                let name = crate::banner::sanitize_name(&p.name);
+                if name.is_empty() {
+                    p.device_id.to_string()
+                } else {
+                    format!("{name} ({})", p.device_id)
+                }
+            })
+    }
+
+    /// Host side: the transfer window, the notices, and the user's requests in them.
+    fn host_transfer_ui(&mut self, ctx: &egui::Context) {
+        let tx = self.tx;
+        let backend = Arc::clone(&self.backend);
+        for action in self.host_transfers.show(ctx, tx, backend.as_ref()) {
+            crate::ui::session::apply_queue_action(backend.as_ref(), SessionId(0), action);
         }
     }
 
@@ -756,6 +796,14 @@ impl App {
                         });
                     });
                 }
+                // Files moving to or from this PC are never invisible.
+                if self.host_transfers.has_activity() {
+                    theme::row(ui, tx.rtl(), |ui| {
+                        if self.host_transfers.chip(ui, tx) {
+                            self.host_transfers.open = !self.host_transfers.open;
+                        }
+                    });
+                }
                 // The remote person types into the void otherwise: say why.
                 if self
                     .host_input_blocked
@@ -810,6 +858,13 @@ impl App {
     fn dialogs(&mut self, ctx: &egui::Context) -> bool {
         let tx = self.tx;
         let mut any = false;
+
+        if let Some((id, answer)) = self.conflicts.show(ctx, tx) {
+            self.backend.resolve_conflict(id, answer);
+        }
+        if self.conflicts.is_open() {
+            any = true;
+        }
 
         if let Some((request, peer)) = self.incoming.front().cloned() {
             any = true;
@@ -1033,6 +1088,7 @@ impl eframe::App for App {
             .is_some_and(|s| s.recording != RecordState::Off);
         self.recordings.show(&ctx, self.tx, recording_now);
         self.host_chat_windows(&ctx);
+        self.host_transfer_ui(&ctx);
 
         if self.session.is_some() {
             let tx = self.tx;

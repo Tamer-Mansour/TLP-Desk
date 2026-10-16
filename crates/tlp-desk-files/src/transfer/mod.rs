@@ -28,6 +28,7 @@
 //! `name.tlpdesk-part`, verified with BLAKE3 and renamed into place, so a file with its real
 //! name is always complete.
 
+mod conflict;
 mod disk;
 mod error;
 mod hash;
@@ -42,7 +43,7 @@ mod types;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tlp_desk_net::{Feature, FeatureCtx};
@@ -51,13 +52,17 @@ use tlp_desk_proto::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+pub use conflict::{
+    detect_conflicts, ConflictChoice, ConflictRequest, ConflictResolution, FileConflict,
+    MAX_LISTED_CONFLICTS,
+};
 pub use error::{FilesError, PathIssue};
 pub use hash::PIECE;
 pub use path::{validate_component, validate_rel_path, MAX_DEPTH};
-pub use plan::{META_SUFFIX, PART_SUFFIX};
+pub use plan::{Decisions, META_SUFFIX, PART_SUFFIX};
 pub use types::{
-    ConflictPolicy, TransferConfig, TransferEvent, TransferId, TransferInfo, TransferRole,
-    TransferSnapshot, TransferState,
+    ConflictPolicy, FileRow, FileState, TransferConfig, TransferEvent, TransferId, TransferInfo,
+    TransferRole, TransferSnapshot, TransferState,
 };
 
 use receiver::Receiving;
@@ -95,6 +100,21 @@ enum Spec {
     },
 }
 
+/// What a transfer started on this side was asked to copy (for "send again").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferOrigin {
+    /// `true` for an upload (local files to the host), `false` for a download.
+    pub upload: bool,
+    /// Uploads: the local files and folders that were sent.
+    pub local_paths: Vec<PathBuf>,
+    /// Uploads: the host folder they went to (empty = the host's default folder).
+    pub remote_dest: String,
+    /// Downloads: the host files and folders that were fetched.
+    pub remote_paths: Vec<String>,
+    /// Downloads: the local folder they went to.
+    pub local_dest: Option<PathBuf>,
+}
+
 /// Engine state shared by all sessions.
 pub(crate) struct Inner {
     pub cfg: TransferConfig,
@@ -103,6 +123,10 @@ pub(crate) struct Inner {
     pub events: broadcast::Sender<(u64, TransferEvent)>,
     pub hooks: TestHooks,
     specs: Mutex<HashMap<TransferId, (u64, Spec)>>,
+    /// Open [`ConflictPolicy::Ask`] prompts.
+    pub(crate) pending: conflict::Pending,
+    /// Policy for uploads from viewers, changeable while running (starts as `cfg.conflict`).
+    incoming_conflict: AtomicU8,
     /// Host: finds the source folder of an offer that names none (a paste of files the user
     /// copied in Explorer), from `(session_key, offer id)`.
     pub announced_source: Mutex<Option<SourceLookup>>,
@@ -118,6 +142,11 @@ impl Inner {
     /// A new process-unique id (also used as wire id for offers we send).
     pub fn alloc_id(&self) -> TransferId {
         TransferId(self.next_id.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// The policy for files a viewer sends to this host right now.
+    pub fn incoming_conflict(&self) -> ConflictPolicy {
+        ConflictPolicy::from_u8(self.incoming_conflict.load(Ordering::Relaxed))
     }
 
     pub fn remove_session(&self, key: u64) {
@@ -143,6 +172,7 @@ impl FileTransfer {
     /// Creates the engine.
     pub fn new(cfg: TransferConfig) -> Arc<Self> {
         let (events, _) = broadcast::channel(1024);
+        let incoming = cfg.conflict as u8;
         Arc::new(Self {
             inner: Arc::new(Inner {
                 cfg,
@@ -151,6 +181,8 @@ impl FileTransfer {
                 events,
                 hooks: TestHooks::default(),
                 specs: Mutex::new(HashMap::new()),
+                pending: conflict::Pending::default(),
+                incoming_conflict: AtomicU8::new(incoming),
                 announced_source: Mutex::new(None),
                 announced_dest: Mutex::new(None),
             }),
@@ -190,6 +222,44 @@ impl FileTransfer {
             .collect();
         out.sort_by_key(|s| s.info.id);
         out
+    }
+
+    /// The files of a transfer (folders are left out), `limit` of them from the `offset`-th,
+    /// with their progress. Empty if the transfer is unknown or its session ended.
+    pub fn file_rows(&self, id: TransferId, offset: usize, limit: usize) -> Vec<FileRow> {
+        self.find(id)
+            .map(|(_, t)| t.file_rows(offset, limit))
+            .unwrap_or_default()
+    }
+
+    /// What a transfer started on this side copies, even after its session ended.
+    pub fn origin(&self, id: TransferId) -> Option<TransferOrigin> {
+        let (_, spec) = lock(&self.inner.specs).get(&id).cloned()?;
+        Some(match spec {
+            Spec::Upload { local, remote_dest } => TransferOrigin {
+                upload: true,
+                local_paths: local,
+                remote_dest,
+                remote_paths: Vec::new(),
+                local_dest: None,
+            },
+            Spec::Download {
+                source_dir,
+                items,
+                local_dest,
+                ..
+            } => TransferOrigin {
+                upload: false,
+                local_paths: Vec::new(),
+                remote_dest: String::new(),
+                remote_paths: items
+                    .iter()
+                    .filter(|i| !i.rel_path.contains('/'))
+                    .map(|i| scan::join_remote(&source_dir, &i.rel_path))
+                    .collect(),
+                local_dest: Some(local_dest),
+            },
+        })
     }
 
     /// One transfer, if its session is still live.
@@ -256,7 +326,7 @@ impl FileTransfer {
     }
 
     /// Viewer: copies host files and folders (absolute host paths, all in one folder) into
-    /// the local folder `local_dest`, using the engine's conflict policy.
+    /// the local folder `local_dest`, using [`TransferConfig::download_conflict`].
     ///
     /// # Errors
     /// No such session, not a viewer, no `FILES`, remote paths that do not exist or do not
@@ -267,7 +337,7 @@ impl FileTransfer {
         remote_paths: Vec<String>,
         local_dest: PathBuf,
     ) -> Result<TransferId, FilesError> {
-        let policy = self.inner.cfg.conflict;
+        let policy = self.inner.cfg.download_conflict;
         let s = self.session(session_key)?;
         check_viewer(&s)?;
         let (source_dir, items) = list_remote(&s, &remote_paths, self.inner.cfg.max_items).await?;
@@ -301,6 +371,21 @@ impl FileTransfer {
             policy,
         };
         self.start(session_key, spec, None, wire_id).await
+    }
+
+    /// Changes what happens to files a viewer sends that already exist here, for uploads that
+    /// start from now on (the host's "ask before replacing" setting).
+    pub fn set_incoming_conflict(&self, policy: ConflictPolicy) {
+        self.inner
+            .incoming_conflict
+            .store(policy as u8, Ordering::Relaxed);
+    }
+
+    /// Answers a [`TransferEvent::ConflictsFound`] prompt: `Some(resolution)` continues the
+    /// transfer accordingly, `None` cancels it (on the host the viewer's upload is declined).
+    /// `false` if no prompt waits for `id` (already answered, timed out, session ended).
+    pub fn resolve_conflicts(&self, id: TransferId, answer: Option<ConflictResolution>) -> bool {
+        self.inner.pending.answer(id, answer)
     }
 
     /// Cancels a transfer (either side). Partial files are kept so a new transfer of the same
@@ -481,7 +566,8 @@ async fn download(
 ) -> Result<(), FilesError> {
     let dest = local_dest.clone();
     let plan_items = items.clone();
-    let rx = tokio::task::spawn_blocking(move || Receiving::prepare(&dest, plan_items, policy))
+    let decisions = conflict::decide(s, id, &local_dest, &items, policy, true).await?;
+    let rx = tokio::task::spawn_blocking(move || Receiving::prepare(&dest, plan_items, &decisions))
         .await
         .map_err(|_| FilesError::Protocol("planning task failed".into()))??;
     let offer = offer_of(

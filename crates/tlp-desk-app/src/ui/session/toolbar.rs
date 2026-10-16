@@ -441,15 +441,7 @@ impl ViewerSession {
             }
             Item::Files => self.files_buttons(ui, tx, backend),
             Item::Transfers => {
-                if icons::icon_toggle(
-                    ui,
-                    tx,
-                    self.transfers.open,
-                    Icon::Upload,
-                    tx.t(S::FilesPanelTitle),
-                )
-                .clicked()
-                {
+                if self.transfers.toolbar_button(ui, tx) {
                     self.transfers.open = !self.transfers.open;
                 }
             }

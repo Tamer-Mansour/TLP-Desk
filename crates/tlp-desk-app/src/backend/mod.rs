@@ -34,6 +34,7 @@ pub mod unattended;
 // TLP-settings-tray: host settings + connection-log glue for the real backend.
 pub mod recording;
 pub(crate) mod settings_tray;
+pub mod transfer_history;
 pub mod tunnels;
 pub mod whiteboard;
 
@@ -397,6 +398,15 @@ pub enum BackendEvent {
         session: SessionId,
         error: files::TransferStartError,
     },
+    /// Files already exist at the destination and the user must choose what happens; answer
+    /// with [`Backend::resolve_conflict`]. `session` is the viewer session or, for a viewer's
+    /// upload, the host session.
+    TransferConflict {
+        session: SessionId,
+        prompt: files::ConflictPrompt,
+    },
+    /// The question of this transfer was answered, timed out or its session ended.
+    TransferConflictClosed { id: files::TransferId },
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
     /// Clipboard content was synced (or refused) in a viewer or host session. Kinds and sizes
     /// only, never contents.
@@ -614,6 +624,36 @@ pub trait Backend: Send + Sync {
     fn retry_transfer(&self, session: SessionId, id: files::TransferId) {
         let _ = (session, id);
     }
+
+    /// Pause a running transfer this device started; [`Backend::retry_transfer`] continues it.
+    fn pause_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
+
+    /// Answer a [`BackendEvent::TransferConflict`]: `None` cancels the transfer.
+    fn resolve_conflict(&self, id: files::TransferId, answer: Option<files::ConflictResolution>) {
+        let _ = (id, answer);
+    }
+
+    /// The files of a transfer (not folders), `limit` of them from the `offset`-th, with
+    /// their progress. Cheap; the UI asks while a transfer's details are open.
+    fn transfer_files(
+        &self,
+        id: files::TransferId,
+        offset: usize,
+        limit: usize,
+    ) -> Vec<files::FileRow> {
+        let _ = (id, offset, limit);
+        Vec::new()
+    }
+
+    /// Recent finished transfers, oldest first (persisted across runs).
+    fn transfer_history(&self) -> Vec<transfer_history::TransferRecord> {
+        Vec::new()
+    }
+
+    /// Forget the recent transfers.
+    fn clear_transfer_history(&self) {}
 
     // --- clipboard (TLP-clipboard) ---
     /// Switch clipboard sync on or off for one viewer or host session ("Sync clipboard").

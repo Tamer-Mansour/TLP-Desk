@@ -51,11 +51,12 @@ use tokio::task::AbortHandle;
 use super::audio::{AudioBridge, AudioDevices};
 use super::chat::{self, ChatBridge, ChatLine, ChatSendError};
 use super::files::{
-    FsOp, FsRequestId, FsSide, TransferDir, TransferId, TransferRequest, TransferStartError,
-    TransferStatus, TransferView,
+    conflict_prompt, ConflictResolution, FileRow, FsOp, FsRequestId, FsSide, TransferDir,
+    TransferId, TransferRequest, TransferStartError, TransferStatus, TransferView,
 };
 use super::files_bridge::{EngineStarter, FilesBridge};
 use super::privacy;
+use super::transfer_history::{history_record, now_unix_ms, HistoryStore, TransferRecord};
 use super::{
     tunnels, whiteboard, AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId,
     DiscoveredDevice, EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo,
@@ -103,6 +104,8 @@ pub struct RealConfig {
     pub clipboard: Option<Arc<dyn tlp_desk_files::ClipboardBackend>>,
     /// File transfer settings (conflict policy, where uploads from viewers land).
     pub transfer: TransferConfig,
+    /// Folder of the transfer history, `transfers.json` (`None` = keep it in memory only).
+    pub history: Option<PathBuf>,
     /// When the port is taken by the installed Windows service, mirror that service instead of
     /// reporting `PortInUse`. Tests turn this off so they behave the same whether or not a real
     /// service is installed on the machine.
@@ -132,7 +135,13 @@ impl Default for RealConfig {
             host_settings: None,
             connection_log: None,
             clipboard: None,
-            transfer: TransferConfig::default(),
+            transfer: TransferConfig {
+                // The app asks before replacing a file it downloads; the host side keeps
+                // both files unless the user turned the question on in the settings.
+                download_conflict: tlp_desk_files::ConflictPolicy::Ask,
+                ..TransferConfig::default()
+            },
+            history: None,
             mirror_service: true,
         }
     }
@@ -187,6 +196,8 @@ struct Inner {
     clipboard: Arc<tlp_desk_files::ClipboardFeature>,
     /// Files lane: remote file system + clipboard files features (TLP-files).
     fsb: FilesBridge,
+    /// Recent finished transfers (`transfers.json`).
+    history: Mutex<super::transfer_history::HistoryStore>,
 }
 
 #[derive(Default)]
@@ -224,10 +235,13 @@ fn transfer_view(s: &TransferSnapshot) -> TransferView {
     };
     TransferView {
         id: TransferId(s.info.id.0),
-        dir: match s.info.direction {
-            tlp_desk_proto::TransferDirection::Upload => TransferDir::Send,
-            _ => TransferDir::Receive,
+        // From this device's point of view: the host's side of an upload is receiving.
+        dir: match s.info.role {
+            tlp_desk_files::TransferRole::Sending => TransferDir::Send,
+            tlp_desk_files::TransferRole::Receiving => TransferDir::Receive,
         },
+        local: s.info.initiated_locally,
+        started_unix_ms: s.info.started_unix_ms,
         label: s.info.label.clone(),
         status,
         bytes_done: s.bytes_done,
@@ -599,6 +613,11 @@ impl RealBackend {
             recorders: Default::default(),
             clipboard,
             fsb,
+            history: Mutex::new(
+                cfg.history
+                    .as_deref()
+                    .map_or_else(HistoryStore::in_memory, HistoryStore::load),
+            ),
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -699,9 +718,12 @@ impl Inner {
 
     // ----- file transfers (lane files-transfer) -----------------------------------------
 
-    /// Forwards the engine's events of viewer sessions to the UI as [`BackendEvent::Transfer`].
-    /// Transfers of host sessions (the other side started them) are not shown here.
+    /// Forwards the engine's events to the UI as [`BackendEvent::Transfer`] (and the
+    /// conflict questions as [`BackendEvent::TransferConflict`]), for viewer sessions and for
+    /// the host sessions viewers use to send or fetch files, and records finished transfers
+    /// in the history.
     async fn pump_files(self: Arc<Self>) {
+        use tlp_desk_files::TransferEvent;
         let mut rx = self.files.subscribe();
         loop {
             let (key, event) = match rx.recv().await {
@@ -709,11 +731,26 @@ impl Inner {
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => break,
             };
-            let Some(session) = self.viewer_session_for_key(key) else {
+            let Some(session) = self.session_for_key(key) else {
                 continue;
             };
-            if let Some(snap) = self.files.snapshot(event.id()) {
-                if snap.info.initiated_locally {
+            match &event {
+                TransferEvent::ConflictsFound(req) => self.emit(BackendEvent::TransferConflict {
+                    session,
+                    prompt: conflict_prompt(req),
+                }),
+                TransferEvent::ConflictsResolved(id) => {
+                    self.emit(BackendEvent::TransferConflictClosed {
+                        id: TransferId(id.0),
+                    });
+                }
+                _ => {
+                    let Some(snap) = self.files.snapshot(event.id()) else {
+                        continue;
+                    };
+                    if matches!(event, TransferEvent::Finished { .. }) {
+                        self.record_transfer(key, &snap);
+                    }
                     self.emit(BackendEvent::Transfer {
                         session,
                         view: transfer_view(&snap),
@@ -721,6 +758,42 @@ impl Inner {
                 }
             }
         }
+    }
+
+    /// Adds a finished transfer to the history (`transfers.json`).
+    fn record_transfer(&self, key: u64, snap: &TransferSnapshot) {
+        let (peer_name, peer_id) = self.peer_for_key(key).unwrap_or_default();
+        let origin = self.files.origin(snap.info.id);
+        if let Some(record) = history_record(snap, origin, peer_name, peer_id, now_unix_ms()) {
+            lock(&self.history).push(record);
+        }
+    }
+
+    /// Name and device ID of the other side of the session with this feature key.
+    fn peer_for_key(&self, key: u64) -> Option<(String, u32)> {
+        let viewer = self
+            .state()
+            .viewer_sessions
+            .values()
+            .find(|s| s.feature_key() == key)
+            .map(|s| (s.peer().name.clone(), s.peer().device_id.as_u32()));
+        viewer.or_else(|| {
+            self.host.as_ref()?.sessions().iter().find_map(|v| {
+                (v.id.0 == key).then(|| (v.peer.name.clone(), v.peer.device_id.as_u32()))
+            })
+        })
+    }
+
+    /// The app's session for an engine session key: a viewer session (keys above 2^32) or a
+    /// host session (its id).
+    fn session_for_key(&self, key: u64) -> Option<SessionId> {
+        self.viewer_session_for_key(key).or_else(|| {
+            let st = self.state();
+            st.host_sessions
+                .iter()
+                .find(|(_, h)| h.0 == key)
+                .map(|(s, _)| *s)
+        })
     }
 
     fn viewer_session_for_key(&self, key: u64) -> Option<SessionId> {
@@ -1606,6 +1679,30 @@ impl Backend for RealBackend {
         self.inner.files.cancel(tlp_desk_files::TransferId(id.0));
     }
 
+    fn pause_transfer(&self, _session: SessionId, id: TransferId) {
+        self.inner.files.pause(tlp_desk_files::TransferId(id.0));
+    }
+
+    fn resolve_conflict(&self, id: TransferId, answer: Option<ConflictResolution>) {
+        self.inner
+            .files
+            .resolve_conflicts(tlp_desk_files::TransferId(id.0), answer);
+    }
+
+    fn transfer_files(&self, id: TransferId, offset: usize, limit: usize) -> Vec<FileRow> {
+        self.inner
+            .files
+            .file_rows(tlp_desk_files::TransferId(id.0), offset, limit)
+    }
+
+    fn transfer_history(&self) -> Vec<TransferRecord> {
+        lock(&self.inner.history).records().to_vec()
+    }
+
+    fn clear_transfer_history(&self) {
+        lock(&self.inner.history).clear();
+    }
+
     fn retry_transfer(&self, session: SessionId, id: TransferId) {
         let Some(key) = self.inner.feature_key(session) else {
             return;
@@ -1688,6 +1785,13 @@ impl Backend for RealBackend {
 
     // --- settings / ux (TLP-settings-tray) ---
     fn apply_host_settings(&self, settings: &HostSettings) {
+        self.inner
+            .files
+            .set_incoming_conflict(if settings.ask_on_upload_conflict {
+                tlp_desk_files::ConflictPolicy::Ask
+            } else {
+                tlp_desk_files::ConflictPolicy::Rename
+            });
         settings_tray::apply(
             self.inner.endpoint.as_deref(),
             self.inner.host.as_ref(),

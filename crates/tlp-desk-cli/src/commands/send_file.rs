@@ -13,6 +13,8 @@ use tlp_desk_files::{
 use tlp_desk_net::FeatureSet;
 use tlp_desk_proto::{FsError, Permissions, TransferDirection};
 use tlp_desk_viewer::ViewerEvent;
+
+use super::common::OnConflict;
 use tokio::sync::broadcast;
 
 use super::common::{dial, peer_json, Ctx, DialArgs, Dialed};
@@ -34,7 +36,7 @@ pub struct SendFileArgs {
 
 /// Runs `send-file`.
 pub async fn run(ctx: &Ctx, args: &SendFileArgs) -> Result<()> {
-    let (ft, mut dialed) = connect(ctx, &args.dial).await?;
+    let (ft, mut dialed) = connect(ctx, &args.dial, OnConflict::default()).await?;
     let mut sub = ft.subscribe();
     let key = dialed.session.feature_key();
     let id = ft
@@ -49,8 +51,12 @@ pub async fn run(ctx: &Ctx, args: &SendFileArgs) -> Result<()> {
 pub(super) async fn connect(
     ctx: &Ctx,
     dial_args: &DialArgs,
+    on_conflict: OnConflict,
 ) -> Result<(Arc<FileTransfer>, Dialed)> {
-    let ft = FileTransfer::new(TransferConfig::default());
+    let ft = FileTransfer::new(TransferConfig {
+        download_conflict: on_conflict.policy(),
+        ..TransferConfig::default()
+    });
     let dialed = dial(ctx, dial_args, FeatureSet::new().with(ft.clone())).await?;
     ctx.out.event(
         text::connected_host(dialed.session.peer(), dialed.session.permissions()),
@@ -133,6 +139,8 @@ pub(super) async fn watch(
                             &json!({ "type": "item_failed", "path": rel_path, "error": e }),
                         );
                     }
+                    // The command line never asks (its policy is fixed by `--on-conflict`).
+                    TransferEvent::ConflictsFound(_) | TransferEvent::ConflictsResolved(_) => {}
                     TransferEvent::Finished { state, failed_items, local_dest, .. } => {
                         return finish(ctx, ft, id, start, state, failed_items, local_dest);
                     }

@@ -27,9 +27,10 @@ pub mod shellclip;
 // --- files-transfer lane ---
 pub mod transfer;
 pub use transfer::{
-    ConflictPolicy, FileTransfer, FilesError, PathIssue, TransferConfig, TransferEvent, TransferId,
-    TransferInfo, TransferRole, TransferSnapshot, TransferState, FEATURE_NAME, META_SUFFIX,
-    PART_SUFFIX, TRANSFER_REQ_ID_BIT,
+    ConflictChoice, ConflictPolicy, ConflictRequest, ConflictResolution, FileConflict, FileRow,
+    FileState, FileTransfer, FilesError, PathIssue, TransferConfig, TransferEvent, TransferId,
+    TransferInfo, TransferOrigin, TransferRole, TransferSnapshot, TransferState, FEATURE_NAME,
+    META_SUFFIX, PART_SUFFIX, TRANSFER_REQ_ID_BIT,
 };
 // --- end files-transfer lane ---
 pub use clipboard::{

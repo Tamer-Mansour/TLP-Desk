@@ -160,8 +160,10 @@ impl Shared {
     }
 }
 
-/// Source of [`ViewerSession::feature_key`]s, unique per process.
-static NEXT_FEATURE_KEY: AtomicU64 = AtomicU64::new(1);
+/// Source of [`ViewerSession::feature_key`]s, unique per process. They start above the range of
+/// host session ids (small counters), because one feature instance (the file transfer engine)
+/// serves host and viewer sessions of the same process and keys its state by this number.
+static NEXT_FEATURE_KEY: AtomicU64 = AtomicU64::new(1 << 32);
 
 /// An established viewer session. Dropping it disconnects.
 pub struct ViewerSession {

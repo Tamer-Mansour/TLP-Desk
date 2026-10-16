@@ -34,6 +34,9 @@ pub struct ServeArgs {
     /// UDP port to listen on.
     #[arg(long, default_value_t = tlp_desk_net::DEFAULT_PORT)]
     pub port: u16,
+    /// What to do when a viewer sends a file that already exists here.
+    #[arg(long, value_enum, default_value_t)]
+    pub on_conflict: super::common::OnConflict,
     /// Target frame rate.
     #[arg(long, default_value_t = 60)]
     pub fps: u32,
@@ -123,7 +126,10 @@ impl ServeArgs {
 fn host_features(args: &ServeArgs) -> FeatureSet {
     let mut set = FeatureSet::new()
         // Uploads and downloads of files and folders.
-        .with(FileTransfer::new(TransferConfig::default()))
+        .with(FileTransfer::new(TransferConfig {
+            conflict: args.on_conflict.policy(),
+            ..TransferConfig::default()
+        }))
         // Remote file browser; served only to sessions holding FILES.
         .with(FsFeature::new(FsConfig::default()))
         // Files copied in Explorer here are offered to viewers holding CLIPBOARD + FILES.
