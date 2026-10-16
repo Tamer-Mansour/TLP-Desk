@@ -58,6 +58,7 @@ fn stats(second: u32) -> SessionStats {
         latency_ms: 14.0 + (second * 7 % 9) as f32,
         latency_synced: true,
         bitrate_kbps: 11_000 + second * 1_337 % 3_000,
+        qp: 0,
     }
 }
 
