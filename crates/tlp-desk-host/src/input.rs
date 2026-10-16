@@ -5,13 +5,12 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tlp_desk_input::{
-    InputError, InputEvent, InputInjector, LocalActivity, MonitorRect, PointerMarker,
-};
+use tlp_desk_input::{InputError, InputEvent, InputInjector, MonitorRect};
 use tokio::sync::{mpsc, watch};
 
+use crate::hooks::{ActivityLease, MarkerLease, SharedHooks};
 use crate::priority::{LocalInput, PriorityGate};
-use crate::{InjectorFactory, LocalActivityFactory, PointerMarkerFactory};
+use crate::InjectorFactory;
 
 /// How often the thread re-evaluates priority / marker visibility without remote input.
 const TICK: Duration = Duration::from_millis(40);
@@ -22,8 +21,12 @@ pub(crate) struct InputCtx {
     pub events: Receiver<InputEvent>,
     /// Grace window for local priority; zero disables it.
     pub grace: Duration,
-    pub activity_factory: Option<LocalActivityFactory>,
-    pub marker_factory: Option<PointerMarkerFactory>,
+    /// Activity monitor and pointer marker shared by all sessions of the host.
+    pub hooks: Arc<SharedHooks>,
+    /// Show the green marker for this session's pointer moves.
+    pub marker_enabled: bool,
+    /// This session (identifies it among the marker's users).
+    pub session: u64,
     /// Shown under the green marker (the viewer's name).
     pub label: String,
     /// Local priority changes, for the control loop to forward to the viewer.
@@ -115,8 +118,9 @@ pub(crate) fn run(ctx: InputCtx) {
         mut rect,
         events,
         grace,
-        activity_factory,
-        marker_factory,
+        hooks,
+        marker_enabled,
+        session,
         label,
         priority,
         blocked,
@@ -128,9 +132,9 @@ pub(crate) fn run(ctx: InputCtx) {
         last_blocked_notice: None,
     };
     let mut gate = PriorityGate::new(grace);
-    let mut activity: Option<Arc<dyn LocalActivity>> = None;
+    let mut activity: Option<ActivityLease> = None;
     let mut activity_tried = false;
-    let mut marker: Option<Box<dyn PointerMarker>> = None;
+    let mut marker: Option<MarkerLease> = None;
     let mut marker_tried = false;
     let mut marker_shown = false;
 
@@ -142,22 +146,14 @@ pub(crate) fn run(ctx: InputCtx) {
         };
         if received.is_some() && !activity_tried && !grace.is_zero() {
             activity_tried = true;
-            if let Some(f) = &activity_factory {
-                match f() {
-                    Ok(a) => {
-                        tracing::debug!("local activity monitor started");
-                        activity = Some(a);
-                    }
-                    Err(e) => tracing::warn!(%e, "local input priority unavailable"),
-                }
-            }
+            activity = hooks.activity();
         }
         let now = Instant::now();
         let last_local = activity
             .as_ref()
             .map_or_else(LocalInput::default, |a| LocalInput {
-                keyboard: a.last_physical_keyboard(),
-                pointer: a.last_physical_pointer(),
+                keyboard: a.get().last_physical_keyboard(),
+                pointer: a.get().last_physical_pointer(),
             });
 
         let (step, ev) = match received {
@@ -184,16 +180,8 @@ pub(crate) fn run(ctx: InputCtx) {
             }
             if !marker_tried && matches!(ev, InputEvent::MouseMove { .. }) {
                 marker_tried = true;
-                if let Some(f) = &marker_factory {
-                    match f(&label) {
-                        Ok(m) => {
-                            if !m.excluded_from_capture() {
-                                tracing::warn!("pointer marker could not be excluded from capture; the viewer may see it");
-                            }
-                            marker = Some(m);
-                        }
-                        Err(e) => tracing::warn!(%e, "remote pointer marker unavailable"),
-                    }
+                if marker_enabled {
+                    marker = hooks.marker(session, &label);
                 }
             }
         } else if rect.has_changed().unwrap_or(false) {
@@ -203,12 +191,12 @@ pub(crate) fn run(ctx: InputCtx) {
         let want = gate.marker_visible(Instant::now());
         if want != marker_shown {
             marker_shown = want;
-            if let Some(m) = marker.as_mut() {
+            if let Some(m) = marker.as_ref() {
                 m.set_visible(want);
             }
         }
     }
-    if let Some(m) = marker.as_mut() {
+    if let Some(m) = marker.as_ref() {
         m.set_visible(false);
     }
     drop(marker);
@@ -225,7 +213,7 @@ pub(crate) fn run(ctx: InputCtx) {
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use tlp_desk_input::InputError;
+    use tlp_desk_input::{InputError, LocalActivity, PointerMarker};
 
     /// `.0`: time of the last local input; `.1`: it was a mouse (the keyboard stayed idle).
     #[derive(Default)]
@@ -289,17 +277,21 @@ mod tests {
             rect,
             events,
             grace,
-            activity_factory: Some({
-                let local = local.clone();
-                Arc::new(move || Ok(local.clone() as Arc<dyn LocalActivity>))
-            }),
-            marker_factory: Some({
-                let log = log.clone();
-                Arc::new(move |_: &str| {
-                    log.lock().unwrap().push("marker created".into());
-                    Ok(Box::new(RecMarker(log.clone())) as Box<dyn PointerMarker>)
-                })
-            }),
+            hooks: SharedHooks::new(
+                {
+                    let local = local.clone();
+                    Arc::new(move || Ok(local.clone() as Arc<dyn LocalActivity>))
+                },
+                {
+                    let log = log.clone();
+                    Arc::new(move |_: &str| {
+                        log.lock().unwrap().push("marker created".into());
+                        Ok(Box::new(RecMarker(log.clone())) as Box<dyn PointerMarker>)
+                    })
+                },
+            ),
+            marker_enabled: true,
+            session: 1,
             label: "viewer".into(),
             priority: ptx,
             blocked: btx,

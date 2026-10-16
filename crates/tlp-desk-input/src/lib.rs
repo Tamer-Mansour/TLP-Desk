@@ -106,6 +106,12 @@ pub trait InputInjector: Send {
 pub trait PointerMarker: Send {
     fn set_visible(&mut self, visible: bool);
 
+    /// Changes the text drawn under the arrow (the names of the viewers moving the pointer).
+    /// Markers with a fixed label ignore it.
+    fn set_label(&mut self, label: &str) {
+        let _ = label;
+    }
+
     /// Whether the marker is kept out of screen capture (so the viewer never sees it).
     fn excluded_from_capture(&self) -> bool {
         true
@@ -115,6 +121,10 @@ pub trait PointerMarker: Send {
 impl PointerMarker for RemotePointerMarker {
     fn set_visible(&mut self, visible: bool) {
         RemotePointerMarker::set_visible(self, visible);
+    }
+
+    fn set_label(&mut self, label: &str) {
+        RemotePointerMarker::set_label(self, label);
     }
 
     fn excluded_from_capture(&self) -> bool {

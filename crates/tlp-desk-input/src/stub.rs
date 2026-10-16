@@ -73,6 +73,8 @@ impl RemotePointerMarker {
 
     pub fn set_visible(&self, _visible: bool) {}
 
+    pub fn set_label(&self, _label: &str) {}
+
     pub fn is_visible(&self) -> bool {
         false
     }
