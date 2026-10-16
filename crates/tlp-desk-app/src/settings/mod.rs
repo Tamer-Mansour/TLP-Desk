@@ -136,9 +136,27 @@ impl Default for StartupSettings {
 pub const APP_DIR: &str = "TLP-Desk";
 
 /// `%APPDATA%\TLP-Desk`, the per-user data folder (`None` if `APPDATA` is not set).
+///
+/// On macOS this is `~/Library/Application Support/TLP-Desk`.
 pub fn app_data_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
-    Some(base.join(APP_DIR))
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        Some(macos_app_data_dir(&home))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
+        Some(base.join(APP_DIR))
+    }
+}
+
+/// The macOS per-user data folder for a home directory.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_app_data_dir(home: &std::path::Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join(APP_DIR)
 }
 
 fn default_path() -> Option<PathBuf> {
@@ -241,6 +259,12 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_data_dir_is_application_support() {
+        let d = macos_app_data_dir(std::path::Path::new("/Users/tamer"));
+        assert!(d.ends_with("Library/Application Support/TLP-Desk"));
+    }
 
     #[test]
     fn settings_roundtrip_and_defaults() {

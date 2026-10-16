@@ -197,6 +197,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7eb209b1518d6bb87b283c20095f5228ecda460da70b44f0802523dea6da04"
 
 [[package]]
+name = "android_log-sys"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84521a3cf562bc62942e294181d9eef17eb38ceb8c68677bc49f144e4c3d4f8d"
+
+[[package]]
+name = "android_logger"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05b07e8e73d720a1f2e4b6014766e6039fd2e96a4fa44e2a78d0e1fa2ff49826"
+dependencies = [
+ "android_log-sys",
+ "env_filter",
+ "log",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1406,6 +1423,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "env_filter"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bf3c259d255ca70051b30e2e95b5446cdb8949ac4cd22c0d7fd634d89f568e2"
+dependencies = [
+ "log",
+ "regex",
 ]
 
 [[package]]
@@ -2660,10 +2687,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "dispatch2",
+ "libc",
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-io-surface",
+ "objc2-metal 0.3.2",
 ]
 
 [[package]]
@@ -3509,6 +3539,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4289,6 +4331,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
+name = "tlp-desk-android"
+version = "1.0.0-rc.1"
+dependencies = [
+ "android-activity",
+ "android_logger",
+ "eframe",
+ "log",
+ "sys-locale",
+ "thiserror 2.0.21",
+ "tlp-desk-crypto",
+ "tlp-desk-input",
+ "tlp-desk-net",
+ "tlp-desk-proto",
+ "tlp-desk-viewer",
+ "tokio",
+ "tracing",
+ "unicode-bidi",
+]
+
+[[package]]
 name = "tlp-desk-app"
 version = "1.0.0-rc.1"
 dependencies = [
@@ -4342,6 +4404,8 @@ dependencies = [
 name = "tlp-desk-capture"
 version = "1.0.0-rc.1"
 dependencies = [
+ "objc2-core-foundation",
+ "objc2-core-graphics",
  "thiserror 2.0.21",
  "windows 0.62.2",
  "windows-core 0.62.2",
@@ -4442,6 +4506,8 @@ dependencies = [
 name = "tlp-desk-input"
 version = "1.0.0-rc.1"
 dependencies = [
+ "objc2-core-foundation",
+ "objc2-core-graphics",
  "thiserror 2.0.21",
  "tiny-skia",
  "tlp-desk-proto",

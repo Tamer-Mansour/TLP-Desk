@@ -12,7 +12,7 @@ const APP_DIR: &str = "tlp-desk";
 /// Default directory for identity and trust files.
 ///
 /// Windows: `%ProgramData%\TLP-Desk` when it exists-and-is-writable or can be created, else
-/// `%LOCALAPPDATA%\TLP-Desk` (attended, non-admin runs). Other OSes: `/var/lib/tlp-desk` if
+/// `%LOCALAPPDATA%\TLP-Desk` (attended, non-admin runs). macOS: `~/Library/Application Support/TLP-Desk`. Other OSes: `/var/lib/tlp-desk` if
 /// writable, else `$XDG_DATA_HOME/tlp-desk` or `~/.local/share/tlp-desk`.
 ///
 /// The returned directory may not exist yet; [`crate::Identity::load_or_generate`] creates it.
@@ -38,7 +38,22 @@ fn candidates() -> Vec<PathBuf> {
     v
 }
 
-#[cfg(not(windows))]
+/// `~/Library/Application Support/TLP-Desk` for a home directory (macOS convention).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_dir(home: &Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join(APP_DIR)
+}
+
+#[cfg(target_os = "macos")]
+fn candidates() -> Vec<PathBuf> {
+    std::env::var_os("HOME")
+        .map(|h| vec![macos_dir(Path::new(&h))])
+        .unwrap_or_default()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn candidates() -> Vec<PathBuf> {
     let mut v = vec![PathBuf::from("/var/lib").join(APP_DIR)];
     if let Some(p) = std::env::var_os("XDG_DATA_HOME") {
@@ -110,6 +125,14 @@ pub fn harden_dir(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_dir_is_under_application_support() {
+        let home = Path::new("/Users/\u{645}\u{62d}\u{645}\u{62f}");
+        let d = macos_dir(home);
+        assert!(d.ends_with("Library/Application Support/TLP-Desk"));
+        assert!(d.starts_with(home));
+    }
 
     #[test]
     fn default_dir_ends_with_app_name() {

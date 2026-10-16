@@ -1,0 +1,66 @@
+[package]
+name = "tlp-desk-android"
+description = "TLP-Desk Android viewer (touch UI over the shared viewer session)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+# cdylib: the APK loads it through NativeActivity. rlib: tests and desktop `cargo check`.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tlp-desk-proto.workspace = true
+tlp-desk-crypto.workspace = true
+tlp-desk-net.workspace = true
+tlp-desk-viewer.workspace = true
+tlp-desk-input.workspace = true
+thiserror.workspace = true
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tracing = "0.1"
+# Same bidi pass the desktop app uses (src/i18n/shaping.rs is shared by path).
+unicode-bidi = "0.3.18"
+sys-locale = "0.3"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# NativeActivity glue; the `android-native-activity` feature must match the activity in the
+# manifest (cargo-apk uses android.app.NativeActivity).
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "android-native-activity"] }
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.14"
+log = "0.4"
+
+[package.metadata.android]
+package = "org.tlp.desk.viewer"
+apk_name = "TLP-Desk"
+build_targets = ["aarch64-linux-android"]
+# Debug-signed by cargo-apk (the debug keystore); a release APK needs your own keystore.
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "TLP-Desk"
+
+[package.metadata.android.application.activity]
+config_changes = "orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|density|uiMode"
+launch_mode = "singleTop"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_WIFI_STATE"
+
+# Needed to receive mDNS multicast; see lib.rs "LAN discovery on Android".
+[[package.metadata.android.uses_permission]]
+name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
