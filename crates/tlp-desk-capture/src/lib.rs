@@ -1,7 +1,8 @@
 //! Screen capture trait and platform implementations.
 //!
 //! On Windows, [`open_capturer`] tries Windows.Graphics.Capture first and falls back to DXGI
-//! Desktop Duplication. Other platforms currently return [`CaptureError::Unsupported`].
+//! Desktop Duplication. On macOS it captures with Quartz Display Services (needs the Screen
+//! Recording permission, see `macos_capture`). Other platforms currently return [`CaptureError::Unsupported`].
 //!
 //! Platform independent helpers:
 //! * [`DirtyTracker`] tells which tiles of a frame changed, so the host skips encoding frames
@@ -17,6 +18,7 @@ use std::time::Duration;
 
 mod compose;
 mod dirty;
+mod macos_capture;
 mod scale;
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -200,7 +202,11 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, CaptureError> {
     {
         windows_capture::list_monitors()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::list_monitors()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         Err(CaptureError::Unsupported)
     }
@@ -213,7 +219,11 @@ pub fn open_capturer(monitor_index: u32) -> Result<Box<dyn ScreenCapturer>, Capt
     {
         windows_capture::open_capturer(monitor_index, CaptureOptions::default())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::open_capturer(monitor_index, CaptureOptions::default())
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = monitor_index;
         Err(CaptureError::Unsupported)
@@ -259,7 +269,11 @@ pub fn open_capturer_opts(
     {
         windows_capture::open_capturer(monitor_index, options)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::open_capturer(monitor_index, options)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (monitor_index, options);
         Err(CaptureError::Unsupported)
@@ -300,7 +314,7 @@ mod tests {
         assert!(BgraFrame::new_tight(5, 3).is_well_formed());
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     #[test]
     fn unsupported_off_windows() {
         assert!(matches!(open_capturer(0), Err(CaptureError::Unsupported)));

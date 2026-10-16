@@ -34,3 +34,8 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.62"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Quartz Display Services (CGDisplayCreateImage) and CoreFoundation types; pure-Rust bindings.
+objc2-core-graphics = "0.3"
+objc2-core-foundation = "0.3"

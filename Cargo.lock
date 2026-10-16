@@ -4345,6 +4345,8 @@ dependencies = [
 name = "tlp-desk-capture"
 version = "1.0.0-rc.1"
 dependencies = [
+ "objc2-core-foundation",
+ "objc2-core-graphics",
  "thiserror 2.0.21",
  "windows 0.62.2",
  "windows-core 0.62.2",
