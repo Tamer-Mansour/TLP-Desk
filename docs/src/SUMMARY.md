@@ -85,6 +85,7 @@
 # Security
 
 - [Security model](security.md)
+  - [Service and IPC audit (2026-10)](security-audit-2026-10.md)
 
 # Contributor guide
 
