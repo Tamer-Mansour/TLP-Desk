@@ -43,6 +43,20 @@ screen or mouse in a normal run.
 - **Files have one place** (CLAUDE.md, "Repository layout"). Never commit screenshots, build output
   or temp files.
 
+## Documentation
+
+The book in [`docs/`](docs/) (mdBook: `docs/src/SUMMARY.md`, build with `mdbook build docs`) has
+the user guide in English and Arabic, the contributor guide and the ADRs. When your change is
+visible to users or changes how a crate works, update the matching pages in the same pull request:
+
+- the crate page in `docs/src/dev/crates/`;
+- the user guide page in **both** `docs/src/user-guide/en/` and `docs/src/user-guide/ar/` — and
+  when a feature ships, turn its *Coming soon* page into a real one;
+- `docs/src/changelog.md` (Unreleased section);
+- a new ADR in `docs/src/adr/` for a decision others should not have to rediscover.
+
+Arabic pages are wrapped in `<div dir="rtl">` and use the same terms as the Arabic interface.
+
 ## Reporting problems
 
 Bugs and ideas: GitHub issues. Security problems: privately, see [SECURITY.md](SECURITY.md).

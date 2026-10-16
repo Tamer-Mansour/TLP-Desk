@@ -43,9 +43,13 @@
 
 mod adapt;
 mod cursor;
+mod device_info;
 mod input;
+mod live;
 mod pipeline;
 mod priority;
+mod tunnel;
+mod whiteboard;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
@@ -73,8 +77,15 @@ pub use adapt::{
     QualityTarget, Signals, ViewerReport,
 };
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
+pub use device_info::{
+    limit as limit_device_info, DeviceInfoFeature, DeviceInfoServed, DeviceInfoSource,
+    SystemInfoSource, DEVICE_INFO_FEATURE,
+};
+pub use live::LiveOptions;
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
+pub use tunnel::{HostTunnelEvent, HostTunnelInfo, HostTunnels, TunnelHostConfig, TUNNEL_FEATURE};
 
+pub use whiteboard::{OverlayFactory, WhiteboardHost, WhiteboardHostEvent};
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
 /// `CaptureOptions::max_size` carries the size cap of the current quality preset (and the
 /// adaptive resolution step); fakes may ignore it, the encoder follows the frames.
@@ -95,6 +106,9 @@ pub type LocalActivityFactory =
 /// [`tlp_desk_input::start_pointer_marker`]).
 pub type PointerMarkerFactory =
     Arc<dyn Fn(&str) -> Result<Box<dyn PointerMarker>, InputError> + Send + Sync>;
+/// The streamed rectangle of a session, by `FeatureCtx::session_key` (see
+/// [`Host::streamed_monitor_fn`]).
+pub type StreamedMonitorFn = Arc<dyn Fn(u64) -> Option<MonitorRect> + Send + Sync>;
 /// Lists the host's monitors (default: [`tlp_desk_capture::list_monitors`]).
 pub type MonitorLister = Arc<dyn Fn() -> Result<Vec<MonitorInfo>, CaptureError> + Send + Sync>;
 
@@ -302,6 +316,10 @@ pub enum HostEvent {
         peer: PeerInfo,
         reason: EndReason,
     },
+    /// The OS refused to inject this viewer's input, typically because an elevated (admin)
+    /// window or the secure desktop is in front. Rate limited; show a notice at the host.
+    /// Running the host as the TLP-Desk service lifts the limit.
+    InputBlocked { id: SessionId },
     /// Something a session feature reports (see [`FeatureEvent::payload`]).
     Feature { id: SessionId, event: FeatureEvent },
 }
@@ -327,6 +345,8 @@ struct PendingEntry {
 
 struct SessionCtl {
     info: Mutex<ConnectedViewer>,
+    /// The streamed monitor's rectangle, published by the capture pipeline.
+    rect: watch::Receiver<Option<MonitorRect>>,
     perms: AtomicU16,
     stop: Notify,
     perms_changed: Notify,
@@ -335,6 +355,8 @@ struct SessionCtl {
 struct Inner {
     endpoint: Arc<Endpoint>,
     cfg: HostConfig,
+    /// Options the app may change at runtime ([`Host::set_live_options`]).
+    live: Mutex<LiveOptions>,
     password: Mutex<Option<PasswordVerifier>>,
     events: mpsc::UnboundedSender<HostEvent>,
     next_id: AtomicU64,
@@ -351,6 +373,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 impl Inner {
     fn emit(&self, ev: HostEvent) {
         let _ = self.events.send(ev);
+    }
+
+    fn live(&self) -> LiveOptions {
+        *lock(&self.live)
     }
 
     fn next(&self) -> u64 {
@@ -405,6 +431,7 @@ impl Host {
         let inner = Arc::new(Inner {
             endpoint,
             password: Mutex::new(cfg.password.clone()),
+            live: Mutex::new(LiveOptions::from_config(&cfg)),
             prompt_limiter: Mutex::new(RateLimiter::new(cfg.prompt_rate_limit)),
             cfg,
             events: tx,
@@ -459,6 +486,19 @@ impl Host {
         *lock(&self.inner.password) = verifier;
     }
 
+    /// Replaces the runtime-changeable options (default permissions, accept timeout, one-time
+    /// code on/off, local-input grace, pointer marker). They apply to the next prompt,
+    /// authentication or session; running sessions are not changed.
+    pub fn set_live_options(&self, options: LiveOptions) {
+        tracing::info!(?options, "host options changed");
+        *lock(&self.inner.live) = options;
+    }
+
+    /// The options currently in effect (see [`Host::set_live_options`]).
+    pub fn live_options(&self) -> LiveOptions {
+        self.inner.live()
+    }
+
     /// The running discovery (advertising this host and browsing the LAN), so the viewer side
     /// can list devices without starting a second instance.
     pub fn discovery(&self) -> Option<Arc<Discovery>> {
@@ -478,7 +518,7 @@ impl Host {
     /// The user clicked **Accept**. `None` grants [`HostConfig::default_permissions`].
     /// Returns `false` if the request no longer exists.
     pub fn accept(&self, id: RequestId, permissions: Option<Permissions>) -> bool {
-        let perms = permissions.unwrap_or(self.inner.cfg.default_permissions);
+        let perms = permissions.unwrap_or(self.inner.live().default_permissions);
         match lock(&self.inner.pending).remove(&id) {
             Some(p) => p.decide.send(Decision::Accept(perms)).is_ok(),
             None => false,
@@ -512,6 +552,22 @@ impl Host {
         lock(&ctl.info).permissions = permissions;
         ctl.perms_changed.notify_one();
         true
+    }
+
+    /// The rectangle (physical virtual-desktop pixels) a session currently streams and maps
+    /// input to; `None` before capture started or for an unknown session.
+    pub fn streamed_monitor(&self, id: SessionId) -> Option<MonitorRect> {
+        streamed_rect(&self.inner, id)
+    }
+
+    /// [`Host::streamed_monitor`] as a callback keyed by `FeatureCtx::session_key`, for
+    /// features that draw on the host screen (e.g. the whiteboard). Holds the host weakly.
+    pub fn streamed_monitor_fn(&self) -> StreamedMonitorFn {
+        let inner = Arc::downgrade(&self.inner);
+        Arc::new(move |key| {
+            let inner = inner.upgrade()?;
+            streamed_rect(&inner, SessionId(key))
+        })
     }
 
     /// Ends a session (the viewer receives `Bye`). [`HostEvent::SessionEnded`] follows.
@@ -556,6 +612,12 @@ impl Drop for Host {
     }
 }
 
+fn streamed_rect(inner: &Inner, id: SessionId) -> Option<MonitorRect> {
+    let ctl = lock(&inner.sessions).get(&id).cloned()?;
+    let rect = *ctl.rect.borrow();
+    rect
+}
+
 async fn accept_loop(inner: Arc<Inner>) {
     while let Some(pending) = inner.endpoint.accept().await {
         if inner.shutting_down.load(Ordering::Acquire) {
@@ -573,14 +635,14 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
     match kind {
         AuthKind::AcceptPrompt => handle_prompt(inner, p).await,
         AuthKind::OneTimeCode => {
-            if !inner.cfg.allow_one_time_code {
+            if !inner.live().allow_one_time_code {
                 tracing::info!(peer = %peer.addr, device_id = %peer.device_id, "one-time code access disabled; rejecting");
                 refuse(&inner, p, RejectReason::NotAllowed).await;
                 return;
             }
             let code = inner.cfg.one_time_code.clone();
             let generation = code.generation();
-            let res = p.verify_code(&code, inner.cfg.default_permissions).await;
+            let res = p.verify_code(&code, inner.live().default_permissions).await;
             if code.generation() != generation {
                 inner.emit(HostEvent::CodeChanged);
             }
@@ -594,7 +656,7 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
                 return;
             };
             let res = p
-                .verify_password(&verifier, inner.cfg.default_permissions)
+                .verify_password(&verifier, inner.live().default_permissions)
                 .await;
             finish_auth(inner, peer, kind, res).await;
         }
@@ -647,7 +709,7 @@ async fn handle_prompt(inner: Arc<Inner>, p: PendingSession) {
         return;
     }
     let id = RequestId(inner.next());
-    let deadline = Instant::now() + inner.cfg.accept_timeout;
+    let deadline = Instant::now() + inner.live().accept_timeout;
     let info = IncomingRequest {
         id,
         peer: peer.clone(),
@@ -751,8 +813,10 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         permissions: perms,
         since: SystemTime::now(),
     };
+    let (rect_tx, rect_rx) = watch::channel(None);
     let ctl = Arc::new(SessionCtl {
         info: Mutex::new(info.clone()),
+        rect: rect_rx.clone(),
         perms: AtomicU16::new(perms.0),
         stop: Notify::new(),
         perms_changed: Notify::new(),
@@ -774,17 +838,17 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         FeatureDispatch::start(&inner.cfg.features, session.clone(), id.0, perms, sink)
     };
 
-    let (rect_tx, rect_rx) = watch::channel(None);
     let (input_tx, input_rx) = std::sync::mpsc::channel::<InputEvent>();
     let (prio_tx, mut prio_rx) = mpsc::unbounded_channel::<bool>();
+    let live = inner.live();
+    let (blocked_tx, mut blocked_rx) = mpsc::unbounded_channel::<()>();
     let input_ctx = input::InputCtx {
         factory: inner.cfg.injector_factory.clone(),
         rect: rect_rx,
         events: input_rx,
-        grace: inner.cfg.local_input_grace,
+        grace: live.local_input_grace,
         activity_factory: Some(inner.cfg.local_activity_factory.clone()),
-        marker_factory: inner
-            .cfg
+        marker_factory: live
             .remote_pointer_marker
             .then(|| inner.cfg.pointer_marker_factory.clone()),
         label: if peer.name.trim().is_empty() {
@@ -793,6 +857,7 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
             peer.name.clone()
         },
         priority: prio_tx,
+        blocked: blocked_tx,
     };
     let input_thread = std::thread::Builder::new()
         .name(format!("tlp-host-input-{}", id.0))
@@ -880,6 +945,9 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 }
                 None => priority_open = false,
             },
+            Some(()) = blocked_rx.recv() => {
+                inner.emit(HostEvent::InputBlocked { id });
+            }
             _ = ctl.stop.notified() => {
                 session.close(ByeReason::UserClosed).await;
                 break EndReason::Local;

@@ -1214,3 +1214,127 @@ async fn features_receive_permitted_messages_on_both_sides() {
     );
     session.disconnect();
 }
+
+/// Settings changed while the host runs (`Host::set_live_options`) apply to the next viewer:
+/// code access can be switched off and on, and new sessions get the new default permissions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn live_options_apply_to_the_next_session() {
+    let mut h = harness(false, |_| {}).await;
+    let base = h.host.live_options();
+    h.host.set_live_options(tlp_desk_host::LiveOptions {
+        allow_one_time_code: false,
+        ..base
+    });
+    let err = spawn_connect(
+        &h,
+        AuthMethod::OneTimeCode(h.host.one_time_code().current()),
+    )
+    .await
+    .unwrap()
+    .expect_err("code access switched off");
+    assert!(
+        matches!(err, ViewerError::Rejected(RejectReason::NotAllowed)),
+        "{err:?}"
+    );
+    let _ = host_event(&mut h.events, |e| matches!(e, HostEvent::AuthFailed { .. })).await;
+
+    h.host.set_live_options(tlp_desk_host::LiveOptions {
+        allow_one_time_code: true,
+        default_permissions: Permissions::VIEW,
+        ..base
+    });
+    assert_eq!(h.host.live_options().default_permissions, Permissions::VIEW);
+    let (session, _ev) = spawn_connect(
+        &h,
+        AuthMethod::OneTimeCode(h.host.one_time_code().current()),
+    )
+    .await
+    .unwrap()
+    .expect("code access switched back on");
+    assert_eq!(session.permissions(), Permissions::VIEW);
+    assert_eq!(h.host.sessions()[0].permissions, Permissions::VIEW);
+    session.disconnect();
+}
+
+/// Fake device-info source: fixed Arabic data, counts how often it was asked.
+struct FakeInfo(Arc<std::sync::atomic::AtomicUsize>);
+
+impl tlp_desk_host::DeviceInfoSource for FakeInfo {
+    fn collect(&self) -> tlp_desk_proto::DeviceInfo {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        fake_device_info()
+    }
+}
+
+fn fake_device_info() -> tlp_desk_proto::DeviceInfo {
+    tlp_desk_proto::DeviceInfo {
+        os: "Windows 11 Pro".into(),
+        version: "10.0.26100".into(),
+        cpu: "Fake CPU @ 3.0GHz".into(),
+        cores: 12,
+        ram_bytes: 32 << 30,
+        disks: vec![tlp_desk_proto::DiskInfo {
+            mount: "C:\\".into(),
+            label: "قرص النظام".into(),
+            total_bytes: 512 << 30,
+            free_bytes: 128 << 30,
+        }],
+        uptime_s: 90_061,
+        hostname: "حاسوب-المحاسبة".into(),
+    }
+}
+
+/// Device info end to end: the viewer asks, the host's feature answers from its source (Arabic
+/// host name and disk label intact), the host UI hears about it, and a second request within the
+/// cache window is answered without collecting again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn device_info_request_is_answered_and_cached() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let feature = tlp_desk_host::DeviceInfoFeature::new(Arc::new(FakeInfo(calls.clone())))
+        .with_min_interval(Duration::from_secs(60));
+    let mut h = harness(false, |cfg| {
+        cfg.features = tlp_desk_host::FeatureSet::new().with(Arc::new(feature));
+    })
+    .await;
+    let viewer = Viewer::new(
+        h.viewer_ep.clone(),
+        ViewerConfig {
+            known_hosts: KnownHostsStore::InMemory,
+            features: tlp_desk_viewer::FeatureSet::new()
+                .with(Arc::new(tlp_desk_viewer::DeviceInfoClient)),
+            ..ViewerConfig::default()
+        },
+    )
+    .unwrap();
+    let target = h.target.clone();
+    let conn = tokio::spawn(async move { viewer.connect(target, AuthMethod::AcceptPrompt).await });
+    let req = incoming(&mut h.events).await;
+    assert!(h.host.accept(req, Some(Permissions::VIEW)));
+    let (session, mut vevents) = conn.await.unwrap().expect("connect");
+
+    async fn next_info(vevents: &mut ViewerEvents) -> tlp_desk_proto::DeviceInfo {
+        within("device info on the viewer", async move {
+            loop {
+                if let Some(ViewerEvent::Feature(e)) = vevents.recv().await {
+                    if e.feature == tlp_desk_viewer::DEVICE_INFO_FEATURE {
+                        return e.payload::<tlp_desk_proto::DeviceInfo>().cloned().unwrap();
+                    }
+                }
+            }
+        })
+        .await
+    }
+    assert!(tlp_desk_viewer::request_device_info(&session));
+    assert_eq!(next_info(&mut vevents).await, fake_device_info());
+    let (_, served) = next_feature_event(&mut h.events).await;
+    assert_eq!(served.feature, tlp_desk_host::DEVICE_INFO_FEATURE);
+    assert!(served
+        .payload::<tlp_desk_host::DeviceInfoServed>()
+        .is_some());
+
+    assert!(tlp_desk_viewer::request_device_info(&session));
+    let again = next_info(&mut vevents).await;
+    assert_eq!(again.hostname, "حاسوب-المحاسبة");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    session.disconnect();
+}
