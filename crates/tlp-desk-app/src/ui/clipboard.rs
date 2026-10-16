@@ -69,7 +69,7 @@ impl ClipboardUi {
             .map(|(k, _)| k)
     }
 
-    /// Toolbar toggle (disabled without `CLIPBOARD`), plus the toast overlay.
+    /// Toolbar toggle (disabled without `CLIPBOARD`).
     pub fn toolbar(
         &mut self,
         ui: &mut egui::Ui,
@@ -96,10 +96,10 @@ impl ClipboardUi {
             self.sync = !self.sync;
             backend.set_clipboard_sync(session, self.sync);
         }
-        self.show_toast(ui.ctx(), tx);
     }
 
-    fn show_toast(&mut self, ctx: &egui::Context, tx: Tx) {
+    /// The toast overlay; call every frame, also while the toggle sits in the "More" menu.
+    pub fn show_toast(&mut self, ctx: &egui::Context, tx: Tx) {
         let Some((key, at)) = self.toast else {
             return;
         };
