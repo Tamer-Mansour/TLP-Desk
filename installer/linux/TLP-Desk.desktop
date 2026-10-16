@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=TLP-Desk
+GenericName=Remote Desktop
+GenericName[ar]=سطح المكتب البعيد
+Comment=Free LAN-only remote desktop (host and viewer)
+Comment[ar]=سطح مكتب بعيد مجاني للشبكة المحلية فقط
+Exec=TLP-Desk
+Icon=TLP-Desk
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=remote;desktop;vnc;rdp;lan;
+StartupWMClass=TLP-Desk

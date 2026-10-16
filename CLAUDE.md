@@ -71,7 +71,7 @@ section in the same commit.**
 | Dev examples, benchmarks | `crates/<crate>/examples/` |
 | App assets | `crates/tlp-desk-app/assets/{fonts,icon,icons}/` (licences next to the asset in `licenses/`) |
 | Build scripts | `crates/<crate>/build.rs` (shared helper: `crates/tlp-desk-app/winres.rs`) |
-| Installer | `installer/`: `TLP-Desk.iss`, `build-setup.ps1`, `portable.ps1`, `common.ps1`, `README-*.txt`, `assets/` (wizard images) |
+| Installer | `installer/`: `TLP-Desk.iss`, `build-setup.ps1`, `portable.ps1`, `common.ps1`, `README-*.txt`, `assets/` (wizard images); Linux in `installer/linux/`: `build-tarball.sh`, `install.sh`, `TLP-Desk.desktop`, `README-linux.txt` |
 | Dev / CI scripts | `scripts/`, PowerShell named `verb-noun.ps1` (e.g. `check.ps1`, `vendor-icons.ps1`); `make_icon.py` is the one legacy exception |
 | Documentation | `docs/`: `protocol.md`, `CODE_STYLE.md`, `book.toml`, `theme/`; mdBook sources in `docs/src/`: user guide in `docs/src/user-guide/en/` and `docs/src/user-guide/ar/` (same file names in both), contributor docs in `docs/src/dev/`, ADRs in `docs/src/adr/NNNN-title.md`, `security.md`, `glossary.md`, `changelog.md`; README media only in `docs/media/` |
 | GitHub | `.github/`: `workflows/`, `ISSUE_TEMPLATE/`, `pull_request_template.md`, `CODEOWNERS`, `dependabot.yml` |
