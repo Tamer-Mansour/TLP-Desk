@@ -188,6 +188,7 @@ strings! {
     UnitTB => "TB", "ت.ب";
     SessionEnded => "The session has ended.", "انتهت الجلسة.";
     KeysCaptured => "Keyboard goes to the remote PC", "لوحة المفاتيح موجّهة إلى الحاسوب البعيد";
+    ToolbarMore => "More", "المزيد";
     KeysCapturedHint => "Win, Alt+Tab and other system keys are sent to the remote PC while this window is focused.", "تُرسل مفاتيح النظام مثل Win وAlt+Tab إلى الحاسوب البعيد ما دامت هذه النافذة نشطة.";
     PermissionViewOnly => "The host allows viewing only.", "المضيف يسمح بالعرض فقط.";
     HostUsingInput => "The person at the other device is using the mouse or keyboard. Your control resumes when they stop.", "الشخص على الجهاز الآخر يستخدم الفأرة أو لوحة المفاتيح. يُستأنف تحكمك عندما يتوقف.";
@@ -659,6 +660,7 @@ strings! {
     WbWhite => "White", "أبيض";
     WbHostCleared => "The other side cleared the drawings.", "مسح الطرف الآخر الرسوم.";
     // recording (TLP-recording)
+    RecLabel => "Record session", "تسجيل الجلسة";
     RecStart => "Record this session to a video file on this computer", "تسجيل هذه الجلسة في ملف فيديو على هذا الجهاز";
     RecStop => "Stop recording", "إيقاف التسجيل";
     RecActive => "Recording {time}", "جارٍ التسجيل {time}";

@@ -9,6 +9,8 @@ use eframe::egui::{
 };
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
+mod toolbar;
+
 use super::chat::{self, ChatState};
 use super::file_browser::FileBrowser;
 use super::icons::{self, Icon};
@@ -93,6 +95,8 @@ pub struct ViewerSession {
     pub audio: super::audio::AudioControls,
     /// Scancode / Unicode-text routing of typed characters (`text_route`).
     pub typing: TextRouter,
+    /// Where the toolbar put its items in the last frame (responsive layout, tests).
+    pub toolbar_layout: toolbar::ToolbarLayout,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -149,6 +153,7 @@ impl ViewerSession {
             transfers: TransferPanel::new(),
             audio: Default::default(),
             typing: TextRouter::default(),
+            toolbar_layout: Default::default(),
         }
     }
 
@@ -272,6 +277,7 @@ impl ViewerSession {
         self.whiteboard
             .update(self.permissions, backend, self.id, Instant::now());
         self.toolbar(ui, tx, backend);
+        self.clipboard.show_toast(&ctx, tx);
         self.device_info.window(&ctx, tx, backend, self.id);
         if self.whiteboard.is_active() {
             self.whiteboard.tools_bar(ui, tx, backend, self.id);
@@ -399,172 +405,6 @@ impl ViewerSession {
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
-        let dark = ui.visuals().dark_mode;
-        let mut disconnect = false;
-        egui::Panel::top("session-toolbar")
-            .frame(
-                egui::Frame::new()
-                    .fill(ui.visuals().window_fill)
-                    .inner_margin(egui::Margin::symmetric(14, 8)),
-            )
-            .show(ui, |ui| {
-                theme::row(ui, tx.rtl(), |ui| {
-                    theme::status_dot(ui, theme::success(dark));
-                    ui.label(
-                        RichText::new(tx.f(S::SessionWith, &[("name", &self.peer.name)])).strong(),
-                    );
-                    ui.separator();
-                    for (mode, icon, key) in [
-                        (ViewMode::Fit, Icon::FitToWindow, S::FitToWindow),
-                        (ViewMode::Original, Icon::ActualSize, S::OriginalSize),
-                    ] {
-                        let selected = self.mode == mode;
-                        if icons::icon_toggle(ui, tx, selected, icon, tx.t(key)).clicked() {
-                            self.mode = mode;
-                        }
-                    }
-                    ui.separator();
-                    let fs = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                    let (fs_icon, fs_label) = if fs {
-                        (Icon::ExitFullscreen, S::ExitFullscreen)
-                    } else {
-                        (Icon::Fullscreen, S::Fullscreen)
-                    };
-                    if icons::icon_toggle(ui, tx, fs, fs_icon, tx.t(fs_label)).clicked() {
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fs));
-                    }
-                    let control_allowed = self.permissions.contains(Permissions::CONTROL);
-                    let vo = self.view_only || !control_allowed;
-                    let resp = icons::icon_toggle_enabled(
-                        ui,
-                        tx,
-                        control_allowed,
-                        vo,
-                        Icon::ViewOnly,
-                        tx.t(S::ViewOnly),
-                    );
-                    let resp = if control_allowed {
-                        resp
-                    } else {
-                        resp.on_disabled_hover_text(tx.t(S::PermissionViewOnly))
-                    };
-                    if resp.clicked() {
-                        self.view_only = !self.view_only;
-                        if self.view_only {
-                            self.release_all(backend);
-                        }
-                        backend.set_view_only(self.id, self.view_only);
-                    }
-                    if icons::icon_toggle(ui, tx, self.show_stats, Icon::Stats, tx.t(S::Stats))
-                        .clicked()
-                    {
-                        self.show_stats = !self.show_stats;
-                    }
-                    let privacy_allowed = self.permissions.contains(Permissions::PRIVACY_MODE);
-                    if let Some(on) = self.privacy.toolbar(ui, tx, privacy_allowed) {
-                        backend.set_privacy_mode(self.id, on);
-                    }
-                    self.device_info.toolbar_button(ui, tx, backend, self.id);
-                    self.tunnels.toolbar_button(ui, tx);
-                    let wb_allowed = self.permissions.contains(Permissions::WHITEBOARD);
-                    if self.whiteboard.toggle_button(ui, tx, wb_allowed) == Some(true) {
-                        // Drawing takes the pointer: nothing may stay pressed on the remote PC.
-                        self.set_grab(false);
-                        self.release_all(backend);
-                    }
-                    let (id, perms) = (self.id, self.permissions);
-                    self.clipboard.toolbar(ui, tx, id, perms, backend);
-                    self.files_buttons(ui, tx, backend);
-                    if icons::icon_toggle(
-                        ui,
-                        tx,
-                        self.transfers.open,
-                        Icon::Upload,
-                        tx.t(S::FilesPanelTitle),
-                    )
-                    .clicked()
-                    {
-                        self.transfers.open = !self.transfers.open;
-                    }
-                    if chat::chat_toggle(ui, tx, &self.chat) {
-                        self.chat.set_open(!self.chat.is_open());
-                    }
-                    super::audio::toolbar(
-                        ui,
-                        tx,
-                        backend,
-                        self.id,
-                        self.permissions,
-                        &mut self.audio,
-                    );
-                    if let Some(pick) = self.monitor_picker(ui, tx) {
-                        // Nothing may stay pressed on the old screen.
-                        self.release_all(backend);
-                        match pick {
-                            Some(index) => backend.select_monitor(self.id, index),
-                            None => backend.select_all_monitors(self.id),
-                        }
-                    }
-                    if let Some(q) = perf::quality_menu(ui, tx, self.quality) {
-                        self.quality = q;
-                        backend.request_quality(self.id, q.to_proto());
-                    }
-                    // System menu: restart, lock, Ctrl+Alt+Del (TLP-unattended).
-                    ui.separator();
-                    self.unattended
-                        .menu(ui, tx, self.permissions, backend, self.id);
-                    if self.grab_on {
-                        ui.separator();
-                        // Accent icon = keys are captured. The caption is shown only when it fits
-                        // next to Disconnect; otherwise it moves into the tooltip.
-                        let accent = theme::accent(dark);
-                        let caption = theme::caption(ui, tx.t(S::KeysCaptured));
-                        let caption_w = egui::WidgetText::from(caption.clone())
-                            .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Small)
-                            .size()
-                            .x;
-                        let fits = ui.available_width() > caption_w + 200.0;
-                        let hint = if fits {
-                            tx.t(S::KeysCapturedHint).to_owned()
-                        } else {
-                            format!("{}\n{}", tx.t(S::KeysCaptured), tx.t(S::KeysCapturedHint))
-                        };
-                        icons::icon(ui, tx, Icon::Keyboard, icons::BUTTON_ICON, accent)
-                            .on_hover_text(&hint);
-                        if fits {
-                            ui.label(caption).on_hover_text(&hint);
-                        }
-                    }
-                    theme::row_end(ui, tx.rtl(), |ui| {
-                        let b = widgets::danger_icon_button(
-                            ui,
-                            tx,
-                            Icon::Disconnect,
-                            tx.t(S::Disconnect),
-                        );
-                        if ui.add(b).clicked() {
-                            disconnect = true;
-                        }
-                        // recording (TLP-recording)
-                        match super::recordings::record_toggle(ui, tx, self.recording) {
-                            Some(true) => {
-                                self.recording = super::recordings::RecordState::Starting;
-                                backend.start_recording(self.id);
-                            }
-                            Some(false) => backend.stop_recording(self.id),
-                            None => {}
-                        }
-                    });
-                });
-            });
-        if disconnect {
-            self.release_all(backend);
-            backend.disconnect(self.id);
-        }
-    }
-
     /// Files toggle, plus a paste button while the remote PC has copied files.
     fn files_buttons(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
         if icons::icon_toggle(ui, tx, self.files.open, Icon::Folder, tx.t(S::FsFiles)).clicked() {
@@ -589,7 +429,6 @@ impl ViewerSession {
         if self.monitors.len() < 2 {
             return None;
         }
-        ui.separator();
         let weak = ui.visuals().weak_text_color();
         // Icon only (the label is its tooltip): the toolbar must fit 760 pt in Arabic too.
         icons::icon(ui, tx, Icon::Monitor, icons::BUTTON_ICON, weak)
@@ -1422,6 +1261,98 @@ mod tests {
         }
     }
 
+    /// The toolbar adapts to the window width: Disconnect and the More button are always fully
+    /// inside the bar, nothing is clipped or overlapping, and wide windows show everything.
+    #[test]
+    fn toolbar_fits_every_width_in_both_languages() {
+        use toolbar::Item;
+        let essentials = [
+            Item::Mode,
+            Item::Fullscreen,
+            Item::ViewOnly,
+            Item::Stats,
+            Item::Files,
+            Item::Chat,
+            Item::Monitors,
+            Item::Quality,
+        ];
+        for width in [800.0_f32, 1120.0, 1920.0] {
+            for (lang, name) in [
+                (Lang::En, "Reception desk computer with a very long name"),
+                (Lang::Ar, "حاسوب-المكتب-الرئيسي-في-الطابق-الثاني"),
+            ] {
+                for digits in [DigitStyle::Western, DigitStyle::ArabicIndic] {
+                    let ctx = egui::Context::default();
+                    icons::install(&ctx);
+                    let backend = Recorder::default();
+                    let peer = PeerInfo {
+                        device_id: DeviceId(2),
+                        name: name.into(),
+                        address: "192.168.1.2".parse().unwrap(),
+                    };
+                    let mut session =
+                        ViewerSession::new(SessionId(1), peer, Permissions::ALL, FrameSlot::new());
+                    session.set_monitors(two_monitors(), 0);
+                    session.grab_on = true;
+                    session.audio.enabled = true;
+                    session.recording = crate::ui::recordings::RecordState::On {
+                        since: Instant::now(),
+                    };
+                    let tx = Tx::new(lang, digits);
+                    let screen = Rect::from_min_size(Pos2::ZERO, vec2(width, 700.0));
+                    for _ in 0..3 {
+                        let input = egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        };
+                        let mut out = ctx.run_ui(input, |ui| session.ui(ui, tx, &backend, false));
+                        out.textures_delta.clear();
+                    }
+                    let l = session.toolbar_layout.clone();
+                    let tag = format!("{width} {lang:?} {digits:?}");
+                    let bar = l.content.expand(0.5);
+                    assert!(bar.contains_rect(l.disconnect), "{tag}: disconnect {l:?}");
+                    assert!(l.disconnect.width() > 20.0, "{tag}");
+                    let mut rects: Vec<Rect> = vec![l.disconnect];
+                    for (item, r) in &l.inline {
+                        assert!(
+                            bar.contains_rect(*r),
+                            "{tag}: {item:?} clipped {r:?} in {bar:?}"
+                        );
+                        rects.push(*r);
+                    }
+                    if let Some(more) = l.more {
+                        assert!(bar.contains_rect(more), "{tag}: more clipped {more:?}");
+                        assert!(!l.overflow.is_empty(), "{tag}");
+                        rects.push(more);
+                    } else {
+                        assert!(l.overflow.is_empty(), "{tag}");
+                    }
+                    for (i, a) in rects.iter().enumerate() {
+                        for b in &rects[i + 1..] {
+                            assert!(!a.shrink(0.5).intersects(*b), "{tag}: overlap {a:?} {b:?}");
+                        }
+                    }
+                    for item in essentials {
+                        assert!(
+                            l.inline.iter().any(|(i, _)| *i == item),
+                            "{tag}: essential {item:?} missing"
+                        );
+                    }
+                    // Disconnect is at the reading end: right in English, left in Arabic.
+                    let mid = l.content.center().x;
+                    assert_eq!(l.disconnect.center().x > mid, lang == Lang::En, "{tag}");
+                    if width >= 1920.0 {
+                        assert!(l.overflow.is_empty(), "{tag}: {:?}", l.overflow);
+                    }
+                    if width <= 800.0 {
+                        assert!(!l.overflow.is_empty(), "{tag}");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn picker_hidden_with_one_monitor_and_banner_renders() {
         let ctx = egui::Context::default();
@@ -1516,6 +1447,53 @@ mod tests {
             session.privacy.on_state(false, Instant::now());
             assert!(session.privacy.notice_visible(Instant::now()));
             run(&mut session, vec![]);
+        }
+    }
+
+    /// Characters of `display` sorted left to right as the real egui pipeline draws them.
+    fn screen_order(display: &str) -> String {
+        let mut fonts =
+            egui::epaint::text::Fonts::new(Default::default(), theme::font_definitions());
+        let galley = fonts.with_pixels_per_point(1.0).layout_no_wrap(
+            display.to_owned(),
+            egui::FontId::proportional(13.5),
+            Color32::WHITE,
+        );
+        let mut glyphs: Vec<(f32, char)> = galley
+            .rows
+            .iter()
+            .flat_map(|r| r.row.glyphs.iter())
+            .filter(|g| g.advance_width > 0.0)
+            .map(|g| (g.pos.x, g.chr))
+            .collect();
+        glyphs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        glyphs.into_iter().map(|(_, c)| c).collect()
+    }
+
+    /// On screen (glyph x positions, not the string) the resolution reads W then H in every
+    /// language and digit style.
+    #[test]
+    fn overlay_resolution_is_left_to_right_on_screen() {
+        let frames = FrameSlot::new();
+        let peer = PeerInfo {
+            device_id: DeviceId(2),
+            name: "pc".into(),
+            address: "192.168.1.2".parse().unwrap(),
+        };
+        let mut session = ViewerSession::new(SessionId(1), peer, Permissions::ALL, frames);
+        session.frame_size = [1280, 720];
+        for digits in [DigitStyle::Western, DigitStyle::ArabicIndic] {
+            for lang in [Lang::Ar, Lang::En] {
+                let tx = Tx::new(lang, digits);
+                let lines = session.stat_lines(tx);
+                let shown = screen_order(&lines[lines.len() - 2]);
+                let want = if digits == DigitStyle::Western {
+                    "1280\u{d7}720"
+                } else {
+                    "\u{661}\u{662}\u{668}\u{660}\u{d7}\u{667}\u{662}\u{660}"
+                };
+                assert!(shown.contains(want), "{lang:?} {digits:?}: {shown:?}");
+            }
         }
     }
 
