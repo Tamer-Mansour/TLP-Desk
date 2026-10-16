@@ -251,3 +251,42 @@ fn engine_default_stays_keep_both() {
     assert_eq!(TransferConfig::default().conflict, ConflictPolicy::Rename);
     let _ = FileTransfer::new(TransferConfig::default());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_hosts_question_can_be_turned_on_while_running() {
+    // Starts as "keep both": nobody is asked.
+    let p = pair().await;
+    let (src, dst) = fixture();
+    let dest = dst.path().to_str().unwrap().to_string();
+    let one = |n: &str| vec![src.path().join(n)];
+    let mut vev = p.viewer_ft.subscribe();
+    let id = p
+        .viewer_ft
+        .start_upload(p.viewer_key, one("تقرير.txt"), dest.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        finished(&mut vev, Some(id)).await.1,
+        TransferState::Completed
+    );
+    assert_eq!(read(&dst.path().join("تقرير (2).txt")), "النسخة الجديدة");
+
+    // The host user turns the question on in the settings.
+    p.host_ft.set_incoming_conflict(ConflictPolicy::Ask);
+    let mut hev = p.host_ft.subscribe();
+    let id = p
+        .viewer_ft
+        .start_upload(p.viewer_key, one("صورة.txt"), dest)
+        .await
+        .unwrap();
+    let req = prompt(&mut hev).await;
+    assert_eq!(req.conflicts[0].rel_path, "صورة.txt");
+    assert!(p
+        .host_ft
+        .resolve_conflicts(req.id, Some(ConflictResolution::all(ConflictChoice::Skip))));
+    assert_eq!(
+        finished(&mut vev, Some(id)).await.1,
+        TransferState::Completed
+    );
+    assert_eq!(read(&dst.path().join("صورة.txt")), "old pic");
+}

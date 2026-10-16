@@ -1778,6 +1778,13 @@ impl Backend for RealBackend {
 
     // --- settings / ux (TLP-settings-tray) ---
     fn apply_host_settings(&self, settings: &HostSettings) {
+        self.inner
+            .files
+            .set_incoming_conflict(if settings.ask_on_upload_conflict {
+                tlp_desk_files::ConflictPolicy::Ask
+            } else {
+                tlp_desk_files::ConflictPolicy::Rename
+            });
         settings_tray::apply(
             self.inner.endpoint.as_deref(),
             self.inner.host.as_ref(),

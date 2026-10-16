@@ -120,6 +120,9 @@ pub struct HostSettings {
     /// Incoming connections on/off ("pause hosting" in the tray). Off refuses every peer
     /// before the handshake; connecting to other devices still works.
     pub incoming_enabled: bool,
+    /// Ask this PC's user before a file a viewer sends replaces an existing one. Off: both
+    /// files are kept (the new one gets a number), so nobody is interrupted.
+    pub ask_on_upload_conflict: bool,
 }
 
 impl Default for HostSettings {
@@ -132,6 +135,7 @@ impl Default for HostSettings {
             local_input_grace_ms: 1000,
             remote_pointer_marker: true,
             incoming_enabled: true,
+            ask_on_upload_conflict: false,
         }
     }
 }

@@ -43,7 +43,7 @@ mod types;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tlp_desk_net::{Feature, FeatureCtx};
@@ -125,6 +125,8 @@ pub(crate) struct Inner {
     specs: Mutex<HashMap<TransferId, (u64, Spec)>>,
     /// Open [`ConflictPolicy::Ask`] prompts.
     pub(crate) pending: conflict::Pending,
+    /// Policy for uploads from viewers, changeable while running (starts as `cfg.conflict`).
+    incoming_conflict: AtomicU8,
     /// Host: finds the source folder of an offer that names none (a paste of files the user
     /// copied in Explorer), from `(session_key, offer id)`.
     pub announced_source: Mutex<Option<SourceLookup>>,
@@ -140,6 +142,11 @@ impl Inner {
     /// A new process-unique id (also used as wire id for offers we send).
     pub fn alloc_id(&self) -> TransferId {
         TransferId(self.next_id.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// The policy for files a viewer sends to this host right now.
+    pub fn incoming_conflict(&self) -> ConflictPolicy {
+        ConflictPolicy::from_u8(self.incoming_conflict.load(Ordering::Relaxed))
     }
 
     pub fn remove_session(&self, key: u64) {
@@ -165,6 +172,7 @@ impl FileTransfer {
     /// Creates the engine.
     pub fn new(cfg: TransferConfig) -> Arc<Self> {
         let (events, _) = broadcast::channel(1024);
+        let incoming = cfg.conflict as u8;
         Arc::new(Self {
             inner: Arc::new(Inner {
                 cfg,
@@ -174,6 +182,7 @@ impl FileTransfer {
                 hooks: TestHooks::default(),
                 specs: Mutex::new(HashMap::new()),
                 pending: conflict::Pending::default(),
+                incoming_conflict: AtomicU8::new(incoming),
                 announced_source: Mutex::new(None),
                 announced_dest: Mutex::new(None),
             }),
@@ -362,6 +371,14 @@ impl FileTransfer {
             policy,
         };
         self.start(session_key, spec, None, wire_id).await
+    }
+
+    /// Changes what happens to files a viewer sends that already exist here, for uploads that
+    /// start from now on (the host's "ask before replacing" setting).
+    pub fn set_incoming_conflict(&self, policy: ConflictPolicy) {
+        self.inner
+            .incoming_conflict
+            .store(policy as u8, Ordering::Relaxed);
     }
 
     /// Answers a [`TransferEvent::ConflictsFound`] prompt: `Some(resolution)` continues the

@@ -21,6 +21,8 @@ use crate::i18n::{format, ltr_isolate, Tx, S};
 #[derive(Default)]
 pub struct ConflictDialogs {
     queue: VecDeque<Pending>,
+    /// Pretend it is this time (Unix ms) when writing ages; for deterministic screenshots.
+    pub fixed_now_ms: Option<u64>,
 }
 
 struct Pending {
@@ -62,7 +64,7 @@ impl ConflictDialogs {
     /// Draws the oldest question; returns the decision once the user made one.
     pub fn show(&mut self, ctx: &egui::Context, tx: Tx) -> Option<Decision> {
         let p = self.queue.front_mut()?;
-        let now = now_unix_ms();
+        let now = self.fixed_now_ms.unwrap_or_else(now_unix_ms);
         let mut result = None;
         egui::Modal::new(Id::new(("transfer-conflict", p.prompt.id.0))).show(ctx, |ui| {
             ui.set_width(520.0);

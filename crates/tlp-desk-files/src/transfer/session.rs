@@ -325,7 +325,7 @@ async fn host_receive(state: &Arc<SessionState>, offer: TransferOffer) -> Result
         }
     }
     let dest = upload_dest(&state.inner, &dest_dir)?;
-    let policy = state.inner.cfg.conflict;
+    let policy = state.inner.incoming_conflict();
     let id = state.inner.alloc_id();
     // The host user may be asked (policy `Ask`); declining declines the viewer's upload.
     let decisions = conflict::decide(state, id, &dest, &offer.items, policy, false)

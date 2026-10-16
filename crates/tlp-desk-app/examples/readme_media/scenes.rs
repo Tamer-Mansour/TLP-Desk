@@ -155,6 +155,21 @@ pub const SCENES: &[Scene] = &[
         about: "viewer session with the device info window: system, memory, uptime and disk bars",
         setup: device_info,
     },
+    Scene {
+        name: "transfer-queue",
+        about: "viewer session with the transfer queue: running, paused and finished transfers",
+        setup: transfer_queue,
+    },
+    Scene {
+        name: "transfer-conflict",
+        about: "the 'files already exist' dialog: existing and new version, choice per file",
+        setup: transfer_conflict,
+    },
+    Scene {
+        name: "host-transfers",
+        about: "host side: banner button and the File transfers window with who sends what",
+        setup: host_transfers,
+    },
 ];
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
@@ -565,4 +580,139 @@ fn device_info(app: &mut App, lang: Lang) {
 fn host_chat(app: &mut App, lang: Lang) {
     host_banner(app, lang);
     app.host_chats.insert(SessionId(2), conversation(true));
+}
+
+fn transfer_view(
+    id: u64,
+    dir: tlp_desk_app::backend::files::TransferDir,
+    label: &str,
+    status: tlp_desk_app::backend::files::TransferStatus,
+    (done, total): (u64, u64),
+    files: (u32, u32),
+    local: bool,
+) -> tlp_desk_app::backend::files::TransferView {
+    use tlp_desk_app::backend::files::{TransferId, TransferStatus, TransferView};
+    let running = status == TransferStatus::Running;
+    TransferView {
+        id: TransferId(id),
+        dir,
+        label: label.to_owned(),
+        status,
+        bytes_done: done,
+        total_bytes: total,
+        files_done: files.0,
+        total_files: files.1,
+        failed_files: 0,
+        bytes_per_sec: if running { 38_000_000 } else { 0 },
+        local_dest: Some(r"C:\Users\me\Downloads".into()),
+        local,
+        started_unix_ms: 1_760_000_000_000 + id * 1000,
+    }
+}
+
+fn transfer_queue(app: &mut App, lang: Lang) {
+    use tlp_desk_app::backend::files::{TransferDir::*, TransferStatus::*};
+    session(app, lang);
+    if let Some(s) = app.session.as_mut() {
+        let mb = 1_000_000;
+        for v in [
+            transfer_view(
+                1,
+                Send,
+                "تقرير المشروع",
+                Completed,
+                (96 * mb, 96 * mb),
+                (12, 12),
+                true,
+            ),
+            transfer_view(
+                2,
+                Receive,
+                "photos.zip",
+                Paused,
+                (310 * mb, 480 * mb),
+                (1, 1),
+                true,
+            ),
+            transfer_view(
+                3,
+                Send,
+                "مجلد الصور 2025",
+                Running,
+                (640 * mb, 1_200 * mb),
+                (212, 400),
+                true,
+            ),
+        ] {
+            s.transfers.update(v);
+        }
+    }
+}
+
+fn transfer_conflict(app: &mut App, lang: Lang) {
+    use tlp_desk_app::backend::files::{ConflictPrompt, FileConflict, TransferId};
+    session(app, lang);
+    let now_ms: u64 = 1_760_000_000_000;
+    let hours = |h: u64| i64::try_from(now_ms - h * 3_600_000).unwrap_or(0);
+    let file = |index, name: &str, old: (u64, u64), new: (u64, u64), partial| FileConflict {
+        index,
+        rel_path: name.to_owned(),
+        existing_size: old.0,
+        existing_modified_unix_ms: hours(old.1),
+        incoming_size: new.0,
+        incoming_modified_unix_ms: hours(new.1),
+        partial_bytes: partial,
+    };
+    app.conflicts.fixed_now_ms = Some(now_ms);
+    app.conflicts.push(
+        ConflictPrompt {
+            id: TransferId(7),
+            local: true,
+            label: "المستندات".to_owned(),
+            dest_dir: r"C:\Users\me\Downloads".to_owned(),
+            total: 3,
+            files: vec![
+                file(0, "تقرير الربع الأول.docx", (96_204, 72), (98_880, 5), None),
+                file(
+                    1,
+                    "photos.zip",
+                    (48_220_331, 24),
+                    (48_220_331, 30),
+                    Some(33_554_432),
+                ),
+                file(2, "notes.txt", (2_048, 5), (1_024, 5), None),
+            ],
+        },
+        "",
+    );
+}
+
+fn host_transfers(app: &mut App, lang: Lang) {
+    use tlp_desk_app::backend::files::{TransferDir::*, TransferStatus::*};
+    host_banner(app, lang);
+    let peer = incoming_peer(lang);
+    let who = format!("{} ({})", peer.name, peer.device_id);
+    let mb = 1_000_000;
+    for v in [
+        transfer_view(
+            1,
+            Receive,
+            "عرض المبيعات.pptx",
+            Running,
+            (22 * mb, 60 * mb),
+            (0, 1),
+            false,
+        ),
+        transfer_view(
+            2,
+            Send,
+            "backup-notes",
+            Completed,
+            (8 * mb, 8 * mb),
+            (4, 4),
+            false,
+        ),
+    ] {
+        app.host_transfers.update(v, &who);
+    }
 }

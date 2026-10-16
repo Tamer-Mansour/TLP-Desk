@@ -116,6 +116,16 @@ fn main() -> anyhow::Result<()> {
                     // (Settings screen), not from constants here.
                     host_settings: Some(settings.host.clone()),
                     connection_log: tlp_desk_app::settings::app_data_dir(),
+                    history: tlp_desk_app::settings::app_data_dir(),
+                    transfer: tlp_desk_files::TransferConfig {
+                        conflict: if settings.host.ask_on_upload_conflict {
+                            tlp_desk_files::ConflictPolicy::Ask
+                        } else {
+                            tlp_desk_files::ConflictPolicy::Rename
+                        },
+                        download_conflict: tlp_desk_files::ConflictPolicy::Ask,
+                        ..Default::default()
+                    },
                     ..Default::default()
                 };
                 backend::real::RealBackend::start_with(&rt, repaint, cfg)

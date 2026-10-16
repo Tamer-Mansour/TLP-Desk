@@ -45,6 +45,16 @@ pub enum ConflictPolicy {
     Ask,
 }
 
+impl ConflictPolicy {
+    /// The policy stored by `policy as u8` (anything unknown is the default, keep both).
+    pub(crate) fn from_u8(v: u8) -> Self {
+        [Self::Rename, Self::Overwrite, Self::Skip, Self::Ask]
+            .into_iter()
+            .find(|p| *p as u8 == v)
+            .unwrap_or_default()
+    }
+}
+
 /// Engine settings (one per [`crate::FileTransfer`]).
 #[derive(Debug, Clone)]
 pub struct TransferConfig {
