@@ -8,6 +8,8 @@
 //!   streams, with resume, BLAKE3 verification and atomic writes. Entry point:
 //!   [`FileTransfer`] (a session `Feature`).
 //! * [`clipfiles`]: Explorer copy/paste of files between the devices (`ClipboardFiles`).
+//! * [`shellclip`]: the peer's copied files as virtual files on this PC's clipboard (Explorer
+//!   Ctrl+V), via COM delayed rendering.
 //! * [`fs`]: browse and change the other device's files (protocol v4 `FsRequest`/`FsResponse`).
 //!
 //! No function in this crate contacts anything outside the session's peer.
@@ -20,6 +22,7 @@
 pub mod clipboard;
 pub mod clipfiles;
 pub mod fs;
+pub mod shellclip;
 
 // --- files-transfer lane ---
 pub mod transfer;

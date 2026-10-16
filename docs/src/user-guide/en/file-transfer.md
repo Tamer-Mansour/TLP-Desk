@@ -28,15 +28,33 @@ drives are listed; network drives and `\server\share` paths are never offered.
 
 ## Copy and paste between the PCs
 
-Copy files in Explorer on one PC as usual (Ctrl+C). When the viewer is connected, a button
-**Paste files copied on the remote PC** appears in the toolbar and in the file browser; it
-downloads those files into the folder shown in your **This PC** pane (or your Downloads folder).
-In the other direction, copy files in Explorer on your PC and click **Paste files copied on this
-PC** in the browser to send them to the folder open in the **Remote PC** pane.
+Select files or folders in Explorer on one PC and press **Ctrl+C**. On the other PC, open an
+Explorer window (or the desktop) and press **Ctrl+V**. The files arrive in that folder, in
+both directions, with Explorer's own copy dialog showing the progress; the transfer also
+appears in the transfers list. Nothing is sent when you copy: the bytes only travel when you
+paste, so copying a large folder and never pasting it costs nothing.
 
-Limitation: this is an explicit paste button, not Ctrl+V inside Explorer. TLP-Desk does not
-register a delayed-render clipboard object, so pasting directly into an Explorer window on the
-other PC is not possible.
+This needs the **Files** and **Clipboard** permissions on the session (the person at the host
+grants them and can take them back at any time; taking either away removes the pending paste at
+once). Folder structure, Arabic file names and file dates are kept. If you copy something else
+(text, an image, other files) the earlier paste is replaced; when the session ends it is removed.
+
+Notes:
+
+- The other PC's files appear on your clipboard as soon as it copies them, replacing what you had
+  copied here. That is how Ctrl+V can work in Explorer.
+- Explorer starts the copy dialog right away, but each file only starts to fill in once it has
+  fully arrived (it is verified first), so a single very large file shows no progress in
+  Explorer's dialog until it completes; watch the transfers list for its progress.
+- File names longer than the Windows limit of 259 characters (with their folders) are not offered.
+- While a paste is running, temporary copies are kept in `%TEMP%\TLP-Desk\paste` and deleted when
+  the session ends or you copy something else.
+
+If Ctrl+V in Explorer is not an option, the buttons still work: **Paste files copied on the
+remote PC** (toolbar and file browser) downloads those files into the folder shown in your
+**This PC** pane (or your Downloads folder), and **Paste files copied on this PC** sends the
+files you copied to the folder open in the **Remote PC** pane. Ctrl+V while the session window
+is focused does the same as the second button.
 
 ## Drag and drop
 

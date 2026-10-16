@@ -92,6 +92,7 @@
   - [Video pipeline](dev/architecture/video.md)
   - [Input path](dev/architecture/input.md)
   - [Connection and authentication](dev/architecture/auth.md)
+  - [Explorer copy and paste](dev/architecture/explorer-paste.md)
 - [Crates](dev/crates/index.md)
   - [tlp-desk-proto](dev/crates/proto.md)
   - [tlp-desk-crypto](dev/crates/crypto.md)

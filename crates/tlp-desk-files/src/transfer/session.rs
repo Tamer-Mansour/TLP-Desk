@@ -317,7 +317,14 @@ async fn on_offer(state: Arc<SessionState>, offer: TransferOffer) {
 /// Host side of an upload: plan, accept, receive.
 async fn host_receive(state: &Arc<SessionState>, offer: TransferOffer) -> Result<(), FilesError> {
     check_offer(&offer, state.inner.cfg.max_items)?;
-    let dest = upload_dest(&state.inner, &offer.dest_dir)?;
+    let mut dest_dir = offer.dest_dir.clone();
+    if dest_dir.is_empty() {
+        let lookup = lock(&state.inner.announced_dest).clone();
+        if let Some(dir) = lookup.and_then(|f| f(state.ctx.session_key, offer.id)) {
+            dest_dir = dir;
+        }
+    }
+    let dest = upload_dest(&state.inner, &dest_dir)?;
     let policy = state.inner.cfg.conflict;
     let id = state.inner.alloc_id();
     // The host user may be asked (policy `Ask`); declining declines the viewer's upload.
