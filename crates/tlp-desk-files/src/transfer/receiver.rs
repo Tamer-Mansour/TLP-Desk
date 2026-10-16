@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
 use tlp_desk_net::{RecvStream, STREAM_REFUSED};
 use tlp_desk_proto::{FileDataHeader, FsError, Message, TransferItem, FILE_DATA_HEADER_LEN};
 
@@ -28,6 +30,21 @@ use super::types::{FileState, TransferEvent, TransferState};
 /// How long a new stream may take to deliver its 12-byte header.
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Files up to this size are kept in memory until their hash is verified and are then created
+/// under their final name in one go, instead of `name.tlpdesk-part` + rename. Creating, timing
+/// and renaming a file are three directory operations, and the rename alone cost about as
+/// much as everything else for thousands of small files (see `examples/bench_transfer.rs`).
+/// The price: a crash or power loss during that single small write can leave a short file
+/// with its real name; larger files keep the always-complete guarantee.
+pub const SMALL_FILE_MAX: u64 = 256 * 1024;
+/// Most small-file bytes held in memory at once (read but not yet created on disk). Streams
+/// wait for room, which in turn holds the sender back through QUIC flow control.
+const SMALL_BUDGET: usize = 32 << 20;
+/// Files finalized (created, timed, renamed) at the same time. More threads in the file
+/// system at once only queue up behind each other: with hundreds of finalize jobs in flight
+/// the same work ran half as fast as with a handful.
+const FS_SLOTS: usize = 4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Receiving,
@@ -48,6 +65,10 @@ struct ItemRx {
     /// Some data did not arrive piece-aligned: hash the file from disk instead.
     rehash: bool,
     expected: Option<Digest>,
+    /// A small file's bytes, waiting for the hash to be verified (see [`SMALL_FILE_MAX`]).
+    mem: Option<Vec<u8>>,
+    /// Memory budget held by `mem` until the file is on disk.
+    mem_permit: Option<OwnedSemaphorePermit>,
 }
 
 /// Receiver half of a transfer.
@@ -63,6 +84,10 @@ pub struct Receiving {
     states: Vec<Mutex<ItemRx>>,
     /// File items not yet verified or failed.
     pending: AtomicUsize,
+    /// Bytes of small files that may wait in memory (1 permit = 1 KiB).
+    mem_budget: Arc<Semaphore>,
+    /// Concurrent finalize jobs.
+    fs_slots: Arc<Semaphore>,
 }
 
 impl Receiving {
@@ -108,6 +133,8 @@ impl Receiving {
                     pieces: vec![None; usize::try_from(piece_count(item.size, PIECE)).unwrap_or(0)],
                     rehash: false,
                     expected: None,
+                    mem: None,
+                    mem_permit: None,
                 })
             })
             .collect();
@@ -118,6 +145,8 @@ impl Receiving {
             resume: plan.resume,
             states,
             pending: AtomicUsize::new(pending),
+            mem_budget: Arc::new(Semaphore::new(SMALL_BUDGET / 1024)),
+            fs_slots: Arc::new(Semaphore::new(FS_SLOTS)),
         }
     }
 
@@ -284,6 +313,9 @@ async fn receive(
     if h.offset < resume || h.offset >= size {
         return Err(StreamError::Protocol("offset outside the file"));
     }
+    if resume == 0 && h.offset == 0 && size <= SMALL_FILE_MAX {
+        return receive_small(rx, t, recv, idx, size).await;
+    }
     let file = {
         let st_mutex = rx
             .states
@@ -351,6 +383,48 @@ async fn receive(
             mark_rehash(rx, idx);
         }
     }
+    Ok(())
+}
+
+/// A small file: the whole stream into memory; the bytes are written by [`FinalizeJob`] once
+/// the sender's hash arrived and matches.
+async fn receive_small(
+    rx: &Receiving,
+    t: &Transfer,
+    recv: &mut RecvStream,
+    idx: usize,
+    size: u64,
+) -> Result<(), StreamError> {
+    let len = usize::try_from(size).map_err(|_| StreamError::Protocol("file too large"))?;
+    let kib = u32::try_from(size / 1024 + 1).unwrap_or(u32::MAX);
+    let permit = rx
+        .mem_budget
+        .clone()
+        .acquire_many_owned(kib)
+        .await
+        .map_err(|_| StreamError::Stopped)?;
+    // One byte more detects a sender that sends past the announced size.
+    let mut data = vec![0u8; len.saturating_add(1)];
+    let n = fill(recv, &mut data).await?;
+    if n != len {
+        return Err(if n > len {
+            StreamError::Protocol("more data than the file size")
+        } else {
+            StreamError::Net
+        });
+    }
+    data.truncate(len);
+    if !claim(rx, idx, 0, size) {
+        return Err(StreamError::Protocol("overlapping data"));
+    }
+    if let Some(st) = rx.states.get(idx) {
+        let mut st = lock(st);
+        st.written.insert(0, size);
+        st.mem = Some(data);
+        st.mem_permit = Some(permit);
+    }
+    t.bytes_done.fetch_add(size, Ordering::Relaxed);
+    t.item_bytes(idx, size);
     Ok(())
 }
 
@@ -549,13 +623,26 @@ fn maybe_finalize(state: &Arc<SessionState>, t: &Arc<Transfer>, rx: &Arc<Receivi
             rehash: st.rehash,
             expected,
             file: st.file.take(),
+            _mem_permit: st.mem_permit.take(),
+            // Empty files have no stream at all; they are created directly as well.
+            mem: st.mem.take().or_else(|| {
+                (info.size == 0
+                    && resume == 0
+                    && matches!(rx.targets.get(idx), Some(Target::File { .. })))
+                .then(Vec::new)
+            }),
         }
     };
     let (state, t, rx) = (state.clone(), t.clone(), rx.clone());
     tokio::spawn(async move {
-        let res = tokio::task::spawn_blocking(move || job.run())
-            .await
-            .unwrap_or_else(|_| Err(FsError::Other("verify task failed".into())));
+        let slot = rx.fs_slots.clone().acquire_owned().await.ok();
+        let res = tokio::task::spawn_blocking(move || {
+            let r = job.run();
+            drop(slot);
+            r
+        })
+        .await
+        .unwrap_or_else(|_| Err(FsError::Other("verify task failed".into())));
         let Some(st) = rx.states.get(idx) else { return };
         match res {
             Ok(()) => {
@@ -610,11 +697,24 @@ struct FinalizeJob {
     rehash: bool,
     expected: Digest,
     file: Option<Arc<File>>,
+    /// The whole file when it is small (see [`SMALL_FILE_MAX`]).
+    mem: Option<Vec<u8>>,
+    /// Frees the memory budget when the job (and its buffer) is gone.
+    _mem_permit: Option<OwnedSemaphorePermit>,
 }
 
 impl FinalizeJob {
-    fn run(self) -> Result<(), FsError> {
+    fn run(mut self) -> Result<(), FsError> {
         let io = |e: std::io::Error| io_to_fs_error(&e);
+        if let (
+            Some(data),
+            Some(Target::File {
+                final_path, part, ..
+            }),
+        ) = (self.mem.take(), &self.target)
+        {
+            return self.create_small(part, final_path, &data);
+        }
         match &self.target {
             Some(Target::Identical { path }) => {
                 let f = open_read(path).map_err(io)?;
@@ -626,7 +726,7 @@ impl FinalizeJob {
             Some(Target::File {
                 part, final_path, ..
             }) => {
-                let file = match self.file.clone() {
+                let file = match self.file.take() {
                     Some(f) => f,
                     None => {
                         Arc::new(open_write(part, self.resume == 0 && self.size == 0).map_err(io)?)
@@ -653,6 +753,52 @@ impl FinalizeJob {
             }
             _ => Ok(()),
         }
+    }
+
+    /// Verifies a small file in memory, then creates it under its final name. If the name is
+    /// taken (the user chose to overwrite), the usual partial file + atomic rename is used.
+    fn create_small(&self, part: &Path, final_path: &Path, data: &[u8]) -> Result<(), FsError> {
+        let io = |e: std::io::Error| io_to_fs_error(&e);
+        if *blake3::hash(data).as_bytes() != self.expected {
+            return Err(FsError::HashMismatch);
+        }
+        let mut direct = true;
+        let mut created = false;
+        let mut write = || -> std::io::Result<()> {
+            let mut f = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(final_path)
+            {
+                Ok(f) => f,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    direct = false;
+                    open_write(part, true)?
+                }
+                Err(e) => return Err(e),
+            };
+            created = true;
+            std::io::Write::write_all(&mut f, data)?;
+            if let Some(t) = from_unix_ms(self.mtime) {
+                if let Err(e) = f.set_modified(t) {
+                    tracing::debug!(%e, "could not restore a file time");
+                }
+            }
+            drop(f);
+            if direct {
+                Ok(())
+            } else {
+                std::fs::rename(part, final_path)
+            }
+        };
+        let res = write();
+        res.map_err(|e| {
+            // Never leave a short file under the real name.
+            if created {
+                let _ = std::fs::remove_file(if direct { final_path } else { part });
+            }
+            io(e)
+        })
     }
 
     fn hash(&self, file: &File) -> std::io::Result<Digest> {
