@@ -13,10 +13,12 @@ use tlp_desk_crypto::Identity;
 use tlp_desk_host::{ConnectedViewer, Host, HostConfig, HostEvent, HostEvents, SessionId};
 use tlp_desk_input::{InputError, InputEvent, InputInjector, LocalActivity, MonitorRect};
 use tlp_desk_net::{Endpoint, EndpointConfig};
-use tlp_desk_proto::Permissions;
+use tlp_desk_host::EndReason as HostEnd;
+use tlp_desk_proto::{ByeReason, Permissions, RejectReason};
 use tlp_desk_viewer::{
-    AuthMethod, ConnectTarget, DecodedFrame, KnownHostsStore, PixelFormat, Viewer, ViewerConfig,
-    ViewerEvent, ViewerEvents, ViewerSession,
+    AuthMethod, ConnectTarget, DecodedFrame, EndReason as ViewerEnd, FeatureSet, HeldTicket,
+    KnownHostsStore, PixelFormat, ReconnectPolicy, ReconnectTickets, Viewer, ViewerConfig,
+    ViewerError, ViewerEvent, ViewerEvents, ViewerSession,
 };
 
 const W: u32 = 320;
@@ -117,9 +119,13 @@ impl InputInjector for FakeInjector {
 }
 
 fn endpoint(listen: bool, name: &str) -> Arc<Endpoint> {
+    endpoint_as(Arc::new(Identity::generate().unwrap()), listen, name)
+}
+
+fn endpoint_as(identity: Arc<Identity>, listen: bool, name: &str) -> Arc<Endpoint> {
     Arc::new(
         Endpoint::bind(
-            Arc::new(Identity::generate().unwrap()),
+            identity,
             EndpointConfig {
                 bind: "127.0.0.1:0".parse().unwrap(),
                 listen,
@@ -186,12 +192,17 @@ async fn rig(tweak: impl FnOnce(&mut HostConfig)) -> Rig {
 }
 
 fn viewer(name: &str) -> Arc<Viewer> {
+    viewer_on(endpoint(false, name), FeatureSet::new())
+}
+
+fn viewer_on(ep: Arc<Endpoint>, features: FeatureSet) -> Arc<Viewer> {
     Arc::new(
         Viewer::new(
-            endpoint(false, name),
+            ep,
             ViewerConfig {
                 known_hosts: KnownHostsStore::InMemory,
                 pixel_format: PixelFormat::Rgba,
+                features,
                 ..ViewerConfig::default()
             },
         )
@@ -454,4 +465,199 @@ async fn pausing_one_viewers_input_keeps_the_other_in_control() {
     .await;
     sa.send_input(mv(1400));
     wait_recorded(&rig.recorded, |r| has(r, &mv(1400))).await;
+}
+
+/// A viewer that keeps the host's reconnect tickets, on an identity that survives a
+/// simulated network drop (the reconnect must come from the same key).
+struct Colleague {
+    identity: Arc<Identity>,
+    keeper: ReconnectTickets,
+    ep: Arc<Endpoint>,
+    viewer: Arc<Viewer>,
+}
+
+impl Colleague {
+    fn new(name: &str) -> Self {
+        let identity = Arc::new(Identity::generate().unwrap());
+        let keeper = ReconnectTickets::new();
+        let ep = endpoint_as(identity.clone(), false, name);
+        let viewer = viewer_on(ep.clone(), FeatureSet::new().with(keeper.feature()));
+        Self {
+            identity,
+            keeper,
+            ep,
+            viewer,
+        }
+    }
+
+    /// The network drops: the connection dies without a goodbye. A fresh endpoint with the
+    /// same identity takes over (like the app after its socket recovered).
+    fn drop_network(&mut self, name: &str) {
+        self.ep.close();
+        self.ep = endpoint_as(self.identity.clone(), false, name);
+        self.viewer = viewer_on(self.ep.clone(), FeatureSet::new().with(self.keeper.feature()));
+    }
+}
+
+fn quick_policy() -> ReconnectPolicy {
+    ReconnectPolicy {
+        give_up_after: Duration::from_secs(10),
+        first_delay: Duration::from_millis(50),
+        ..ReconnectPolicy::network_blip()
+    }
+}
+
+async fn held_ticket(keeper: &ReconnectTickets, s: &ViewerSession) {
+    within("a resume ticket", async {
+        loop {
+            if keeper.has(s.feature_key()) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+}
+
+async fn connection_lost(rig: &mut Rig, id: SessionId) {
+    let ev = host_event(&mut rig.events, |e| {
+        matches!(e, HostEvent::SessionEnded { id: i, .. } if *i == id)
+    })
+    .await;
+    let HostEvent::SessionEnded { reason, .. } = ev else {
+        unreachable!()
+    };
+    assert!(matches!(reason, HostEnd::ConnectionLost(_)), "{reason:?}");
+}
+
+/// A network blip ends the connection; the viewer gets back in with its resume ticket and no
+/// Accept prompt, with the permissions the host allows *now* (keyboard was revoked before the
+/// drop, so it stays revoked). The ticket works once; the other viewer is not disturbed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn viewer_resumes_after_a_network_drop_without_a_new_accept() {
+    let mut rig = rig(|_| {}).await;
+    let mut a = Colleague::new("زميل-1");
+    let vb = viewer("colleague-2");
+    let (sa, mut ea, ca) = join(&mut rig, &a.viewer, FULL).await;
+    let (sb, _eb, _cb) = join(&mut rig, &vb, FULL).await;
+    held_ticket(&a.keeper, &sa).await;
+
+    let reduced = Permissions::VIEW | Permissions::CONTROL;
+    assert!(rig.host.set_permissions(ca.id, reduced));
+    within("A told", async {
+        loop {
+            if let Some(ViewerEvent::PermissionsChanged(p)) = ea.recv().await {
+                assert_eq!(p, reduced);
+                return;
+            }
+        }
+    })
+    .await;
+    // The re-issued ticket follows the permissions message on the same stream.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    a.drop_network("زميل-1");
+    connection_lost(&mut rig, ca.id).await;
+    let ended = within("A's old session ends", sa.ended()).await;
+    assert!(!matches!(ended, ViewerEnd::Local), "{ended:?}");
+    let ticket: HeldTicket = a.keeper.take(sa.feature_key()).expect("ticket kept");
+
+    let (sa2, _ea2) = within(
+        "resume",
+        a.viewer
+            .reconnect_with_ticket(ticket.clone(), quick_policy(), None),
+    )
+    .await
+    .expect("resumed");
+    assert_eq!(sa2.permissions(), reduced, "revoked keyboard must stay revoked");
+    let HostEvent::SessionStarted(cv) =
+        host_event(&mut rig.events, |e| matches!(e, HostEvent::SessionStarted(_))).await
+    else {
+        unreachable!()
+    };
+    assert_eq!(cv.permissions, reduced);
+    assert_eq!(cv.peer.fingerprint, a.ep.fingerprint());
+    assert!(rig.host.pending_requests().is_empty(), "no Accept prompt");
+    streaming(&sa2, W, H).await;
+    streaming(&sb, W, H).await;
+    sa2.send_input(mv(1500));
+    wait_recorded(&rig.recorded, |r| has(r, &mv(1500))).await;
+
+    // Single use.
+    let err = a
+        .viewer
+        .reconnect_with_ticket(ticket, quick_policy(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ViewerError::Rejected(RejectReason::WrongCredentials)),
+        "{err}"
+    );
+    // The resumed session gets a fresh ticket of its own.
+    held_ticket(&a.keeper, &sa2).await;
+}
+
+/// Deliberate ends revoke the ticket: after the host user disconnects a viewer, its ticket no
+/// longer opens a session.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn host_disconnect_revokes_the_resume_ticket() {
+    let mut rig = rig(|_| {}).await;
+    let a = Colleague::new("viewer-a");
+    let (sa, _ea, ca) = join(&mut rig, &a.viewer, FULL).await;
+    held_ticket(&a.keeper, &sa).await;
+    assert!(rig.host.disconnect(ca.id));
+    assert_eq!(
+        within("A ended", sa.ended()).await,
+        ViewerEnd::Remote(ByeReason::UserClosed)
+    );
+    let ticket = a.keeper.take(sa.feature_key()).expect("ticket");
+    let err = a
+        .viewer
+        .reconnect_with_ticket(ticket, quick_policy(), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ViewerError::Rejected(RejectReason::WrongCredentials)),
+        "{err}"
+    );
+    assert!(rig.host.sessions().is_empty());
+}
+
+/// An expired resume ticket is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn expired_resume_ticket_is_refused() {
+    let mut rig = rig(|c| c.session_resume = Some(Duration::from_millis(1500))).await;
+    let mut a = Colleague::new("viewer-a");
+    let (sa, _ea, ca) = join(&mut rig, &a.viewer, FULL).await;
+    held_ticket(&a.keeper, &sa).await;
+    a.drop_network("viewer-a");
+    connection_lost(&mut rig, ca.id).await;
+    // Read straight from the keeper's copy (`take` already filters expired tickets).
+    let ticket = a.keeper.take(sa.feature_key()).expect("ticket");
+    tokio::time::sleep(Duration::from_millis(1700)).await;
+    let policy = ReconnectPolicy {
+        give_up_after: Duration::from_secs(10),
+        first_delay: Duration::from_millis(50),
+        ..ReconnectPolicy::network_blip()
+    };
+    let started = Instant::now();
+    let err = a
+        .viewer
+        .reconnect_with_ticket(ticket, policy, None)
+        .await
+        .unwrap_err();
+    // The viewer gives up at the ticket's expiry instead of dialling with a dead ticket.
+    assert!(started.elapsed() < Duration::from_secs(2), "{err}");
+    assert!(rig.host.sessions().is_empty());
+}
+
+/// Resume tickets can be switched off.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_resume_tickets_when_disabled() {
+    let mut rig = rig(|c| c.session_resume = None).await;
+    let a = Colleague::new("viewer-a");
+    let (sa, _ea, _ca) = join(&mut rig, &a.viewer, FULL).await;
+    streaming(&sa, W, H).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!a.keeper.has(sa.feature_key()));
 }

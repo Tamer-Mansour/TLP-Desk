@@ -64,6 +64,7 @@ mod pipeline;
 mod priority;
 mod privacy;
 mod refine;
+mod resume;
 pub mod service;
 mod tunnel;
 mod unattended;
@@ -100,6 +101,7 @@ pub use device_info::{
     SystemInfoSource, DEVICE_INFO_FEATURE,
 };
 pub use live::LiveOptions;
+pub use resume::RESUME_TICKET_TTL;
 pub use privacy::{
     PrivacyCause, PrivacyFeature, PrivacyStatus, PrivacyTextFn, PrivacyViewer, ShieldFactory,
     FEATURE_NAME as PRIVACY_FEATURE,
@@ -194,6 +196,11 @@ pub struct HostConfig {
     /// Reconnect tickets (restart and reconnect): the same store must be given to the
     /// [`UnattendedFeature`] that issues them. None = ticket logins are refused.
     pub reconnect_tickets: Option<TicketStore>,
+    /// Session resume after a network blip: every session is sent a single-use ticket of
+    /// this lifetime (renewed while it runs) that lets the viewer reconnect without a new
+    /// Accept, with the session's current permissions (see the `resume` module). `None`
+    /// disables it. Default [`RESUME_TICKET_TTL`].
+    pub session_resume: Option<Duration>,
     /// Name announced in discovery.
     pub device_name: String,
     /// Announce this host on the LAN (mDNS + broadcast). The advertisement is filled in from
@@ -230,6 +237,7 @@ impl Default for HostConfig {
             one_time_code: OneTimeCode::new(),
             password: None,
             reconnect_tickets: None,
+            session_resume: Some(RESUME_TICKET_TTL),
             device_name: default_device_name(),
             advertise: true,
             discovery: DiscoveryConfig::default(),
@@ -257,6 +265,7 @@ impl std::fmt::Debug for HostConfig {
             .field("allow_one_time_code", &self.allow_one_time_code)
             .field("password", &self.password.is_some())
             .field("reconnect_tickets", &self.reconnect_tickets.is_some())
+            .field("session_resume", &self.session_resume)
             .field("device_name", &self.device_name)
             .field("advertise", &self.advertise)
             .field("local_input_grace", &self.local_input_grace)
@@ -439,6 +448,8 @@ struct Inner {
     shutting_down: AtomicBool,
     /// Local-activity monitor and pointer marker shared by all sessions.
     hooks: Arc<hooks::SharedHooks>,
+    /// Session-resume tickets (`HostConfig::session_resume`), in memory only.
+    resume: Option<TicketStore>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -507,6 +518,7 @@ impl Host {
             cfg.local_activity_factory.clone(),
             cfg.pointer_marker_factory.clone(),
         );
+        let cfg_resume = cfg.session_resume;
         let inner = Arc::new(Inner {
             endpoint,
             password: Mutex::new(cfg.password.clone()),
@@ -519,6 +531,7 @@ impl Host {
             sessions: Mutex::default(),
             shutting_down: AtomicBool::new(false),
             hooks,
+            resume: cfg_resume.map(TicketStore::session_resume),
         });
         let accept_task = tokio::spawn(accept_loop(inner.clone()));
         tracing::info!(
@@ -760,7 +773,12 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
             finish_auth(inner, peer, kind, res).await;
         }
         AuthKind::ReconnectTicket => {
-            let res = unattended::redeem(inner.cfg.reconnect_tickets.as_ref(), p).await;
+            let res = resume::redeem(
+                inner.resume.as_ref(),
+                inner.cfg.reconnect_tickets.as_ref(),
+                p,
+            )
+            .await;
             finish_auth(inner, peer, kind, res).await;
         }
     }
@@ -1015,6 +1033,12 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     // host user's pause, whichever holds.
     let mut local_active = false;
     let mut paused = false;
+    // Session resume: a fresh ticket now and on every renewal / permission change.
+    let mut resume_store = inner.resume.clone();
+    let mut resume_tick = tokio::time::interval(resume::renew_every(
+        inner.cfg.session_resume.unwrap_or(RESUME_TICKET_TTL),
+    ));
+    resume_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let reason = loop {
         // Publish the monitor list whenever it (or the active monitor) differs from what the
         // viewer last saw.
@@ -1076,6 +1100,13 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                     }
                 }
             }
+            _ = resume_tick.tick(), if resume_store.is_some() => {
+                if let Some(store) = &resume_store {
+                    if let Err(e) = resume::send_ticket(store, &session, current).await {
+                        break EndReason::ConnectionLost(e.to_string());
+                    }
+                }
+            }
             Some(()) = blocked_rx.recv() => {
                 inner.emit(HostEvent::InputBlocked { id });
             }
@@ -1107,6 +1138,12 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 }
                 if let Err(e) = session.send(&Message::Permissions(new)).await {
                     break EndReason::ConnectionLost(e.to_string());
+                }
+                // The held resume ticket must not grant the old permissions.
+                if let Some(store) = &resume_store {
+                    if let Err(e) = resume::send_ticket(store, &session, current).await {
+                        break EndReason::ConnectionLost(e.to_string());
+                    }
                 }
             }
             msg = session.recv() => match msg {
@@ -1143,6 +1180,13 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
                 Ok(other) => match perf.handle(&session, current, other).await {
+                    Ok(Some(msg @ Message::RestartRemote { reconnect: true })) => {
+                        // The restart ticket must stay the one the viewer holds.
+                        if let Some(store) = resume_store.take() {
+                            store.revoke_peer(&peer.fingerprint);
+                        }
+                        route_to_feature(&features, current, id, msg);
+                    }
                     Ok(None) => {}
                     Ok(Some(other)) => route_to_feature(&features, current, id, other),
                     Err(e) => break EndReason::ConnectionLost(e.to_string()),
@@ -1161,6 +1205,12 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     lock(&inner.sessions).remove(&id);
     unattended::revoke_after_session(
         inner.cfg.reconnect_tickets.as_ref(),
+        &peer,
+        &reason,
+        inner.shutting_down.load(Ordering::Acquire),
+    );
+    resume::after_session(
+        inner.resume.as_ref(),
         &peer,
         &reason,
         inner.shutting_down.load(Ordering::Acquire),
