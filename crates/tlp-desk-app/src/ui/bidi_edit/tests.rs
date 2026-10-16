@@ -251,7 +251,7 @@ fn text_field_switches_editors_without_losing_focus_or_caret() {
     let tx = Tx::new(Lang::Ar, DigitStyle::Western);
     let mut value = String::from("abc");
     let id_cell = std::cell::Cell::new(None);
-    let mut frame = |events: Vec<Event>, value: &mut String| {
+    let frame = |events: Vec<Event>, value: &mut String| {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0))),
             events,
