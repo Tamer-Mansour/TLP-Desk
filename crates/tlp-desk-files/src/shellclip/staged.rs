@@ -7,12 +7,17 @@
 //! for that signal; while waiting it calls a `pump` closure so the COM thread keeps handling
 //! messages. Waiting is bounded: the pull must start, the transfer must not fail, and the
 //! virtual clipboard must not be cancelled (session ended, peer copied something else).
+//!
+//! The item list is either known up front (a clipboard announcement carries it) or listed
+//! later by the stager ([`StagedItems::listed_later`]: a drag out of the file browser starts
+//! before the remote folders are walked); [`StagedItems::wait_items`] waits for it, bounded
+//! the same way.
 
 use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use tlp_desk_proto::TransferItem;
@@ -41,12 +46,19 @@ pub trait Stager: Send + Sync {
     fn state(&self) -> StageState;
     /// Stops the pull (the virtual clipboard is gone).
     fn cancel(&self);
+    /// The items, for a stager that lists them itself ([`StagedItems::listed_later`]): `None`
+    /// while the listing runs, then the items or why the listing failed (for the log). The
+    /// default suits stagers whose items were given to [`StagedItems::new`]: never asked.
+    fn listing(&self) -> Option<Result<Vec<TransferItem>, String>> {
+        None
+    }
 }
 
 /// The files of one virtual clipboard offer and where they are staged.
 pub struct StagedItems {
     dir: PathBuf,
-    items: Vec<TransferItem>,
+    /// Set at creation, or once the stager's listing arrives.
+    items: OnceLock<Vec<TransferItem>>,
     stager: Arc<dyn Stager>,
     cancelled: AtomicBool,
     /// Longest wait for the pull to start (state still [`StageState::Idle`]).
@@ -56,7 +68,7 @@ pub struct StagedItems {
 impl std::fmt::Debug for StagedItems {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StagedItems")
-            .field("items", &self.items.len())
+            .field("items", &self.items().len())
             .finish_non_exhaustive()
     }
 }
@@ -66,7 +78,19 @@ impl StagedItems {
     pub fn new(dir: PathBuf, items: Vec<TransferItem>, stager: Arc<dyn Stager>) -> Arc<Self> {
         Arc::new(Self {
             dir,
-            items,
+            items: OnceLock::from(items),
+            stager,
+            cancelled: AtomicBool::new(false),
+            start_timeout: Duration::from_secs(60),
+        })
+    }
+
+    /// Items that `stager` lists itself ([`Stager::listing`]), staged under `dir`. Until the
+    /// listing arrives [`StagedItems::items`] is empty; [`StagedItems::wait_items`] waits.
+    pub fn listed_later(dir: PathBuf, stager: Arc<dyn Stager>) -> Arc<Self> {
+        Arc::new(Self {
+            dir,
+            items: OnceLock::new(),
             stager,
             cancelled: AtomicBool::new(false),
             start_timeout: Duration::from_secs(60),
@@ -75,18 +99,61 @@ impl StagedItems {
 
     /// Like [`StagedItems::new`] with a custom start timeout (tests).
     pub fn with_start_timeout(self: Arc<Self>, timeout: Duration) -> Arc<Self> {
+        let items = match self.items.get() {
+            Some(items) => OnceLock::from(items.clone()),
+            None => OnceLock::new(),
+        };
         Arc::new(Self {
             dir: self.dir.clone(),
-            items: self.items.clone(),
+            items,
             stager: self.stager.clone(),
             cancelled: AtomicBool::new(false),
             start_timeout: timeout,
         })
     }
 
-    /// The announced items.
+    /// The items (empty while a later listing has not arrived).
     pub fn items(&self) -> &[TransferItem] {
-        &self.items
+        self.items.get().map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether the items are known (always for [`StagedItems::new`]).
+    pub fn is_listed(&self) -> bool {
+        self.items.get().is_some()
+    }
+
+    /// The items, waiting for the stager's listing if needed. `pump` is called every ~20 ms
+    /// while waiting.
+    ///
+    /// # Errors
+    /// Cancelled, the listing failed, or it did not arrive within the start timeout.
+    pub fn wait_items(&self, pump: &mut dyn FnMut()) -> io::Result<&[TransferItem]> {
+        let started = Instant::now();
+        loop {
+            if let Some(items) = self.items.get() {
+                return Ok(items);
+            }
+            if self.is_cancelled() {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"));
+            }
+            match self.stager.listing() {
+                Some(Ok(items)) => {
+                    // Another waiter may have stored it first: same list either way.
+                    let _ = self.items.set(items);
+                    continue;
+                }
+                Some(Err(why)) => return Err(io::Error::other(why)),
+                None if started.elapsed() > self.start_timeout => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "the other PC did not list the files",
+                    ));
+                }
+                None => {}
+            }
+            pump();
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// The staging folder.
@@ -113,7 +180,7 @@ impl StagedItems {
     /// The staged path of item `index` (never outside the staging folder).
     fn path_of(&self, index: usize) -> io::Result<(PathBuf, u64)> {
         let item = self
-            .items
+            .items()
             .get(index)
             .filter(|i| !i.is_dir && is_safe_rel_path(&i.rel_path))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no such file"))?;
@@ -140,6 +207,7 @@ impl StagedItems {
     /// # Errors
     /// Cancelled, the pull failed or never started, or the item is unknown.
     pub fn open(&self, index: usize, pump: &mut dyn FnMut()) -> io::Result<File> {
+        self.wait_items(pump)?;
         self.begin();
         let (path, size) = self.path_of(index)?;
         let started = Instant::now();
@@ -377,5 +445,102 @@ mod tests {
         assert!(s.open(0, &mut || {}).is_err());
         assert!(s.open(1, &mut || {}).is_err());
         assert!(s.open(99, &mut || {}).is_err());
+    }
+
+    /// Lists after a delay, then serves the files from the staging folder (already there).
+    struct Lister {
+        items: Vec<TransferItem>,
+        ready_at: Instant,
+        fail: bool,
+        begun: AtomicBool,
+    }
+
+    impl Stager for Lister {
+        fn begin(&self) {
+            self.begun.store(true, Ordering::SeqCst);
+        }
+        fn state(&self) -> StageState {
+            StageState::Finished
+        }
+        fn cancel(&self) {}
+        fn listing(&self) -> Option<Result<Vec<TransferItem>, String>> {
+            if Instant::now() < self.ready_at {
+                return None;
+            }
+            Some(if self.fail {
+                Err("listing refused".into())
+            } else {
+                Ok(self.items.clone())
+            })
+        }
+    }
+
+    fn lister(items: Vec<TransferItem>, delay: Duration, fail: bool) -> Arc<Lister> {
+        Arc::new(Lister {
+            items,
+            ready_at: Instant::now() + delay,
+            fail,
+            begun: AtomicBool::new(false),
+        })
+    }
+
+    #[test]
+    fn items_listed_later_are_waited_for_before_a_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let files = vec![("مجلد/تقرير.txt".to_string(), "نص عربي".as_bytes().to_vec())];
+        std::fs::create_dir_all(tmp.path().join("مجلد")).unwrap();
+        std::fs::write(tmp.path().join("مجلد").join("تقرير.txt"), &files[0].1).unwrap();
+        let l = lister(items_of(&files), Duration::from_millis(100), false);
+        let s = StagedItems::listed_later(tmp.path().to_path_buf(), l.clone());
+        assert!(!s.is_listed());
+        assert!(s.items().is_empty());
+        assert!(!s.is_ready(0), "nothing is ready before the listing");
+        let mut pumps = 0;
+        let mut f = s.open(0, &mut || pumps += 1).unwrap();
+        let mut got = Vec::new();
+        f.read_to_end(&mut got).unwrap();
+        assert_eq!(got, files[0].1);
+        assert!(pumps > 0, "the wait for the listing must pump messages");
+        assert!(s.is_listed());
+        assert_eq!(s.items()[0].rel_path, "مجلد/تقرير.txt");
+        assert!(
+            l.begun.load(Ordering::SeqCst),
+            "the pull starts after the listing"
+        );
+        // Listed once: later waits return at once without pumping.
+        let mut later = 0;
+        assert_eq!(s.wait_items(&mut || later += 1).unwrap().len(), 1);
+        assert_eq!(later, 0);
+    }
+
+    #[test]
+    fn a_failed_or_missing_listing_fails_the_wait() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = StagedItems::listed_later(
+            tmp.path().to_path_buf(),
+            lister(Vec::new(), Duration::ZERO, true),
+        );
+        let err = s.wait_items(&mut || {}).unwrap_err();
+        assert!(err.to_string().contains("refused"), "{err}");
+        assert!(s.open(0, &mut || {}).is_err());
+
+        let never = StagedItems::listed_later(
+            tmp.path().to_path_buf(),
+            lister(Vec::new(), Duration::from_secs(3600), false),
+        )
+        .with_start_timeout(Duration::from_millis(60));
+        let err = never.wait_items(&mut || {}).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+
+        let cancelled = StagedItems::listed_later(
+            tmp.path().to_path_buf(),
+            lister(Vec::new(), Duration::from_secs(3600), false),
+        );
+        let c2 = cancelled.clone();
+        let t = std::thread::spawn(move || c2.wait_items(&mut || {}).map(<[TransferItem]>::len));
+        std::thread::sleep(Duration::from_millis(60));
+        cancelled.cancel();
+        let err = t.join().unwrap().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
     }
 }
