@@ -3,22 +3,22 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0-rc.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.85"
 
 [workspace.dependencies]
-tlp-desk-proto = { path = "crates/tlp-desk-proto", version = "0.1.0" }
-tlp-desk-crypto = { path = "crates/tlp-desk-crypto", version = "0.1.0" }
-tlp-desk-net = { path = "crates/tlp-desk-net", version = "0.1.0" }
-tlp-desk-capture = { path = "crates/tlp-desk-capture", version = "0.1.0" }
-tlp-desk-codec = { path = "crates/tlp-desk-codec", version = "0.1.0" }
-tlp-desk-input = { path = "crates/tlp-desk-input", version = "0.1.0" }
-tlp-desk-audio = { path = "crates/tlp-desk-audio", version = "0.1.0" }
-tlp-desk-files = { path = "crates/tlp-desk-files", version = "0.1.0" }
-tlp-desk-host = { path = "crates/tlp-desk-host", version = "0.1.0" }
-tlp-desk-viewer = { path = "crates/tlp-desk-viewer", version = "0.1.0" }
+tlp-desk-proto = { path = "crates/tlp-desk-proto", version = "1.0.0-rc.1" }
+tlp-desk-crypto = { path = "crates/tlp-desk-crypto", version = "1.0.0-rc.1" }
+tlp-desk-net = { path = "crates/tlp-desk-net", version = "1.0.0-rc.1" }
+tlp-desk-capture = { path = "crates/tlp-desk-capture", version = "1.0.0-rc.1" }
+tlp-desk-codec = { path = "crates/tlp-desk-codec", version = "1.0.0-rc.1" }
+tlp-desk-input = { path = "crates/tlp-desk-input", version = "1.0.0-rc.1" }
+tlp-desk-audio = { path = "crates/tlp-desk-audio", version = "1.0.0-rc.1" }
+tlp-desk-files = { path = "crates/tlp-desk-files", version = "1.0.0-rc.1" }
+tlp-desk-host = { path = "crates/tlp-desk-host", version = "1.0.0-rc.1" }
+tlp-desk-viewer = { path = "crates/tlp-desk-viewer", version = "1.0.0-rc.1" }
 # Dev-only test harness; only ever a [dev-dependencies] entry.
 tlp-desk-testkit = { path = "crates/tlp-desk-testkit" }
 serde = { version = "1", features = ["derive"] }

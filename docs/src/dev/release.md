@@ -17,7 +17,7 @@ All three are written to `dist\` (git-ignored).
 
 ## Version number
 
-The single source is `[workspace.package] version` in the root `Cargo.toml` (currently `0.1.0`).
+The single source is `[workspace.package] version` in the root `Cargo.toml` (currently `1.0.0-rc.1`).
 Every crate inherits it; the installer scripts read it from there, `winres.rs` writes it into the
 executables' VERSIONINFO, and the setup's file name uses it. The wire protocol has its own
 `PROTOCOL_VERSION`, independent of the app version.
@@ -86,7 +86,7 @@ The setup is **not code-signed**, so SmartScreen may warn on first run; the user
 Users can check a file against `SHA256SUMS.txt`:
 
 ```powershell
-Get-FileHash .\TLP-Desk-0.1.0-setup.exe -Algorithm SHA256
+Get-FileHash .\TLP-Desk-1.0.0-rc.1-setup.exe -Algorithm SHA256
 ```
 
 The hash must match the line for that file name (case-insensitive).

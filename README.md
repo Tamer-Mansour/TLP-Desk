@@ -120,6 +120,11 @@ Windows Firewall prompt the first time.
 
 **Requirements:** Windows 10 (2004 or newer) or Windows 11, x64.
 
+**Current release:** `v1.0.0-rc.1` (release candidate). See the
+[changelog](docs/src/changelog.md), the [system test report](docs/src/dev/system-test-report.md)
+and the [two-PC manual test checklist](docs/src/user-guide/en/manual-test.md)
+([بالعربية](docs/src/user-guide/ar/manual-test.md)).
+
 ### Network ports
 
 | Port | Protocol | Purpose |
@@ -266,6 +271,7 @@ GitHub Security Advisories rather than public issues; see [SECURITY.md](SECURITY
 [الإصدارات](https://github.com/Tamer-Mansour/TLP-Desk/releases) وشغّله على الجهازين.
 
 الدليل الكامل بالعربية: [دليل المستخدم](docs/src/user-guide/ar/index.md).
+قائمة الاختبار اليدوي على جهازين: [قائمة الاختبار](docs/src/user-guide/ar/manual-test.md).
 
 </div>
 
