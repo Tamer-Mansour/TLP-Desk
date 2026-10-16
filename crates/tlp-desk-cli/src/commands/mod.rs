@@ -21,6 +21,7 @@ pub mod remote_fs;
 pub mod rm;
 pub mod send_file;
 pub mod serve;
+pub mod set_password;
 pub mod typing;
 pub mod wol;
 // FEATURE HOOK: `pub mod <command>;` for new subcommands.
@@ -98,6 +99,9 @@ pub enum Cmd {
     SendFile(send_file::SendFileArgs),
     /// Viewer: download files and folders from a host (--to <local folder>).
     GetFile(get_file::GetFileArgs),
+    /// Host: set the permanent unattended-access password from the TLP_DESK_PASSWORD
+    /// environment variable, or remove it with --remove.
+    SetPassword(set_password::SetPasswordArgs),
     // FEATURE HOOK: one variant per new subcommand.
 }
 
@@ -136,6 +140,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
         Cmd::Mv(a) => mv::run(&ctx, a).await,
         Cmd::SendFile(a) => send_file::run(&ctx, a).await,
         Cmd::GetFile(a) => get_file::run(&ctx, a).await,
+        Cmd::SetPassword(a) => set_password::run(&ctx, a),
         // FEATURE HOOK: one arm per new subcommand.
     }
 }
@@ -382,6 +387,7 @@ mod tests {
             &["serve", "--name", "مكتب"],
             &["connect", "123456789", "--code", "042917"],
             &["info", "123456789", "--code", "042917"],
+            &["set-password", "--remove"],
             &["wol", "01:23:45:67:89:ab"],
             &["exec-wol", "مكتب"],
             &[

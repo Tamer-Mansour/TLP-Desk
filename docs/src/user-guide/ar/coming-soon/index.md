@@ -9,7 +9,6 @@
 | الميزة | المرحلة |
 |---|---|
 | [دفتر العناوين](address-book.md) | M2 |
-| [الوصول غير المراقَب](unattended-access.md) | M3 |
 | [Ctrl+Alt+Del والقفل](ctrl-alt-del.md) | M3 |
 | [وضع الخصوصية](privacy-mode.md) | M3 |
 | [التشغيل عبر الشبكة (Wake-on-LAN)](wake-on-lan.md) | M4 |

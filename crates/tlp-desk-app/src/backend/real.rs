@@ -13,6 +13,8 @@
 //!
 //! Nothing here contacts anything outside the local network.
 
+mod unattended;
+
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
@@ -20,14 +22,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use tlp_desk_crypto::{Fingerprint, HostKey, Identity};
+use tlp_desk_crypto::{
+    Fingerprint, HostKey, Identity, PasswordStore, TicketStore, DEFAULT_TICKET_TTL, TICKETS_FILE,
+};
 use tlp_desk_files::clipfiles::ClipFilesConfig;
 use tlp_desk_files::fs::FsConfig;
 use tlp_desk_files::{FileTransfer, FilesError, TransferConfig, TransferSnapshot, TransferState};
 use tlp_desk_host::{
     CancelReason, EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, HostTunnels,
-    RequestId as HostRequestId, SessionId as HostSessionId, TunnelHostConfig, WhiteboardHost,
-    DEFAULT_PERMISSIONS, TUNNEL_FEATURE,
+    RequestId as HostRequestId, SessionId as HostSessionId, SystemPower, TunnelHostConfig,
+    UnattendedFeature, WhiteboardHost, WindowsPower, DEFAULT_PERMISSIONS, TUNNEL_FEATURE,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
@@ -36,8 +40,8 @@ use tlp_desk_net::{
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 use tlp_desk_viewer::{
     AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, ForwardSpec,
-    KnownHostsStore, PixelFormat, TunnelId, TunnelViewerConfig, Viewer, ViewerConfig, ViewerError,
-    ViewerEvent, ViewerEvents, ViewerSession, ViewerTunnels,
+    KnownHostsStore, PixelFormat, ReconnectTickets, TunnelId, TunnelViewerConfig, Viewer,
+    ViewerConfig, ViewerError, ViewerEvent, ViewerEvents, ViewerSession, ViewerTunnels,
 };
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
@@ -78,6 +82,12 @@ pub struct RealConfig {
     pub host: HostConfig,
     /// Start a browse-only discovery when the host (and its discovery) is unavailable.
     pub fallback_discovery: bool,
+    /// Restarts / locks this machine when a viewer with `RESTART` / `SYSTEM` asks (TLP-unattended).
+    /// Tests that exercise those requests must swap in a fake.
+    pub power: Arc<dyn SystemPower>,
+    /// Grant `RESTART` and `SYSTEM` (restart, lock, Ctrl+Alt+Del) to new sessions in addition
+    /// to `host.default_permissions`, so unattended access can restart and lock (TLP-unattended).
+    pub system_permissions: bool,
     // --- audio (TLP-audio) ---
     /// Sound devices (tests use [`AudioDevices::fake`]).
     pub audio: AudioDevices,
@@ -109,6 +119,8 @@ impl Default for RealConfig {
                 ..HostConfig::default()
             },
             fallback_discovery: true,
+            power: Arc::new(WindowsPower),
+            system_permissions: true,
             audio: AudioDevices::default(),
             host_settings: None,
             connection_log: None,
@@ -121,6 +133,9 @@ impl Default for RealConfig {
 /// Real implementation of [`Backend`].
 pub struct RealBackend {
     inner: Arc<Inner>,
+    /// Background loops (they hold the shared state); stopped on drop so the endpoint, and
+    /// with it the UDP port, is released when the backend goes away.
+    tasks: Vec<AbortHandle>,
 }
 
 struct Bridge {
@@ -146,6 +161,10 @@ struct Inner {
     /// File transfer engine shared by host and viewer sessions (lane files-transfer).
     files: Arc<FileTransfer>,
     state: Mutex<State>,
+    /// Reconnect tickets received from hosts we asked to restart (TLP-unattended).
+    keeper: ReconnectTickets,
+    /// Where the permanent password's verifier lives (`None` without an identity).
+    password_store: Option<PasswordStore>,
     audio: AudioBridge,
     /// Connection log (TLP-settings-tray).
     log: Recorder,
@@ -169,6 +188,10 @@ struct State {
     /// Remembered keys that failed with `HostKeyChanged`, per attempt.
     changed_keys: HashMap<AttemptId, HostKey>,
     last_devices: Option<Vec<DiscoveredDevice>>,
+    /// Permanent password state shown in Settings (TLP-unattended).
+    password: super::unattended::PasswordState,
+    /// Viewer sessions waiting for their restarted host (TLP-unattended).
+    reconnects: HashMap<SessionId, AbortHandle>,
     /// Who is behind each open accept prompt (to log declines and timeouts).
     request_peers: HashMap<HostRequestId, tlp_desk_net::PeerInfo>,
 }
@@ -400,6 +423,19 @@ impl RealBackend {
             }
         }
 
+        // Unattended access (TLP-unattended): permanent password, reconnect tickets, restart.
+        let password_store = identity.as_ref().map(|_| PasswordStore::new(&cfg.data_dir));
+        let stored_password = password_store.as_ref().and_then(|s| {
+            s.load()
+                .map_err(|e| tracing::warn!(%e, "cannot read the permanent password; disabled"))
+                .ok()
+                .flatten()
+        });
+        let tickets = TicketStore::load(&cfg.data_dir.join(TICKETS_FILE), DEFAULT_TICKET_TTL)
+            .unwrap_or_else(|e| {
+                tracing::warn!(%e, "cannot read reconnect tickets; starting empty");
+                TicketStore::in_memory(DEFAULT_TICKET_TTL)
+            });
         let audio = AudioBridge::new(&cfg.audio);
         let host_tunnels = HostTunnels::new(TunnelHostConfig::default());
         let tunnels = ViewerTunnels::new(TunnelViewerConfig::default());
@@ -430,6 +466,20 @@ impl RealBackend {
             if let Some(s) = &cfg.host_settings {
                 host_cfg = settings_tray::host_config(host_cfg, s);
             }
+            if host_cfg.password.is_none() {
+                host_cfg.password = stored_password.clone();
+            }
+            host_cfg.reconnect_tickets = Some(tickets.clone());
+            host_cfg.features.push(Arc::new(UnattendedFeature::new(
+                Some(tickets.clone()),
+                cfg.power.clone(),
+            )));
+            if cfg.system_permissions {
+                host_cfg.default_permissions = host_cfg
+                    .default_permissions
+                    .union(Permissions::RESTART)
+                    .union(Permissions::SYSTEM);
+            }
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
                 Ok((h, ev)) => {
                     whiteboard.set_monitor_source(h.streamed_monitor_fn());
@@ -452,6 +502,7 @@ impl RealBackend {
         }
 
         let bridges: Bridges = Arc::default();
+        let keeper = ReconnectTickets::new();
         let viewer = endpoint.as_ref().and_then(|(ep, _)| {
             let bridges = bridges.clone();
             let repaint = repaint.clone();
@@ -488,6 +539,7 @@ impl RealBackend {
                 ..ViewerConfig::default()
             };
             vcfg.features.push(tunnels.clone());
+            vcfg.features.push(keeper.feature());
             chat.register_viewer(&mut vcfg);
             match Viewer::new(ep.clone(), vcfg) {
                 Ok(v) => Some(v),
@@ -515,6 +567,8 @@ impl RealBackend {
             chat,
             files,
             state: Mutex::default(),
+            keeper,
+            password_store: password_store.clone(),
             audio,
             log: Recorder::new(cfg.connection_log.clone().map(LogStore::new)),
             tunnels,
@@ -530,17 +584,24 @@ impl RealBackend {
             one_time_code: inner.current_code(),
         };
         lock(&inner.state).local = Some(local);
+        lock(&inner.state).password = super::unattended::PasswordState {
+            set: inner.host.is_some() && stored_password.is_some(),
+            machine_wide: super::unattended::is_machine_wide(&cfg.data_dir),
+            admin: false,
+        };
 
         if let Some(p) = problem {
             inner.emit(BackendEvent::HostUnavailable(p));
         }
+        let mut tasks = Vec::new();
         if let Some(ev) = host_events {
-            rt.spawn(inner.clone().pump_host(ev));
+            tasks.push(rt.spawn(inner.clone().pump_host(ev)).abort_handle());
         }
-        rt.spawn(inner.clone().pump_files());
-        rt.spawn(inner.clone().pump_devices());
-        rt.spawn(inner.clone().reconcile_loop());
-        (Arc::new(RealBackend { inner }), rx)
+        tasks.push(rt.spawn(inner.clone().pump_devices()).abort_handle());
+        tasks.push(rt.spawn(inner.clone().reconcile_loop()).abort_handle());
+        tasks.push(rt.spawn(inner.clone().probe_elevation()).abort_handle());
+        tasks.push(rt.spawn(inner.clone().pump_files()).abort_handle());
+        (Arc::new(RealBackend { inner, tasks }), rx)
     }
 }
 
@@ -940,14 +1001,27 @@ impl Inner {
         target: ConnectTarget,
         code: Option<String>,
     ) {
-        let auth = if code.as_deref().is_some_and(|c| !c.trim().is_empty()) {
-            LogAuth::OneTimeCode
-        } else {
-            LogAuth::AcceptPrompt
+        let auth = match code {
+            Some(c) if !c.trim().is_empty() => AuthMethod::OneTimeCode(c),
+            _ => AuthMethod::AcceptPrompt,
         };
-        let result = self.dial(attempt, target, code).await;
+        self.run_attempt_auth(attempt, target, auth).await;
+    }
+
+    async fn run_attempt_auth(
+        self: Arc<Self>,
+        attempt: AttemptId,
+        target: ConnectTarget,
+        auth: AuthMethod,
+    ) {
+        let log_auth = match &auth {
+            AuthMethod::Password(_) | AuthMethod::ReconnectTicket(_) => LogAuth::Password,
+            AuthMethod::OneTimeCode(_) => LogAuth::OneTimeCode,
+            AuthMethod::AcceptPrompt => LogAuth::AcceptPrompt,
+        };
+        let result = self.dial(attempt, target, auth).await;
         match result {
-            Ok((session, events)) => self.session_started(attempt, session, events, auth),
+            Ok((session, events)) => self.session_started(attempt, session, events, log_auth),
             Err(e) => {
                 tracing::info!(attempt = attempt.0, %e, "connect failed");
                 let error = map_viewer_error(&e);
@@ -968,7 +1042,7 @@ impl Inner {
         self: &Arc<Self>,
         attempt: AttemptId,
         target: ConnectTarget,
-        code: Option<String>,
+        auth: AuthMethod,
     ) -> Result<(ViewerSession, ViewerEvents), ViewerError> {
         let Some(viewer) = &self.viewer else {
             return Err(ViewerError::Unreachable(
@@ -982,10 +1056,6 @@ impl Inner {
             },
             ConnectTarget::Address(sa) => ViewerTarget::Addr(sa),
             ConnectTarget::Name(n) => ViewerTarget::Name(n),
-        };
-        let auth = match code {
-            Some(c) if !c.trim().is_empty() => AuthMethod::OneTimeCode(c),
-            _ => AuthMethod::AcceptPrompt,
         };
         let me = Arc::downgrade(self);
         let hook: AwaitingAcceptFn = Arc::new(move || {
@@ -1044,6 +1114,7 @@ impl Inner {
 
     async fn pump_viewer(self: Arc<Self>, session: SessionId, mut events: ViewerEvents) {
         let mut reason = EndReason::Error("session event stream closed".into());
+        let mut raw_end = None;
         while let Some(ev) = events.recv().await {
             match ev {
                 ViewerEvent::PermissionsChanged(permissions) => {
@@ -1119,6 +1190,7 @@ impl Inner {
                     }
                 }
                 ViewerEvent::Ended(r) => {
+                    raw_end = Some(r.clone());
                     let (end, detail) = settings_tray::viewer_end(&r);
                     self.log.end(Direction::Outgoing, session.0, end, detail);
                     reason = map_viewer_end(r);
@@ -1129,9 +1201,23 @@ impl Inner {
         // Stream closed without an `Ended` (no-op if it was already logged).
         self.log
             .end(Direction::Outgoing, session.0, LogEnd::Error, None);
-        self.state().viewer_sessions.remove(&session);
-        lock(&self.bridges).retain(|b| b.session != session);
+        let old = self.state().viewer_sessions.remove(&session);
+        let dst = {
+            let mut bridges = lock(&self.bridges);
+            let dst = bridges
+                .iter()
+                .find(|b| b.session == session)
+                .map(|b| b.dst.clone());
+            bridges.retain(|b| b.session != session);
+            dst
+        };
         self.recorders.stop(session, &self.rt, self.emitter());
+        // A host we asked to restart left a ticket: wait for it instead of ending.
+        if let (Some(old), Some(raw)) = (&old, &raw_end) {
+            if self.try_start_reconnect(session, old, raw, dst) {
+                return;
+            }
+        }
         self.emit(BackendEvent::SessionEnded { session, reason });
     }
 }
@@ -1231,6 +1317,38 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn connect_with_password(&self, target: ConnectTarget, password: String) -> AttemptId {
+        let attempt = AttemptId(self.inner.next_id());
+        let me = Arc::clone(&self.inner);
+        let mut st = self.inner.state();
+        let handle = self
+            .inner
+            .rt
+            .spawn(me.run_attempt_auth(attempt, target, AuthMethod::Password(password)))
+            .abort_handle();
+        st.attempts.insert(attempt, handle);
+        attempt
+    }
+
+    fn set_unattended_password(&self, current: Option<String>, new: Option<String>) {
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(me.change_password(current, new));
+    }
+
+    fn unattended_password_state(&self) -> super::unattended::PasswordState {
+        self.inner.password_state()
+    }
+
+    fn system_action(&self, session: SessionId, action: super::unattended::SystemAction) {
+        self.inner.system_action(session, action);
+    }
+
+    fn cancel_reconnect(&self, session: SessionId) {
+        if !self.inner.cancel_reconnect(session) {
+            self.disconnect(session);
         }
     }
 
@@ -1407,6 +1525,9 @@ impl Backend for RealBackend {
     }
 
     fn disconnect(&self, session: SessionId) {
+        if self.inner.cancel_reconnect(session) {
+            return;
+        }
         let (viewer, host) = {
             let st = self.inner.state();
             (
@@ -1587,6 +1708,12 @@ impl Drop for RealBackend {
             // Let the Bye messages leave (they are sent on the runtime's worker threads).
             std::thread::sleep(Duration::from_millis(150));
             ep.close();
+        }
+        for h in self.inner.state().reconnects.values() {
+            h.abort();
+        }
+        for t in &self.tasks {
+            t.abort();
         }
         // Sessions whose end events did not arrive in time are logged as "app closed".
         self.inner.log.close_all();

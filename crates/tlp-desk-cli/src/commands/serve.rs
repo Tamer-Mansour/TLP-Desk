@@ -4,7 +4,7 @@ use std::io::{BufRead, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Args;
 use serde_json::json;
 use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
@@ -216,7 +216,11 @@ fn tunnel_event(
 
 /// Runs `serve` until Ctrl+C.
 pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
-    let cfg = args.host_config();
+    let mut cfg = args.host_config();
+    // Unattended access: the permanent password set in the app (only its verifier is stored).
+    cfg.password = tlp_desk_crypto::PasswordStore::new(&ctx.data_dir)
+        .load()
+        .context("cannot read the permanent password")?;
     let auto_accept = args.auto_accept;
     let identity = load_identity(&ctx.data_dir)?;
     let name = cfg.device_name.clone();

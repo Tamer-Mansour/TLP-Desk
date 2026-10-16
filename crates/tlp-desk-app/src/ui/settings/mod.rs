@@ -84,6 +84,9 @@ impl App {
                         ui.add_space(12.0);
                         self.incoming_card(ui);
                         ui.add_space(12.0);
+                        // Permanent password for unattended access (TLP-unattended).
+                        self.unattended.settings_card(ui, tx, self.backend.as_ref());
+                        ui.add_space(12.0);
                         self.allow_list_card(ui);
                         ui.add_space(12.0);
                         self.quality_card(ui);

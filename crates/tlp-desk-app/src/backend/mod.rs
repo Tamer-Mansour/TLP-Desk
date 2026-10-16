@@ -28,6 +28,7 @@ pub mod files;
 pub mod files_bridge;
 pub mod files_fake;
 pub mod real;
+pub mod unattended;
 // TLP-settings-tray: host settings + connection-log glue for the real backend.
 pub mod recording;
 pub(crate) mod settings_tray;
@@ -427,6 +428,27 @@ pub enum BackendEvent {
 
     // --- power: WOL, recording, tunnels, whiteboard, connection log, device info (TLP-power) ---
 
+    // --- unattended: permanent password, restart + reconnect, lock (TLP-unattended) ---
+    /// The permanent password's state (at startup and after every change).
+    PasswordState(unattended::PasswordState),
+    /// Answer to [`Backend::set_unattended_password`].
+    PasswordChanged(Result<unattended::PasswordChange, unattended::PasswordError>),
+    /// Viewer: the remote PC went down for the restart we asked for; the backend now waits
+    /// for it and reconnects with the ticket. The session stays open (no `SessionEnded`).
+    RemoteRestarting { session: SessionId },
+    /// Viewer: reconnect try number `attempt` (1-based) is starting.
+    ReconnectAttempt { session: SessionId, attempt: u32 },
+    /// Viewer: back in after the restart; frames arrive in the same [`FrameSlot`] again.
+    Reconnected {
+        session: SessionId,
+        permissions: Permissions,
+    },
+    /// Viewer: the remote PC did not come back (or refused the ticket). `SessionEnded` follows.
+    ReconnectFailed {
+        session: SessionId,
+        error: ConnectError,
+    },
+
     // --- device info (TLP-cli-devinfo) ---
     /// The host answered [`Backend::request_device_info`] (already sanitized).
     DeviceInfo {
@@ -675,6 +697,43 @@ pub trait Backend: Send + Sync {
     }
 
     // --- power (TLP-power) ---
+
+    // --- unattended (TLP-unattended) ---
+    /// Start connecting with the host's permanent unattended-access password (never logged).
+    /// Same events as [`Backend::connect`]. Backends without password support fall back to
+    /// asking the host user to accept.
+    fn connect_with_password(&self, target: ConnectTarget, password: String) -> AttemptId {
+        drop(password);
+        self.connect(target, None)
+    }
+
+    /// Host side: set (`new: Some`) or remove (`new: None`) the permanent password. `current`
+    /// must match the stored one unless none is set or this process is elevated. The result
+    /// arrives as [`BackendEvent::PasswordChanged`] and a new [`BackendEvent::PasswordState`].
+    fn set_unattended_password(&self, current: Option<String>, new: Option<String>) {
+        let _ = (current, new);
+        tracing::debug!("set_unattended_password not supported by this backend");
+    }
+
+    /// Current state of the permanent password (also pushed as `PasswordState`).
+    fn unattended_password_state(&self) -> unattended::PasswordState {
+        unattended::PasswordState::default()
+    }
+
+    /// Viewer side: ask the host to restart / lock / press Ctrl+Alt+Del. The UI asks for
+    /// confirmation first; the host enforces `RESTART` / `SYSTEM`.
+    fn system_action(&self, session: SessionId, action: unattended::SystemAction) {
+        tracing::debug!(
+            session = session.0,
+            ?action,
+            "system_action not supported by this backend"
+        );
+    }
+
+    /// Viewer side: stop waiting for a restarting PC. `SessionEnded { Local }` follows.
+    fn cancel_reconnect(&self, session: SessionId) {
+        self.disconnect(session);
+    }
 
     // --- address book + Wake-on-LAN (TLP-addressbook) ---
     /// MAC address of the LAN neighbour `ip`, read from the OS neighbour (ARP) cache. Reads

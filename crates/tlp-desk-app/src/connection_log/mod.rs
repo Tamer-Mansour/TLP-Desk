@@ -55,7 +55,9 @@ pub fn log_auth(kind: tlp_desk_net::AuthKind) -> LogAuth {
     match kind {
         tlp_desk_net::AuthKind::AcceptPrompt => LogAuth::AcceptPrompt,
         tlp_desk_net::AuthKind::OneTimeCode => LogAuth::OneTimeCode,
-        tlp_desk_net::AuthKind::Password => LogAuth::Password,
+        tlp_desk_net::AuthKind::Password | tlp_desk_net::AuthKind::ReconnectTicket => {
+            LogAuth::Password
+        }
     }
 }
 

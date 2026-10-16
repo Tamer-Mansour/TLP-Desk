@@ -460,6 +460,30 @@ pub fn wol_sent(mac: &str, to: &str) -> String {
     )
 }
 
+// --- permanent password ---
+
+pub fn password_removed() -> String {
+    t(
+        "Permanent password removed: password sign-in is off.".to_owned(),
+        "أُزيلت كلمة المرور الدائمة: تسجيل الدخول بكلمة المرور متوقف.".to_owned(),
+    )
+}
+
+pub fn password_set(path: &str) -> String {
+    t(
+        format!("Permanent password set (only its Argon2id verifier is stored, in {path})."),
+        format!("عُيّنت كلمة المرور الدائمة (يُخزَّن فقط ناتج Argon2id الخاص بها، في {path})."),
+    )
+}
+
+pub fn password_too_short() -> String {
+    let n = tlp_desk_crypto::MIN_PASSWORD_CHARS;
+    t(
+        format!("The password is too short: use at least {n} characters."),
+        format!("كلمة المرور قصيرة جدًا: استخدم {n} أحرف على الأقل."),
+    )
+}
+
 // --- device info ---
 
 /// `bytes` in binary units with one decimal (`16.0 GiB` / `16.0 غ.ب`).

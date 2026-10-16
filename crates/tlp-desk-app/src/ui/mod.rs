@@ -18,5 +18,6 @@ pub mod settings;
 pub mod theme;
 pub mod transfers;
 pub mod tunnels;
+pub mod unattended;
 pub mod whiteboard;
 pub mod widgets;

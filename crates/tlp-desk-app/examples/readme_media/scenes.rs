@@ -91,6 +91,11 @@ pub const SCENES: &[Scene] = &[
         setup: settings_incoming,
     },
     Scene {
+        name: "settings-unattended",
+        about: "settings: permanent password for unattended access",
+        setup: settings_unattended,
+    },
+    Scene {
         name: "settings-network",
         about: "settings: allowed networks (CIDR list), picture quality, start-up and tray",
         setup: settings_network,
@@ -308,10 +313,15 @@ fn settings_incoming(app: &mut App, lang: Lang) {
     app.settings_ui.scroll_offset = Some(430.0);
 }
 
+fn settings_unattended(app: &mut App, lang: Lang) {
+    settings(app, lang);
+    app.settings_ui.scroll_offset = Some(800.0);
+}
+
 fn settings_network(app: &mut App, lang: Lang) {
     settings(app, lang);
     app.settings.host.allow_list = vec!["192.168.1.0/24".into(), "10.8.0.0/16".into()];
-    app.settings_ui.scroll_offset = Some(1000.0);
+    app.settings_ui.scroll_offset = Some(1390.0);
 }
 
 fn connection_log(app: &mut App, lang: Lang) {

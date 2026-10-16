@@ -11,7 +11,10 @@
 //!   input it receives (crosshair at the pointer, indicators for buttons/keys/wheel);
 //! * the fake host has two monitors (1280x720 primary, 1024x768 secondary with a warm-tinted
 //!   pattern) that can be switched with [`Backend::select_monitor`];
-//! * a simulated incoming connection request arrives ~6 s after start.
+//! * a simulated incoming connection request arrives ~6 s after start;
+//! * unattended (TLP-unattended): password sign-in succeeds unless the password starts with
+//!   'wrong' (wrong credentials) or is 'locked' (locked out); the permanent password can be set
+//!   and removed; 'Restart remote PC' goes down after ~1.5 s, retries three times and comes back.
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -79,6 +82,8 @@ struct State {
     requests: HashMap<RequestId, PeerInfo>,
     /// The simulated "reinstalled" host at 192.168.1.66 has a changed key until forgotten.
     key_changed: bool,
+    /// Permanent password of the fake host (in memory only; TLP-unattended).
+    password: Option<String>,
     rng: u64,
     /// Simulated port forwarding rules per viewer session (TLP-tunnel).
     tunnels: HashMap<SessionId, Vec<TunnelRow>>,
@@ -133,6 +138,7 @@ impl FakeBackend {
                 sessions: HashMap::new(),
                 requests: HashMap::new(),
                 key_changed: true,
+                password: None,
                 rng,
                 tunnels: HashMap::new(),
             }),
@@ -652,6 +658,91 @@ impl Backend for FakeBackend {
             session,
             monitors: fake_monitors(),
             active: index,
+        });
+    }
+
+    fn connect_with_password(&self, target: ConnectTarget, password: String) -> AttemptId {
+        let refused = if password.starts_with("wrong") {
+            Some(tlp_desk_proto::RejectReason::WrongCredentials)
+        } else if password == "locked" {
+            Some(tlp_desk_proto::RejectReason::RateLimited)
+        } else {
+            None
+        };
+        match refused {
+            // Like a code login (no accept prompt), with a placeholder code.
+            None => self.connect(target, Some("000000".into())),
+            Some(reason) => {
+                let attempt = AttemptId(self.inner.next_id());
+                let me = Arc::clone(&self.inner);
+                self.inner.rt.spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(600)).await;
+                    me.emit(BackendEvent::ConnectFailed {
+                        attempt,
+                        error: ConnectError::Rejected(reason),
+                    });
+                });
+                attempt
+            }
+        }
+    }
+
+    fn set_unattended_password(&self, current: Option<String>, new: Option<String>) {
+        use super::unattended::{PasswordChange, PasswordError};
+        let result = {
+            let mut st = self.inner.state();
+            if st.password.is_some() && st.password != current {
+                Err(PasswordError::WrongCurrent)
+            } else if new.as_ref().is_some_and(|n| n.chars().count() < 8) {
+                Err(PasswordError::TooShort)
+            } else {
+                let set = new.is_some();
+                st.password = new;
+                Ok(if set {
+                    PasswordChange::Set
+                } else {
+                    PasswordChange::Removed
+                })
+            }
+        };
+        self.inner.emit(BackendEvent::PasswordChanged(result));
+        self.inner.emit(BackendEvent::PasswordState(
+            self.unattended_password_state(),
+        ));
+    }
+
+    fn unattended_password_state(&self) -> super::unattended::PasswordState {
+        super::unattended::PasswordState {
+            set: self.inner.state().password.is_some(),
+            machine_wide: true,
+            admin: false,
+        }
+    }
+
+    fn system_action(&self, session: SessionId, action: super::unattended::SystemAction) {
+        if action != super::unattended::SystemAction::Restart
+            || !self.inner.state().sessions.contains_key(&session)
+        {
+            return;
+        }
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            me.emit(BackendEvent::RemoteRestarting { session });
+            for attempt in 1..=3 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if !me.state().sessions.contains_key(&session) {
+                    return; // stopped waiting
+                }
+                me.emit(BackendEvent::ReconnectAttempt { session, attempt });
+            }
+            tokio::time::sleep(Duration::from_millis(800)).await;
+            if me.state().sessions.contains_key(&session) {
+                me.emit(BackendEvent::Reconnected {
+                    session,
+                    permissions: Permissions::ALL,
+                });
+            }
         });
     }
 
