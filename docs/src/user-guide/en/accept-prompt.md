@@ -32,8 +32,7 @@ Click **Accept** to let them in, or **Decline** to refuse. If you do nothing for
 request is declined automatically. If the other person cancels first, the prompt disappears.
 
 **What Accept allows:** the other person can **see your screen and use your mouse and keyboard**.
-Nothing else — no files, no clipboard, no audio (those features are not available yet, and will need
-their own permission).
+Nothing else — no files, no clipboard, no sound (those features need their own permission).
 
 Only accept people you know and expect. If prompts keep appearing from a PC you do not recognise,
 decline them; after more than 5 requests in a minute TLP-Desk blocks that PC for 10 minutes.
