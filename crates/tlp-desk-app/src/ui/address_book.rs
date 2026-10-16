@@ -514,7 +514,7 @@ impl AddressBookUi {
     }
 
     fn toolbar_ui(&mut self, ui: &mut Ui, tx: Tx) {
-        let resp = theme::row(ui, tx.rtl(), |ui| {
+        theme::row(ui, tx.rtl(), |ui| {
             let weak = ui.visuals().weak_text_color();
             icons::icon(ui, tx, Icon::Search, 18.0, weak);
             let w = (ui.available_width() - 8.0).max(120.0);
@@ -527,7 +527,6 @@ impl AddressBookUi {
                 w,
             )
         });
-        widgets::edit_preview(ui, tx, &resp, &self.query);
         theme::row(ui, tx.rtl(), |ui| {
             let groups = self.book.groups();
             let label = match &self.filter {

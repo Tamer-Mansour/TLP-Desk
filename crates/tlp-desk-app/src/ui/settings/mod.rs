@@ -180,7 +180,7 @@ impl App {
                 widgets::icon_heading(ui, tx, Icon::Laptop, tx.t(S::ThisDeviceSettings));
                 ui.add_space(6.0);
                 ui.label(theme::caption(ui, tx.t(S::DeviceName)));
-                let resp = theme::row(ui, tx.rtl(), |ui| {
+                theme::row(ui, tx.rtl(), |ui| {
                     let w = (ui.available_width() - 100.0).max(160.0);
                     let hint = tx.t(S::DeviceName);
                     let resp =
@@ -200,7 +200,6 @@ impl App {
                     }
                     resp
                 });
-                widgets::edit_preview(ui, tx, &resp, &self.name_edit);
                 ui.label(theme::caption(ui, tx.t(S::DeviceNameHint)));
                 if self.renamed {
                     ui.label(theme::caption(ui, tx.t(S::DeviceNameRestart)));

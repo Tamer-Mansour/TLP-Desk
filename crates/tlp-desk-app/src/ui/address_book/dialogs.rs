@@ -1,13 +1,12 @@
 //! Address book dialogs: add / edit, delete confirmation, import / export.
 
-use std::sync::Arc;
-
-use eframe::egui::{self, text::LayoutJob, Align, Galley, Id, RichText, TextBuffer, Ui};
+use eframe::egui::{self, Align, Id, RichText, Ui};
 
 use super::{ago_raw, AddressBookUi, Dialog, EditForm};
 use crate::address_book::{Entry, MacSource, UnixTime};
 use crate::backend::DeviceId;
-use crate::i18n::{has_rtl, shape_for_edit, BaseDir, Tx, S};
+use crate::i18n::{has_rtl, Tx, S};
+use crate::ui::bidi_edit::{BidiEdit, NewlineKey};
 use crate::ui::icons::{self, Icon};
 use crate::ui::{theme, widgets};
 
@@ -171,8 +170,7 @@ impl AddressBookUi {
                 widgets::icon_heading(ui, tx, icon, tx.t(title));
                 ui.add_space(4.0);
                 let w = ui.available_width();
-                let resp = labeled_field(ui, tx, S::AbFilePath, "ab-file-path", &mut path, "", w);
-                widgets::edit_preview(ui, tx, &resp, &path);
+                labeled_field(ui, tx, S::AbFilePath, "ab-file-path", &mut path, "", w);
                 ui.add_space(8.0);
                 theme::row(ui, tx.rtl(), |ui| {
                     let ok = widgets::primary_icon_button(ui, tx, icon, tx.t(action));
@@ -255,42 +253,24 @@ fn labeled_field(
     width: f32,
 ) -> egui::Response {
     ui.label(theme::caption(ui, tx.t(label)));
-    let resp = widgets::text_field(ui, tx, id_salt, value, hint, width);
-    widgets::edit_preview(ui, tx, &resp, value);
-    resp
+    widgets::text_field(ui, tx, id_salt, value, hint, width)
 }
 
-/// Multi-line notes. Like [`widgets::text_field`]: shown in visual order when not focused,
-/// one line at a time (each line is a permutation of itself, so egui's cursor stays valid).
+/// Multi-line notes. Text with Arabic is edited by [`BidiEdit`] (visual order, bidi caret).
 fn notes_field(ui: &mut Ui, tx: Tx, value: &mut String, width: f32) -> egui::Response {
     let id = ui.make_persistent_id("ab-edit-notes");
-    let focused = ui.memory(|m| m.has_focus(id));
-    let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| -> Arc<Galley> {
-        let raw = buf.as_str();
-        let text = if focused {
-            raw.to_owned()
-        } else {
-            raw.split('\n')
-                .map(|l| shape_for_edit(l, BaseDir::Auto).unwrap_or_else(|| l.to_owned()))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        // Pre-ordered RTL lines must not be soft-wrapped (see theme::apply_lang).
-        let wrap = if has_rtl(raw) {
-            f32::INFINITY
-        } else {
-            wrap_width
-        };
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        let job = LayoutJob::simple(text, font, ui.visuals().text_color(), wrap);
-        ui.fonts_mut(|f| f.layout_job(job))
-    };
+    if has_rtl(value) {
+        return BidiEdit::new(value, id)
+            .width(width)
+            .multiline(3, NewlineKey::Enter)
+            .default_rtl(tx.rtl())
+            .show(ui);
+    }
     ui.add(
         egui::TextEdit::multiline(value)
             .id(id)
             .desired_width(width)
             .desired_rows(3)
-            .horizontal_align(if tx.rtl() { Align::Max } else { Align::Min })
-            .layouter(&mut layouter),
+            .horizontal_align(if tx.rtl() { Align::Max } else { Align::Min }),
     )
 }

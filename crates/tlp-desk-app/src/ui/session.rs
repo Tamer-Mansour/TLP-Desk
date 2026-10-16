@@ -23,7 +23,7 @@ use crate::i18n::{format, ltr_isolate, Tx, S};
 use crate::input_map;
 use crate::keygrab::KeyGrab;
 use crate::settings::QualityChoice;
-use crate::text_route::{TextRoute, TextRouter};
+use crate::text_route::TextRouter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
@@ -894,6 +894,7 @@ mod tests {
     use super::*;
     use crate::backend::{AttemptId, ConnectTarget, DeviceId, LocalInfo, RequestId, VideoImage};
     use crate::i18n::{DigitStyle, Lang};
+    use crate::text_route::TextRoute;
     use eframe::egui::{pos2, vec2};
     use std::sync::Mutex;
 

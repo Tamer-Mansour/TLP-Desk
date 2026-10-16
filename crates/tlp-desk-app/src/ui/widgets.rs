@@ -1,21 +1,18 @@
 //! Small reusable widgets that know about RTL.
 
-use std::sync::Arc;
+use eframe::egui::{self, Align, Id, Response, Ui};
 
-use eframe::egui::{self, text::LayoutJob, Align, Galley, Id, Response, TextBuffer, Ui};
-
+use super::bidi_edit::BidiEdit;
 use super::icons::{self, Icon};
 use super::theme;
-use crate::i18n::{has_rtl, shape_for_edit, BaseDir, Tx, S};
+use crate::i18n::{has_rtl, Tx, S};
 
-/// Single-line text field that stores **logical-order UTF-8** and handles Arabic as well as
-/// egui allows:
+/// Single-line text field that stores **logical-order UTF-8** and handles Arabic properly.
 ///
-/// * not focused: the text is shown in correct visual order via a custom layouter (the display
-///   string is a permutation of the input, so egui's cursor indices stay valid);
-/// * focused: egui edits the raw logical text. egui still shapes each Arabic word (joined
-///   letters), but words are laid out left-to-right and the caret moves left-to-right — egui
-///   has no bidi caret. Call [`edit_preview`] to show the correctly ordered text underneath.
+/// Text without right-to-left characters is edited by egui's own `TextEdit`. As soon as the
+/// text contains Arabic (or Hebrew, ...) the field is edited by [`BidiEdit`] instead: words in
+/// visual order, a caret that moves with the arrow keys on screen, selection, Backspace/Delete
+/// by letter. The caret and focus carry over when the field switches between the two.
 ///
 /// The field is right-aligned in RTL UI.
 pub fn text_field(
@@ -27,43 +24,19 @@ pub fn text_field(
     width: f32,
 ) -> Response {
     let id = ui.make_persistent_id(id_salt);
-    let focused = ui.memory(|m| m.has_focus(id));
-    let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| -> Arc<Galley> {
-        let raw = buf.as_str();
-        let text = if focused {
-            None
-        } else {
-            shape_for_edit(raw, BaseDir::Auto)
-        };
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        let mut job = LayoutJob::simple_singleline(
-            text.unwrap_or_else(|| raw.to_owned()),
-            font,
-            ui.visuals().text_color(),
-        );
-        job.wrap.max_width = wrap_width;
-        ui.fonts_mut(|f| f.layout_job(job))
-    };
-    let resp = ui.add(
+    if has_rtl(value) {
+        return BidiEdit::new(value, id)
+            .width(width)
+            .default_rtl(tx.rtl())
+            .show(ui);
+    }
+    ui.add(
         egui::TextEdit::singleline(value)
             .id(id)
             .hint_text(hint)
             .desired_width(width)
-            .horizontal_align(if tx.rtl() { Align::Max } else { Align::Min })
-            .layouter(&mut layouter),
-    );
-    resp
-}
-
-/// Under a focused [`text_field`] containing Arabic, show how the text will look (egui edits
-/// it in raw logical order, see [`text_field`]).
-pub fn edit_preview(ui: &mut Ui, tx: Tx, field: &Response, value: &str) {
-    if field.has_focus() && has_rtl(value) {
-        let preview = format!("{} {}", tx.raw(S::InputPreview), value);
-        theme::column(ui, tx.rtl(), |ui| {
-            ui.label(theme::caption(ui, &tx.p(&preview)))
-        });
-    }
+            .horizontal_align(if tx.rtl() { Align::Max } else { Align::Min }),
+    )
 }
 
 /// Icon-only copy button with persisted-per-id "Copied" feedback: the icon turns into a check

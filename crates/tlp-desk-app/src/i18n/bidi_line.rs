@@ -58,7 +58,14 @@ fn reversed_clusters(segment: &[(char, usize)], mirror_brackets: bool, out: &mut
     }
     for cluster in clusters.into_iter().rev() {
         for (n, &(c, l)) in cluster.iter().enumerate() {
-            out.push((if n == 0 && mirror_brackets { mirror(c) } else { c }, l));
+            out.push((
+                if n == 0 && mirror_brackets {
+                    mirror(c)
+                } else {
+                    c
+                },
+                l,
+            ));
         }
     }
 }

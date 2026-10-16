@@ -36,9 +36,12 @@ Use **egui / eframe with the wgpu backend** and fix bidirectional text ourselves
 - One small binary; video textures are uploaded directly with wgpu.
 - Static and display-only text is correct in Arabic, verified by tests that run the real epaint
   layout and check glyph positions.
-- **Limitation:** while typing in a text field, egui shows Arabic in typing (logical) order because
-  it has no bidi caret. Mitigation: unfocused fields show the shaped text and a live "Shown as:"
-  preview appears while editing. This keeps one roadmap item open.
+- egui's `TextEdit` has no bidi caret and `TextEdit::layouter` cannot reorder (the galley must have
+  the edited characters in edited order), so fields whose text contains Arabic are edited by our
+  own `ui::bidi_edit::BidiEdit`: logical `String`, screen-order layout (`i18n::bidi_line`), a caret
+  and arrow keys that follow the screen, selection by clusters, wrapping for multi-line fields.
+  Plain Latin text still uses egui's `TextEdit` (IME, undo, accessibility). Known gaps while a
+  field contains Arabic: no IME pre-edit string and no accessibility text tree.
 - Labels in RTL do not soft-wrap (`wrap_mode = Extend`), because reordering works per line.
 - Every string must be shaped exactly once — the `Tx` helpers enforce the pattern.
 - If egui gains a bidi algorithm upstream, `shaping.rs` should shrink to the parts egui still lacks;

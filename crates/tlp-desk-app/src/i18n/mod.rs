@@ -18,8 +18,8 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
-pub use format::DigitStyle;
 pub use bidi_line::{bidi_line, BidiLine};
+pub use format::DigitStyle;
 pub use shaping::{
     has_rtl, ltr_isolate, shape_for_display, shape_for_edit, visual_for_egui, BaseDir,
 };
@@ -121,7 +121,6 @@ strings! {
     Searching => "Searching for devices…", "جارٍ البحث عن أجهزة…";
     Online => "Available", "متاح";
     Offline => "Unavailable", "غير متاح";
-    InputPreview => "Shown as:", "يظهر هكذا:";
     CodeHint => "One-time code (optional)", "رمز لمرة واحدة (اختياري)";
     CodeFieldHint => "Leave it empty to ask the other side to accept.", "اتركه فارغاً ليُطلب من الطرف الآخر الموافقة.";
 

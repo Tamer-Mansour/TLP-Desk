@@ -697,7 +697,6 @@ fn name_field(ui: &mut egui::Ui, tx: Tx, name: &mut String, submit: &mut bool) -
     if !resp.has_focus() && !resp.lost_focus() {
         resp.request_focus();
     }
-    widgets::edit_preview(ui, tx, &resp, name);
     let trimmed = name.trim();
     let valid = tlp_desk_files::fs::path::check_name(trimmed).is_ok();
     if !trimmed.is_empty() && !valid {

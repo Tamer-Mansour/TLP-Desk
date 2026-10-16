@@ -17,16 +17,17 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, text::LayoutJob, Align, Color32, Galley, Id, Key, KeyboardShortcut, Modifiers, Pos2,
-    Rect, Response, RichText, Sense, TextBuffer, Ui,
+    self, Align, Color32, Galley, Id, Key, KeyboardShortcut, Modifiers, Pos2, Rect, Response,
+    RichText, Sense, Ui,
 };
 use unicode_bidi::Direction;
 
+use super::bidi_edit::{BidiEdit, NewlineKey};
 use super::icons::{self, Icon};
 use super::theme;
 use crate::backend::chat::{max_chat_chars, ChatLine, ChatSendError};
 use crate::backend::{Backend, SessionId};
-use crate::i18n::{has_rtl, shape_for_display, shape_for_edit, BaseDir, Tx, S};
+use crate::i18n::{has_rtl, shape_for_display, BaseDir, Tx, S};
 
 /// Messages kept per conversation in the UI (oldest dropped first).
 pub const MAX_LINES: usize = 500;
@@ -441,50 +442,28 @@ fn bubble_ui(ui: &mut Ui, tx: Tx, item: &mut ChatItem) {
 }
 
 /// Multi-line message box: Enter sends, Shift+Enter adds a line. Returns `true` when the user
-/// asked to send.
+/// asked to send. Text with Arabic is edited by [`BidiEdit`] (visual order, bidi caret).
 fn message_box(ui: &mut Ui, tx: Tx, chat: &mut ChatState, id: Id, width: f32) -> (Response, bool) {
-    let focused = ui.memory(|m| m.has_focus(id));
     let rtl = message_is_rtl(&chat.draft, tx.rtl());
-    let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| -> Arc<Galley> {
-        let raw = buf.as_str();
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        // Not editing: show it shaped, wrapped in logical order by turning the breaking spaces
-        // into line breaks (same character count, so egui's cursor indices stay valid).
-        let shown = (!focused).then(|| {
-            let mut measure = |s: &str| {
-                ui.painter()
-                    .layout_no_wrap(s.to_owned(), font.clone(), Color32::WHITE)
-                    .size()
-                    .x
-            };
-            let mut wrapped = raw.to_owned();
-            for r in wrap_ranges(raw, wrap_width.max(20.0), &mut measure) {
-                if raw.get(r.end..).is_some_and(|rest| rest.starts_with(' ')) {
-                    wrapped.replace_range(r.end..r.end + 1, "\n");
-                }
-            }
-            shape_for_edit(&wrapped, base_dir(rtl))
-        });
-        let mut job = LayoutJob::simple(
-            shown.flatten().unwrap_or_else(|| raw.to_owned()),
-            font,
-            ui.visuals().text_color(),
-            wrap_width,
-        );
-        job.halign = Align::LEFT;
-        ui.fonts_mut(|f| f.layout_job(job))
-    };
-    let resp = ui.add(
-        egui::TextEdit::multiline(&mut chat.draft)
-            .id(id)
-            .hint_text(tx.t(S::ChatInputHint))
-            .desired_rows(2)
-            .desired_width(width)
-            .return_key(KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter))
-            .horizontal_align(if rtl { Align::Max } else { Align::Min })
+    let resp = if has_rtl(&chat.draft) {
+        BidiEdit::new(&mut chat.draft, id)
+            .width(width)
+            .multiline(2, NewlineKey::ShiftEnter)
+            .base(base_dir(rtl))
             .interactive(chat.allowed)
-            .layouter(&mut layouter),
-    );
+            .show(ui)
+    } else {
+        ui.add(
+            egui::TextEdit::multiline(&mut chat.draft)
+                .id(id)
+                .hint_text(tx.t(S::ChatInputHint))
+                .desired_rows(2)
+                .desired_width(width)
+                .return_key(KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter))
+                .horizontal_align(if rtl { Align::Max } else { Align::Min })
+                .interactive(chat.allowed),
+        )
+    };
     // Plain Enter (Shift+Enter is the newline above; Ctrl/Alt+Enter do nothing).
     let enter = resp.has_focus()
         && ui.input(|i| {
