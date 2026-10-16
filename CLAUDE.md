@@ -25,8 +25,12 @@ Read `ROADMAP.md` before starting any task. Work only on the lane/milestone you 
 1. **Clean-room.** Never copy code, protocol, assets, icons, names or UI text from AnyDesk, RustDesk,
    TeamViewer or any other remote desktop product. RustDesk is AGPL — do not read its source while
    implementing. Use only public OS documentation (Microsoft Learn, Apple docs, freedesktop) and crate docs.
-2. **No network beyond the LAN.** No outbound internet calls, no update checks, no analytics, no crash
-   uploads. The app must work with the Ethernet cable unplugged from the router's WAN port.
+2. **No automatic network access beyond the LAN.** No automatic outbound internet calls, no analytics,
+   no crash uploads. The single exception is an **explicit, opt-in update check against GitHub
+   Releases** (`api.github.com` / `github.com` only): it runs when the user presses "Check for
+   updates now" or turned on "Check daily" (default off), and anything it downloads is verified
+   against the release signing key before it runs. Everything else must work with the Ethernet
+   cable unplugged from the router's WAN port.
 3. **Security is not optional.** Every connection is encrypted (QUIC/TLS 1.3) and authenticated
    (see Security model). No "debug mode" that disables auth may ship in release builds.
 4. **Windows first.** Windows 10/11 x64 is the tier-1 target. Keep platform code behind traits so
