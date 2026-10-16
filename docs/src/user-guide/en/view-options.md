@@ -47,3 +47,10 @@ The **Quality** button (sliders icon) in the session toolbar picks a preset for 
 
 The change applies immediately. New sessions start with the preset chosen in **Settings**.
 Within the preset the remote PC still adapts the bitrate to the network by itself.
+
+### Sharp text
+
+When the picture stops moving (you stop scrolling or typing) the remote PC sends one extra
+high-quality picture about a third of a second later, so text turns crisp on its own. In **Actual
+size** every remote pixel is shown on exactly one screen pixel, and when the window is smaller than
+the remote screen, TLP-Desk re-scales the still picture with a sharp filter. Nothing to configure.

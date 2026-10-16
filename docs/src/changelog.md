@@ -8,6 +8,10 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Added
+
+- **Sharper text.** When the screen stops changing, the host sends one near-lossless refresh picture (QP 14) so text turns crisp after scrolling or typing; the GPU downscaler uses a Lanczos-2 filter for non-2x ratios; the viewer snaps the picture to physical pixels, shows 1:1 views with exact pixels and re-scales a still, shrunk picture with a sharp filter. See [Performance notes](dev/performance.md#sharpness).
+
 ### Fixed
 
 - **The session toolbar fits any window width.** Items that do not fit move into a **More** menu (least important first); the connection label is shortened with an ellipsis and **Disconnect** is always visible at the reading end, in English and Arabic. A running recording shows a red dot on **More** while its button is in the menu.
