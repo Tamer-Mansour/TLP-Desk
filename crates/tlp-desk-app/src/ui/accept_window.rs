@@ -21,7 +21,7 @@ use crate::prompt::protocol::{Outcome, PromptAuth, PromptDecision, PromptRequest
 use crate::settings::host::PermissionSet;
 use crate::ui::icons::Icon;
 use crate::ui::settings::incoming::PERMISSION_LABELS;
-use crate::ui::theme;
+use crate::ui::{theme, widgets};
 
 /// Seconds after the card appears before Accept / Decline react to clicks.
 pub const ARM_DELAY: f64 = 0.6;
@@ -129,7 +129,7 @@ impl AcceptCard {
 
         // Header strip.
         let header = egui::Frame::new()
-            .fill(theme::accent(dark))
+            .fill(theme::accent_fill(dark))
             .corner_radius(CornerRadius {
                 nw: corner,
                 ne: corner,
@@ -140,10 +140,12 @@ impl AcceptCard {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 theme::row(ui, tx.rtl(), |ui| {
-                    ui.add(Icon::ShieldCheck.image(18.0, Color32::WHITE));
+                    let on_fill = theme::palette(dark).on_fill;
+                    ui.add(Icon::ShieldCheck.image(18.0, on_fill));
                     ui.label(
                         RichText::new(tx.t(S::PopupTitle))
-                            .color(Color32::WHITE)
+                            .size(theme::font::HEADING - 1.0)
+                            .color(on_fill)
                             .strong(),
                     );
                     theme::row_end(ui, tx.rtl(), |ui| {
@@ -179,14 +181,7 @@ impl AcceptCard {
                     self.chips(ui, tx);
                     ui.add_space(8.0);
                     let trust = theme::row(ui, tx.rtl(), |ui| {
-                        let mut r = ui.checkbox(&mut self.trust, "");
-                        let label =
-                            ui.add(egui::Label::new(tx.t(S::PopupTrust)).sense(Sense::click()));
-                        if label.clicked() {
-                            self.trust = !self.trust;
-                            r.mark_changed();
-                        }
-                        r.union(label)
+                        widgets::switch(ui, tx, &mut self.trust, tx.t(S::PopupTrust))
                     });
                     trust.on_hover_text(tx.t(S::PopupTrustHint));
                     ui.add_space(4.0);
@@ -275,9 +270,9 @@ impl AcceptCard {
             PromptAuth::Password => (Icon::Lock, S::PopupAuthPassword),
         };
         theme::row(ui, tx.rtl(), |ui| {
-            let accent = theme::accent(dark);
+            let (accent, tint) = theme::Tone::Accent.colors(dark);
             egui::Frame::new()
-                .fill(accent.gamma_multiply(0.14))
+                .fill(tint)
                 .corner_radius(CornerRadius::same(255))
                 .inner_margin(Margin::symmetric(10, 3))
                 .show(ui, |ui| {
@@ -315,18 +310,18 @@ impl AcceptCard {
                 }
                 let on = self.permissions.contains(bit);
                 let locked = bit == Permissions::VIEW || fixed;
+                let p = theme::palette(dark);
                 let (fg, fill, stroke) = if on {
                     (
                         accent,
-                        accent.gamma_multiply(0.16),
-                        Stroke::new(1.0, accent),
+                        p.accent_soft,
+                        Stroke::new(1.0, accent.gamma_multiply(0.6)),
                     )
                 } else {
-                    let weak = ui.visuals().weak_text_color();
                     (
-                        weak,
+                        p.text_muted,
                         Color32::TRANSPARENT,
-                        Stroke::new(1.0, weak.gamma_multiply(0.5)),
+                        Stroke::new(1.0, p.border_strong),
                     )
                 };
                 // Viewing is what a session is: always on, shown with a lock.
@@ -367,31 +362,22 @@ impl AcceptCard {
         let size = Vec2::new(w, 40.0);
         theme::row(ui, tx.rtl(), |ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            let weak = ui.visuals().widgets.inactive.fg_stroke.color;
+            let p = theme::palette(dark);
             let decline = crate::ui::icons::icon_text_colored(
                 tx,
                 Icon::Reject,
-                RichText::new(tx.t(S::Decline)).strong().color(weak),
-                weak,
+                RichText::new(tx.t(S::Decline)).strong().color(p.text),
+                p.text,
             )
-            .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, weak.gamma_multiply(0.45)))
-            .corner_radius(CornerRadius::same(10))
+            .stroke(Stroke::new(1.0, p.border_strong))
+            .corner_radius(CornerRadius::same(theme::radius::MD + 2))
             .min_size(size);
             if ui.add(decline).clicked() && armed {
                 out = Some(Outcome::Decline);
             }
-            let accept = crate::ui::icons::icon_text_colored(
-                tx,
-                Icon::Accept,
-                RichText::new(tx.t(S::Accept))
-                    .strong()
-                    .color(Color32::WHITE),
-                Color32::WHITE,
-            )
-            .fill(theme::accent(dark))
-            .corner_radius(CornerRadius::same(10))
-            .min_size(size);
+            let accept = widgets::primary_icon_button(ui, tx, Icon::Accept, tx.t(S::Accept))
+                .corner_radius(CornerRadius::same(theme::radius::MD + 2))
+                .min_size(size);
             if ui.add(accept).clicked() && armed {
                 out = Some(Outcome::Accept);
             }
@@ -401,11 +387,7 @@ impl AcceptCard {
 }
 
 fn ring_track(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_white_alpha(28)
-    } else {
-        Color32::from_black_alpha(22)
-    }
+    theme::palette(dark).border
 }
 
 /// Arc from 12 o'clock, clockwise, covering `frac` (0..=1) of the circle.

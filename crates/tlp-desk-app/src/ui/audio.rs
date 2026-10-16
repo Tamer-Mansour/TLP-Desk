@@ -99,7 +99,7 @@ pub fn settings_card(ui: &mut egui::Ui, tx: Tx, settings: &mut Settings, backend
             widgets::icon_heading(ui, tx, Icon::Volume, tx.t(S::AudioSettings));
             ui.add_space(6.0);
             let mut on = !settings.mute_remote_audio;
-            if ui.checkbox(&mut on, tx.t(S::AudioOnConnect)).changed() {
+            if super::settings::check_row(ui, tx, &mut on, tx.t(S::AudioOnConnect)) {
                 settings.mute_remote_audio = !on;
                 settings.save();
                 backend.set_audio_on_connect(on);

@@ -7,7 +7,7 @@
 
 mod dialogs;
 
-use eframe::egui::{self, Id, RichText, Ui};
+use eframe::egui::{self, Align, Id, Layout, RichText, Ui};
 
 use super::icons::{self, Icon};
 use super::{theme, widgets};
@@ -664,66 +664,103 @@ fn entry_row(
 ) {
     let dark = ui.visuals().dark_mode;
     let id = e.device_id;
-    egui::Frame::new()
-        .fill(ui.visuals().extreme_bg_color)
-        .corner_radius(10)
-        .inner_margin(egui::Margin::symmetric(12, 8))
-        .outer_margin(egui::Margin::symmetric(0, 3))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.push_id(("ab-row", id.0), |ui| {
-                theme::row(ui, tx.rtl(), |ui| {
-                    let color = if online {
-                        theme::success(dark)
-                    } else {
-                        ui.visuals().weak_text_color()
-                    };
-                    theme::status_dot(ui, color);
-                    let fav_tip = if e.favorite {
-                        S::AbFavoriteRemove
-                    } else {
-                        S::AbFavoriteAdd
-                    };
-                    if icons::icon_toggle(ui, tx, e.favorite, Icon::Star, tx.t(fav_tip)).clicked() {
-                        actions.push(RowAction::Favorite(id));
-                    }
-                    theme::column(ui, tx.rtl(), |ui| {
-                        ui.label(RichText::new(tx.d(&e.display_name())).strong());
-                        ui.label(theme::caption(ui, &tx.p(&meta_line(tx, e, online, now))));
-                    });
-                    theme::row_end(ui, tx.rtl(), |ui| {
-                        if icons::icon_button(ui, tx, Icon::Trash, tx.t(S::AbDelete)).clicked() {
-                            actions.push(RowAction::Delete(id));
-                        }
-                        if icons::icon_button(ui, tx, Icon::Rename, tx.t(S::AbEdit)).clicked() {
-                            actions.push(RowAction::Edit(id));
-                        }
-                        if online {
-                            let b = icons::icon_text_button(tx, Icon::Connect, tx.t(S::Connect));
-                            if ui.add(b).clicked() {
-                                actions.push(RowAction::Connect(id));
-                            }
-                        } else {
-                            let b = icons::icon_text_button(tx, Icon::WakeOnLan, tx.t(S::AbWake));
-                            let tip = if e.mac.is_some() {
-                                S::AbWakeTooltip
-                            } else {
-                                S::AbWakeNoMac
-                            };
-                            let resp = ui.add_enabled(e.mac.is_some(), b);
-                            let resp = resp
-                                .on_hover_text(tx.t(tip))
-                                .on_disabled_hover_text(tx.t(tip));
-                            if resp.clicked() {
-                                actions.push(RowAction::Wake(id));
-                            }
-                        }
-                    });
-                });
+    let rtl = tx.rtl();
+    ui.push_id(("ab-row", id.0), |ui| {
+        widgets::list_row(ui, |ui| {
+            let (row, _) = ui
+                .allocate_exact_size(egui::vec2(ui.available_width(), 36.0), egui::Sense::hover());
+            let (start, end) = if rtl {
+                (
+                    Layout::right_to_left(Align::Center),
+                    Layout::left_to_right(Align::Center),
+                )
+            } else {
+                (
+                    Layout::left_to_right(Align::Center),
+                    Layout::right_to_left(Align::Center),
+                )
+            };
+            // Actions first: name and meta line get only what is left, so they never run
+            // under the buttons (long IPv6 addresses, long Arabic names).
+            let mut trail = ui.new_child(egui::UiBuilder::new().max_rect(row).layout(end));
+            entry_actions(&mut trail, tx, e, online, actions);
+            let trailing = trail.min_rect();
+            let gap = theme::space::M;
+            let lead_rect = if rtl {
+                egui::Rect::from_min_max(egui::pos2(trailing.right() + gap, row.top()), row.max)
+            } else {
+                egui::Rect::from_min_max(row.min, egui::pos2(trailing.left() - gap, row.bottom()))
+            };
+            let mut lead = ui.new_child(egui::UiBuilder::new().max_rect(lead_rect).layout(start));
+            lead.set_clip_rect(lead_rect.intersect(ui.clip_rect()));
+            let color = if online {
+                theme::success(dark)
+            } else {
+                lead.visuals().weak_text_color()
+            };
+            theme::status_dot(&mut lead, color);
+            let fav_tip = if e.favorite {
+                S::AbFavoriteRemove
+            } else {
+                S::AbFavoriteAdd
+            };
+            let fav = widgets::ghost_scope(&mut lead, |ui| {
+                icons::icon_toggle(ui, tx, e.favorite, Icon::Star, tx.t(fav_tip))
+            });
+            if fav.clicked() {
+                actions.push(RowAction::Favorite(id));
+            }
+            theme::column(&mut lead, rtl, |ui| {
+                let max_w = ui.available_width();
+                let full_name = e.display_name();
+                let name = widgets::fit(ui, &full_name, max_w, |s| RichText::new(tx.d(s)).strong());
+                let r = ui.label(RichText::new(tx.d(&name)).strong());
+                if name != full_name {
+                    r.on_hover_text(tx.d(&full_name));
+                }
+                let full_meta = meta_line(tx, e, online, now);
+                let meta = widgets::fit(ui, &full_meta, max_w, |s| theme::caption(ui, &tx.p(s)));
+                let r = ui.label(theme::caption(ui, &tx.p(&meta)));
+                if meta != full_meta {
+                    r.on_hover_text(tx.p(&full_meta));
+                }
             });
         });
+    });
 }
 
+/// Connect (or Wake), edit and delete, from the reading end of the row.
+fn entry_actions(ui: &mut Ui, tx: Tx, e: &Entry, online: bool, actions: &mut Vec<RowAction>) {
+    let id = e.device_id;
+    widgets::ghost_scope(ui, |ui| {
+        if icons::icon_button(ui, tx, Icon::Trash, tx.t(S::AbDelete)).clicked() {
+            actions.push(RowAction::Delete(id));
+        }
+        if icons::icon_button(ui, tx, Icon::Rename, tx.t(S::AbEdit)).clicked() {
+            actions.push(RowAction::Edit(id));
+        }
+    });
+    if online {
+        let b = icons::icon_text_button(tx, Icon::Connect, tx.t(S::Connect));
+        if ui.add(b).clicked() {
+            actions.push(RowAction::Connect(id));
+        }
+    } else {
+        let b = icons::icon_text_button(tx, Icon::WakeOnLan, tx.t(S::AbWake));
+        let tip = if e.mac.is_some() {
+            S::AbWakeTooltip
+        } else {
+            S::AbWakeNoMac
+        };
+        let resp = ui.add_enabled(e.mac.is_some(), b);
+        let resp = resp
+            .on_hover_text(tx.t(tip))
+            .on_disabled_hover_text(tx.t(tip));
+        if resp.clicked() {
+            actions.push(RowAction::Wake(id));
+        }
+    }
+}
 /// "ID · IP · group · Available / Last seen 5 minutes ago", logical order (shape once).
 fn meta_line(tx: Tx, e: &Entry, online: bool, now: UnixTime) -> String {
     let mut parts = vec![tx.digits(&e.device_id.to_string())];

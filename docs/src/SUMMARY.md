@@ -89,6 +89,7 @@
 
 # Contributor guide
 
+- [Design system](dev/design.md)
 - [Architecture](dev/architecture/index.md)
   - [Video pipeline](dev/architecture/video.md)
   - [Input path](dev/architecture/input.md)

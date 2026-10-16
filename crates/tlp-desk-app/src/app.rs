@@ -781,7 +781,7 @@ impl App {
         egui::Panel::top("host-banner")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::accent(dark))
+                    .fill(theme::accent_fill(dark))
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
             .show(ui, |ui| {
@@ -875,7 +875,7 @@ impl App {
         egui::Panel::top("host-problem")
             .frame(
                 egui::Frame::new()
-                    .fill(theme::danger(dark))
+                    .fill(theme::palette(dark).danger_fill)
                     .inner_margin(egui::Margin::symmetric(16, 8)),
             )
             .show(ui, |ui| {

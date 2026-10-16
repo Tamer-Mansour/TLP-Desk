@@ -182,6 +182,20 @@ impl ViewerSession {
                     .inner_margin(egui::Margin::symmetric(14, 8)),
             )
             .show(ui, |ui| {
+                // Toolbar look: icon buttons stay frameless until hovered, active toggles get
+                // a tinted accent pill with an accent glyph (design tokens, see theme.rs).
+                let p = theme::palette(dark);
+                {
+                    let v = ui.visuals_mut();
+                    v.selection.bg_fill = p.accent_soft;
+                    v.selection.stroke = egui::Stroke::new(1.5, p.accent);
+                    let w = &mut v.widgets;
+                    w.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                    w.inactive.bg_stroke = egui::Stroke::NONE;
+                    w.hovered.bg_stroke = egui::Stroke::NONE;
+                    w.active.bg_stroke = egui::Stroke::NONE;
+                    w.noninteractive.bg_stroke = egui::Stroke::new(1.0, p.border);
+                }
                 layout.content = ui.max_rect();
                 theme::row(ui, tx.rtl(), |ui| {
                     let s = ui.spacing().item_spacing.x;
