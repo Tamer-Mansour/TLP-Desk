@@ -468,6 +468,9 @@ pub fn info_for(
         total_bytes: offer.total_bytes,
         total_files: count(offer, false),
         total_dirs: count(offer, true),
+        started_unix_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
     }
 }
 

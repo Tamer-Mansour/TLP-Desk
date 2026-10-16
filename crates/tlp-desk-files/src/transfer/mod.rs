@@ -306,7 +306,7 @@ impl FileTransfer {
     }
 
     /// Viewer: copies host files and folders (absolute host paths, all in one folder) into
-    /// the local folder `local_dest`, using the engine's conflict policy.
+    /// the local folder `local_dest`, using [`TransferConfig::download_conflict`].
     ///
     /// # Errors
     /// No such session, not a viewer, no `FILES`, remote paths that do not exist or do not
@@ -317,7 +317,7 @@ impl FileTransfer {
         remote_paths: Vec<String>,
         local_dest: PathBuf,
     ) -> Result<TransferId, FilesError> {
-        let policy = self.inner.cfg.conflict;
+        let policy = self.inner.cfg.download_conflict;
         let s = self.session(session_key)?;
         check_viewer(&s)?;
         let (source_dir, items) = list_remote(&s, &remote_paths, self.inner.cfg.max_items).await?;

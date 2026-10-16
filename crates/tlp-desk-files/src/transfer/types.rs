@@ -52,8 +52,13 @@ pub struct TransferConfig {
     /// many (each small file is its own stream). Clamped to `1..=32`.
     pub streams: usize,
     /// Conflict policy for transfers this side receives from the peer (host: uploads).
-    /// Transfers started locally pass their own policy.
+    /// Default [`ConflictPolicy::Rename`]: the host user is never interrupted unless the app
+    /// configures [`ConflictPolicy::Ask`].
     pub conflict: ConflictPolicy,
+    /// Conflict policy of downloads this side starts (viewer: files fetched from the host).
+    /// Apps use [`ConflictPolicy::Ask`], the command line keeps [`ConflictPolicy::Rename`]
+    /// unless told otherwise.
+    pub download_conflict: ConflictPolicy,
     /// Host: where uploads go when the viewer leaves the destination empty. `None` = the
     /// user's Desktop (or home folder).
     pub default_upload_dir: Option<PathBuf>,
@@ -68,6 +73,7 @@ impl Default for TransferConfig {
         Self {
             streams: 8,
             conflict: ConflictPolicy::Rename,
+            download_conflict: ConflictPolicy::Rename,
             default_upload_dir: None,
             max_items: 200_000,
             ask_timeout: std::time::Duration::from_secs(120),
@@ -102,6 +108,8 @@ pub struct TransferInfo {
     pub total_files: u32,
     /// Number of folders.
     pub total_dirs: u32,
+    /// When the transfer was created (Unix milliseconds).
+    pub started_unix_ms: u64,
 }
 
 /// Live state of a transfer.

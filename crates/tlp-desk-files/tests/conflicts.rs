@@ -16,6 +16,7 @@ use tlp_desk_proto::FsError;
 fn ask() -> TransferConfig {
     TransferConfig {
         conflict: ConflictPolicy::Ask,
+        download_conflict: ConflictPolicy::Ask,
         ..TransferConfig::default()
     }
 }
