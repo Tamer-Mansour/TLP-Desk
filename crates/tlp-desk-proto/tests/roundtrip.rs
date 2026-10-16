@@ -47,6 +47,9 @@ fn samples() -> Vec<Message> {
             down: false,
         }),
         Message::InputEvent(InputEvent::ReleaseAll),
+        Message::InputEvent(InputEvent::Text {
+            text: "مرحبا 123 😀".into(),
+        }),
         Message::ClipboardData(ClipboardData::Text("مرحبا hello".into())),
         Message::ClipboardData(ClipboardData::Image {
             width: 1,
@@ -594,6 +597,20 @@ fn v5_clipboard_png_is_appended_to_clipboard_data() {
 }
 
 #[test]
-fn protocol_version_is_5() {
-    assert_eq!(PROTOCOL_VERSION, 5);
+fn protocol_version_is_6() {
+    assert_eq!(PROTOCOL_VERSION, 6);
+}
+
+#[test]
+fn v6_input_text_is_appended_to_input_event() {
+    // v6 appends `InputEvent::Text` after `ReleaseAll` (index 4); the older variants keep theirs.
+    let outer = index(&Message::InputEvent(InputEvent::ReleaseAll));
+    let release = encode_message(&Message::InputEvent(InputEvent::ReleaseAll)).unwrap();
+    assert_eq!(release, vec![outer, 4]);
+    let text = encode_message(&Message::InputEvent(InputEvent::Text { text: "ب".into() })).unwrap();
+    assert_eq!(text, vec![outer, 5, 2, 0xD8, 0xA8]);
+    assert_eq!(
+        Message::InputEvent(InputEvent::Text { text: "a".into() }).required_permissions(),
+        Permissions::CONTROL
+    );
 }

@@ -123,6 +123,7 @@ fn input_event() -> impl Strategy<Value = InputEvent> {
             }
         }),
         Just(InputEvent::ReleaseAll),
+        ".{0,40}".prop_map(|text| InputEvent::Text { text }),
     ]
 }
 

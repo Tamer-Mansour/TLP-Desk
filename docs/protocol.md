@@ -1,7 +1,21 @@
 # tlp-desk wire protocol
 
-Status: **draft**, `PROTOCOL_VERSION = 5`. Source of truth: `crates/tlp-desk-proto` (messages),
+Status: **draft**, `PROTOCOL_VERSION = 6`. Source of truth: `crates/tlp-desk-proto` (messages),
 `crates/tlp-desk-net` (transport, discovery) and `crates/tlp-desk-crypto` (keys, PAKE).
+
+### Changes in v6
+
+- Appended `InputEvent::Text { text: String }` (index 5 inside `InputEvent`): Unicode text to type
+  on the host independent of its keyboard layout (IME commits, composed text, emoji, and the
+  viewer option "Type text using my keyboard layout"). At most 256 characters per event
+  (`MAX_INPUT_TEXT_CHARS`); the host drops longer text and text containing control characters
+  other than tab and newline. Injected with `SendInput` + `KEYEVENTF_UNICODE` (UTF-16 code units,
+  so characters outside the BMP travel as surrogate pairs). Needs `KEYBOARD`, like `Key`.
+- Viewer rule: normal keys travel as scancodes (`InputEvent::Key`) so shortcuts and games work;
+  `Text` is sent only for text that has no scancode (IME/compose commits, emoji, characters with
+  no key on the viewer layout) or for every printable character while the option above is on.
+  A character is never sent both ways.
+- Nothing else changed; every v5 index is unchanged.
 
 ### Changes in v5
 
@@ -155,7 +169,7 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `AuthResult::Accepted { permissions }` | host → viewer | Session authorized |
 | `AuthResult::Rejected { reason }` | host → viewer | `UserDeclined`, `WrongCredentials`, `RateLimited`, `NotAllowed`, `VersionMismatch` |
 | `VideoFrame { seq, timestamp_us, width, height, codec, keyframe, data }` | host → viewer (one uni stream per frame) | One encoded frame, H.264 Annex-B |
-| `InputEvent` | viewer → host | Mouse/keyboard; see below |
+| `InputEvent` | viewer → host | Mouse/keyboard; see below. `InputEvent::Text` is v6 |
 | `ClipboardData::Text / Image` | both | Clipboard sync (needs `CLIPBOARD`) |
 | `ClipboardData::Png { width, height, png }` | both | PNG-compressed clipboard image (v5, `CLIPBOARD`) |
 | `FileChunk { transfer_id, offset, data, last }` | both | File transfer (needs `FILES`) |
