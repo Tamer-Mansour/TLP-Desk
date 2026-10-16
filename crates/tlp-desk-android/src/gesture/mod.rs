@@ -291,7 +291,7 @@ impl Recognizer {
                         mode = TwoMode::Scroll;
                     }
                 }
-                let (mut nd, mut nc) = (last_d, last_c);
+                let (mut next_d, mut next_c) = (last_d, last_c);
                 match mode {
                     TwoMode::Pinch => {
                         if last_d > 0.0 && d > 0.0 {
@@ -304,8 +304,8 @@ impl Recognizer {
                             dx: c.x - last_c.x,
                             dy: c.y - last_c.y,
                         });
-                        nd = d;
-                        nc = c;
+                        next_d = d;
+                        next_c = c;
                     }
                     TwoMode::Scroll => {
                         out.push(Action::Scroll {
@@ -313,7 +313,7 @@ impl Recognizer {
                             dy: c.y - last_c.y,
                             at: c,
                         });
-                        nc = c;
+                        next_c = c;
                     }
                     TwoMode::Undecided => {}
                 }
@@ -321,8 +321,8 @@ impl Recognizer {
                     mode,
                     d0,
                     c0,
-                    last_d: nd,
-                    last_c: nc,
+                    last_d: next_d,
+                    last_c: next_c,
                 };
             }
             _ => {}

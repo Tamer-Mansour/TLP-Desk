@@ -34,7 +34,10 @@ pub mod ui;
 pub mod view;
 
 /// Entry point called by `android-activity` when the activity starts.
+// SAFETY: `android_main` is the one symbol the NativeActivity glue looks up by name; nothing else
+// in this library uses that name.
 #[cfg(target_os = "android")]
+#[allow(unsafe_code)]
 #[no_mangle]
 pub fn android_main(app: android_activity::AndroidApp) {
     android_logger::init_once(

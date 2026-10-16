@@ -63,8 +63,20 @@ $env:ANDROID_HOME = "C:\tlp-build\android\sdk"
 $env:ANDROID_NDK_ROOT = "C:\tlp-build\android\ndk-x\android-ndk-r27c"
 $env:JAVA_HOME = "C:\tlp-build\android\jdk\jdk-17.0.13+11"; $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 cargo apk build -p tlp-desk-android --lib           # debug-signed APK under target/debug/apk
-cargo apk build -p tlp-desk-android --lib --release # needs your own keystore (see cargo-apk docs)
+cargo apk build -p tlp-desk-android --lib --release # small (about 8 MB) but unsigned, see below
 ```
+
+The debug APK is about 340 MB (debug symbols). `cargo-apk` needs a `[package.metadata.android.signing.release]`
+keystore to sign a release build; to test without one, sign the release APK with the debug keystore
+that `cargo apk build` created in `%USERPROFILE%\.android`:
+
+```powershell
+$bt = "$env:ANDROID_HOME\build-tools\34.0.0"
+& $bt\zipalign.exe -f -p 4 target\release\apk\TLP-Desk-unaligned.apk aligned.apk
+& $bt\apksigner.bat sign --ks $env:USERPROFILE\.android\debug.keystore --ks-pass pass:android --out TLP-Desk.apk aligned.apk
+```
+
+This identity is public knowledge; it is for testing only. Publish with your own keystore.
 
 Manifest permissions come from `[package.metadata.android]` in the crate's `Cargo.toml`:
 `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_MULTICAST_STATE`.
