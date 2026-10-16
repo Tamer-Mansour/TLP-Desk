@@ -33,7 +33,7 @@ pub use compose::{
     ALL_MONITORS_NAME,
 };
 pub use dirty::{DirtyRect, DirtyTracker, FrameChange, DEFAULT_TILE};
-pub use scale::{fit_within, mip_level_for};
+pub use scale::{fit_within, lanczos2, mip_level_for, mip_size, needs_lanczos, resample_lanczos2};
 
 /// One captured frame in BGRA8 layout.
 #[derive(Debug, Clone, PartialEq, Eq)]

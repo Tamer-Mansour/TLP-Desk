@@ -1,4 +1,7 @@
-//! Pure size arithmetic for GPU-side downscaling (platform independent, unit tested).
+//! Pure size arithmetic for GPU-side downscaling, plus the CPU reference / fallback resampler
+//! (platform independent, unit tested).
+
+use crate::BgraFrame;
 
 /// Size of frames delivered for a `src` monitor when frames must fit inside `max`.
 ///
@@ -44,6 +47,106 @@ pub fn mip_level_for(src: (u32, u32), out: (u32, u32)) -> u32 {
         level += 1;
     }
     level
+}
+
+/// Size of mip `level` of a `size` texture (each level halves, rounding down, minimum 1).
+pub fn mip_size(size: (u32, u32), level: u32) -> (u32, u32) {
+    (
+        (size.0 >> level.min(31)).max(1),
+        (size.1 >> level.min(31)).max(1),
+    )
+}
+
+/// Whether the final scaling pass (from the chosen mip to the output) should use the Lanczos-2
+/// shader. A reduction of exactly 2x on both axes is already a perfect 2x2 box filter with a
+/// bilinear tap, and a 1:1 copy needs no filter; everything else benefits from Lanczos.
+pub fn needs_lanczos(mip: (u32, u32), out: (u32, u32)) -> bool {
+    mip != out && !(mip.0 == out.0 * 2 && mip.1 == out.1 * 2)
+}
+
+/// Lanczos-2 kernel: `sinc(x) * sinc(x / 2)` on `|x| < 2`. Sharper than bilinear/box filtering
+/// (keeps text edges) with only a faint overshoot.
+pub fn lanczos2(x: f64) -> f64 {
+    let x = x.abs();
+    if x < 1e-9 {
+        1.0
+    } else if x >= 2.0 {
+        0.0
+    } else {
+        let px = std::f64::consts::PI * x;
+        2.0 * px.sin() * (px / 2.0).sin() / (px * px)
+    }
+}
+
+/// Normalised Lanczos-2 taps for output pixel `o` of an axis shrunk from `src` to `out`
+/// samples: `(first source index, weights)`. The kernel is stretched by the reduction ratio
+/// when shrinking (so it also low-passes against aliasing), source indices are clamped by the
+/// caller. The GPU shader in `windows_capture::scaler` computes exactly the same taps.
+fn taps(o: u32, src: u32, out: u32) -> (i64, Vec<f32>) {
+    let ratio = f64::from(src) / f64::from(out);
+    let scale = ratio.max(1.0);
+    let centre = (f64::from(o) + 0.5) * ratio;
+    let radius = 2.0 * scale;
+    let first = (centre - radius).floor() as i64;
+    let last = (centre + radius).ceil() as i64;
+    let mut w: Vec<f64> = (first..=last)
+        .map(|j| lanczos2((j as f64 + 0.5 - centre) / scale))
+        .collect();
+    let sum: f64 = w.iter().sum();
+    if sum > 0.0 {
+        for v in &mut w {
+            *v /= sum;
+        }
+    }
+    (first, w.into_iter().map(|v| v as f32).collect())
+}
+
+/// Resamples `src` to `w` x `h` with a separable Lanczos-2 filter (CPU path: reference for the
+/// GPU scaler's tests and fallback wherever no GPU is available). Alpha is forced opaque.
+/// Returns an empty frame for an empty source or target.
+pub fn resample_lanczos2(src: &BgraFrame, w: u32, h: u32) -> BgraFrame {
+    let mut out = BgraFrame::new_tight(w, h);
+    out.timestamp_us = src.timestamp_us;
+    if src.width == 0 || src.height == 0 || w == 0 || h == 0 || !src.is_well_formed() {
+        return out;
+    }
+    let (sw, sh) = (src.width as usize, src.height as usize);
+    // Horizontal pass into f32 (3 channels) at the target width, source height.
+    let mut tmp = vec![0f32; w as usize * sh * 3];
+    let htaps: Vec<_> = (0..w).map(|o| taps(o, src.width, w)).collect();
+    for (y, trow) in tmp.chunks_exact_mut(w as usize * 3).enumerate() {
+        let row = src.row(y as u32);
+        for (tpx, (first, weights)) in trow.chunks_exact_mut(3).zip(&htaps) {
+            let mut acc = [0f32; 3];
+            for (k, wt) in weights.iter().enumerate() {
+                let x = (first + k as i64).clamp(0, sw as i64 - 1) as usize;
+                let px = &row[x * 4..x * 4 + 3];
+                acc[0] += wt * f32::from(px[0]);
+                acc[1] += wt * f32::from(px[1]);
+                acc[2] += wt * f32::from(px[2]);
+            }
+            tpx.copy_from_slice(&acc);
+        }
+    }
+    let stride = w as usize * 3;
+    for oy in 0..h {
+        let (first, weights) = taps(oy, src.height, h);
+        let dst = out.row_mut(oy);
+        let mut acc = vec![0f32; stride];
+        for (k, wt) in weights.iter().enumerate() {
+            let y = (first + k as i64).clamp(0, sh as i64 - 1) as usize;
+            for (a, t) in acc.iter_mut().zip(&tmp[y * stride..(y + 1) * stride]) {
+                *a += wt * t;
+            }
+        }
+        for (px, a) in dst.chunks_exact_mut(4).zip(acc.chunks_exact(3)) {
+            px[0] = a[0].round().clamp(0.0, 255.0) as u8;
+            px[1] = a[1].round().clamp(0.0, 255.0) as u8;
+            px[2] = a[2].round().clamp(0.0, 255.0) as u8;
+            px[3] = 255;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -111,5 +214,82 @@ mod tests {
         assert_eq!(mip_level_for((7680, 4320), (1280, 720)), 2); // 6x
         assert_eq!(mip_level_for((1280, 720), (1920, 1080)), 0); // upscale
         assert_eq!(mip_level_for((100, 100), (0, 0)), 0);
+    }
+
+    fn gradient(w: u32, h: u32) -> BgraFrame {
+        let mut f = BgraFrame::new_tight(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let p = &mut f.row_mut(y)[x as usize * 4..x as usize * 4 + 4];
+                p.copy_from_slice(&[(x * 255 / w) as u8, (y * 255 / h) as u8, 90, 255]);
+            }
+        }
+        f
+    }
+
+    #[test]
+    fn lanczos_is_used_only_for_non_trivial_ratios() {
+        assert!(!needs_lanczos((1920, 1080), (1920, 1080)));
+        assert!(
+            !needs_lanczos((3840, 2160), (1920, 1080)),
+            "exact 2x is a box"
+        );
+        assert!(needs_lanczos((1920, 1200), (1600, 1000)));
+        assert!(needs_lanczos((2560, 1440), (1920, 1080)));
+        assert!(
+            needs_lanczos((3840, 2160), (1920, 1200)),
+            "2x wide, 1.8x high"
+        );
+        assert_eq!(mip_size((3840, 2400), 1), (1920, 1200));
+        assert_eq!(mip_size((5, 3), 4), (1, 1));
+    }
+
+    #[test]
+    fn lanczos_kernel_shape() {
+        assert!((lanczos2(0.0) - 1.0).abs() < 1e-12);
+        assert!(lanczos2(1.0).abs() < 1e-12, "zero at the integers");
+        assert_eq!(lanczos2(2.0), 0.0);
+        assert!(
+            lanczos2(1.5) < 0.0,
+            "negative lobe is what keeps edges sharp"
+        );
+        assert_eq!(lanczos2(-0.3), lanczos2(0.3));
+    }
+
+    #[test]
+    fn resample_flat_colour_is_exact_for_any_ratio() {
+        let mut f = BgraFrame::new_tight(100, 61);
+        for p in f.data.chunks_exact_mut(4) {
+            p.copy_from_slice(&[10, 200, 77, 255]);
+        }
+        for (w, h) in [(50, 30), (37, 23), (100, 61), (7, 5)] {
+            let o = resample_lanczos2(&f, w, h);
+            assert_eq!((o.width, o.height), (w, h));
+            assert!(
+                o.data.chunks_exact(4).all(|p| p == [10, 200, 77, 255]),
+                "{w}x{h}"
+            );
+        }
+    }
+
+    #[test]
+    fn resample_keeps_a_smooth_gradient_in_place() {
+        let o = resample_lanczos2(&gradient(300, 200), 160, 100);
+        for y in 5..o.height - 5 {
+            let r = o.row(y);
+            for x in 5..o.width as usize - 5 {
+                let want = (x as f64 + 0.5) * 255.0 / 160.0;
+                let got = f64::from(r[x * 4]);
+                assert!((got - want).abs() < 4.0, "x={x}: {got} vs {want}");
+            }
+        }
+    }
+
+    #[test]
+    fn resample_handles_empty_input() {
+        let o = resample_lanczos2(&BgraFrame::new_tight(0, 0), 10, 10);
+        assert_eq!((o.width, o.height), (10, 10));
+        let o = resample_lanczos2(&gradient(8, 8), 0, 4);
+        assert_eq!(o.data.len(), 0);
     }
 }

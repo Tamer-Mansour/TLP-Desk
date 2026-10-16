@@ -34,7 +34,7 @@ costs almost nothing after the first frame.
 
 Reading a 3840×2400 BGRA frame back from the GPU moves 36 MB per frame — over 2 GB/s at 60 fps —
 before the encoder even starts. The host caps capture at **1920×1200** and scales on the GPU
-(mip generation for reductions above 2×, then one bilinear pass), so only 9 MB per frame crosses
+(mip generation for reductions above 2×, then one bilinear pass, or a Lanczos-2 pass for ratios other than 2×; see [Sharpness](#sharpness)), so only 9 MB per frame crosses
 to the CPU and the encoder works on a quarter of the pixels. Input mapping is unaffected: clicks
 are mapped over the real monitor, not the video. See
 [ADR 0012](../adr/0012-capture-size-cap.md).
@@ -54,14 +54,108 @@ one QUIC stream per frame, a slow link or a slow viewer lowers the frame rate in
 a backlog. The host e2e test `slow_encoder_drops_frames_instead_of_queueing` and the net test
 `host_drops_video_instead_of_queueing` keep this property from regressing.
 
+## Quality policy: smaller, never blurrier
+
+The stream must never turn into a smeared or blocky picture. When bits are short the picture gets
+**smaller** (lower resolution, then lower frame rate); the quality of what is sent stays high.
+Three pieces enforce this.
+
+**1. A quantiser floor in the encoders.** `QpBounds::FLOOR` limits H.264 QP to 12..=32
+(`QUALITY_MIN_QP`, `QUALITY_MAX_QP`). OpenH264 gets `iMaxQp`/`iMinQp`; Media Foundation encoders get
+`CODECAPI_AVEncVideoMaxQP`/`MinQP` (a vendor that refuses them keeps its own limits; the refusal is
+logged at debug level). Frame skipping stays off, so a frame that cannot be coded at QP 32 within
+the bitrate overshoots it and the controller reacts (below). The minimum stops the rate control
+from chasing invisible detail: NVIDIA's MFT otherwise drops to QP 2 on a static screen and spends
+3.7 Mbps where 0.16 Mbps gives the same picture.
+
+**2. A resolution ladder in the adaptive controller** (`crates/tlp-desk-host/src/adapt/controller.rs`).
+What a bitrate buys is measured in bits per pixel (bpp = kbps / (pixels x fps)). Text stays crisp
+above about **0.07 bpp**. When congestion has pushed the target under that for 2.5 s, the controller
+moves to the first rung of the ladder that restores it (one jump, not a staircase):
+
+| Rung | Resolution (of a 1920x1200 cap) | Frame rate (of 60) |
+|---|---|---|
+| 0 | 1920x1200 | 60 |
+| 1 | 1600x1000 | 60 |
+| 2 | 1600x1000 | 45 |
+| 3 | 1280x800 | 45 |
+| 4 | 1280x800 | 30 |
+| 5 | 1024x640 | 30 |
+| 6 | 1024x640 | 15 |
+
+A rung change goes through the capture cap (`capture_cap`, sizes rounded to multiples of 4), an
+encoder rebuild and a keyframe. Monitors smaller than the cap are scaled themselves. Rules that
+prevent flapping: changes are at least 4 s apart; a step *up* needs 10 s without congestion **and**
+at least 0.10 bpp at the bigger size (the gap to the 0.07 floor is the hysteresis); a step down
+within 30 s of a step up doubles the wait for the next step up (to at most 60 s). Thresholds are
+scaled down for capped ceilings (the Speed preset) so they can always climb back.
+
+**3. Defaults that leave headroom on a LAN.** `EncoderConfig::for_screen` budgets **0.12 bpp**
+(14.9 Mbps for 1080p60), up from 0.1. Presets: *Speed* caps at 1280x720 with a 60 % ceiling,
+*Balanced* is the floor plus the ladder from 1920x1200, *Quality* streams the monitor at native size
+(up to 3840x2160, the encoders' limit; larger sources are halved) with a 160 % ceiling, also under
+the ladder.
+
+The viewer's stats overlay shows the size and the average QP read from the bitstream (`QpProbe`):
+`1280x800 . Q~24`. Intel Quick Sync always writes QP 26 in its slice headers and varies it per
+macroblock, so the number is hidden for that encoder.
+
+### Measured: `bench --quality`
+
+`cargo run --release -p tlp-desk-codec --example bench -- --quality --encoder sw|hw --adapter
+intel|nvidia --bpp 0.01,0.04 --qp 12:32` renders four animated scenes off screen with GDI
+(ClearType): `ui` (settings page with English and Arabic text, a counter and a progress bar),
+`code` (syntax-coloured editor scrolling 3 px/frame), `scroll` (prose scrolling 6 px/frame) and
+`photo` (smooth colour fields with grain panning), at 1920x1080, 60 fps, 70 frames per point. It
+reports luma PSNR, **edge PSNR** (pixels on or next to strokes: where text lives) and SSIM of the
+decoded pictures. `--qp 0:51` is the old unbounded behaviour.
+
+Text scenes with OpenH264, edge PSNR in dB (higher is better; below ~38 dB text visibly softens):
+
+| bpp | `ui` | `code` | `scroll` | note |
+|---|---|---|---|---|
+| 0.005 unbounded (QP 42) | - | 21.2 | 22.1 | illegible |
+| 0.005 floor (QP 32) | - | 28.4 | 28.6 | still soft: the ladder steps in long before |
+| 0.02 | 40.1 | 33.1 | 31.2 | |
+| 0.04 | 40.7 | 37.4 | 38.5 | |
+| 0.06 | 40.7 | 39.3 | 40.4 | |
+| **0.07 (the floor)** | 40.7 | **~39.8** | **~40.5** | text readable: >= 38 dB |
+| 0.12 | 40.6 | 42.3 | 40.6 | the `for_screen` default |
+
+Photographic content needs more (luma PSNR 37.3 dB at 0.06 bpp, 44.4 at 0.08), which is why the
+floor is tuned for desktops and not for video.
+
+What the quantiser floor changes at starvation (1080p60, 0.01 bpp, edge PSNR / luma PSNR in dB):
+
+| Encoder | Scene | Unbounded | Floor (QP 12..32) |
+|---|---|---|---|
+| OpenH264 | code | 21.3 / 32.0 (QP 42) | 28.4 / 39.0 (QP 32) |
+| OpenH264 | scroll | 21.7 / 30.3 (QP 42) | 28.6 / 37.2 (QP 32) |
+| NVIDIA RTX A3000 | scroll | 20.2 / 28.9 (QP 42) | 30.1 / 38.8 (QP 30) |
+| NVIDIA RTX A3000 | code | 23.5 / 34.0 (QP 39) | 31.0 / 41.7 (QP 28) |
+| Intel UHD Quick Sync | scroll | 22.8 / 31.1 | 31.4 / 39.8 |
+| Intel UHD Quick Sync | code | 25.6 / 35.1 | 30.0 / 39.8 |
+
+At the same time the floor barely costs anything where bits are plentiful (OpenH264 `code` at
+0.06 bpp: 39.3 vs 39.7 dB, within noise; NVIDIA `ui` at 0.04 bpp: 40.1 vs 40.2 dB using 156 kbps instead of
+3 672 kbps).
+
+The controller itself is tested against simulated links (`adapt::simulation`): a collapse from
+100 to 2.5 Mbps lowers the picture to 1280x800 or smaller within 15 s with the modelled QP staying
+at or below 24 and at most four structural changes; recovery climbs one rung at a time, at least
+10 s apart, back to full quality; a borderline 6 Mbps Wi-Fi link settles on a rung instead of
+flapping.
+
 ## Encoder settings that matter
 
 - **No internal frame skipping** in OpenH264 — the session decides what to drop, with knowledge
   of the network.
 - **IDR only on demand** — no periodic keyframe spikes.
 - **Threads = half the logical CPUs, 1–4**, with the frame split into the same number of slices.
-- **Bitrate ≈ 0.1 bit/pixel** (`EncoderConfig::for_screen`): about 12 Mbps for 1080p60, well
-  within a LAN, and changeable at run time without a keyframe (groundwork for adaptive bitrate).
+- **Bitrate ≈ 0.12 bit/pixel** (`EncoderConfig::for_screen`): about 15 Mbps for 1080p60, well
+  within a LAN, and changeable at run time without a keyframe. See
+  [Quality policy](#quality-policy-smaller-never-blurrier).
+- **QP 12..32** on every encoder, so the picture never goes below a quality floor.
 - **NASM** gives OpenH264 its assembly paths. Builds without it work but encode slower; release
   builds should have it.
 
@@ -70,6 +164,62 @@ a backlog. The host e2e test `slow_encoder_drops_frames_instead_of_queueing` and
 BGRA → I420 is integer BT.709 code written for auto-vectorisation and split into bands of at least
 128 rows across up to 8 threads. `bgra_to_i420_half` downsizes 2× and converts in one pass when
 the encoder has to halve an oversized source.
+
+## Sharpness
+
+"Never blurry" is about what the eye sees once the picture stops moving, so sharpness work targets
+four places in the pipeline.
+
+**Static refinement (host).** While the screen moves, rate control spends few bits per picture and
+text softens. When the captured content has been unchanged for 300 ms the encode thread
+(`tlp-desk-host`, `refine::RefineGate`) re-encodes the last frame **once** through
+`VideoEncoder::encode_refine`: a keyframe at QP 14. The OpenH264 encoder does this with a second,
+lazily created OpenH264 instance configured for QP 14 and no practical bitrate cap (OpenH264 does
+not reliably take quantiser changes on a running encoder, so the quality-ladder's `QpBounds` on the
+main encoder are never touched); the main encoder is then told to emit a keyframe on its next
+picture, so the viewer's reference stays in sync (the main stream afterwards behaves exactly as
+after any keyframe request). Other backends (Media Foundation hardware) use the trait default:
+forced keyframe at 6x the bitrate, then the bitrate is restored. A pending resolution-ladder step
+postpones the refresh (the capturer is about to reopen at another size). Rules: nothing changed means no
+refresh (cursor-only moves do not count), at least 1.5 s between refreshes, and a 3 s back-off after
+a dropped packet because a refresh keyframe is big. It is sent at the current encoded size; lifting
+the capture cap for the refresh is not done (the adaptive ladder owns the size).
+
+**Downscale filter (capture).** The GPU scaler used mips plus a bilinear tap, which is an exact box
+filter only for a 2x reduction and blurs 1-pixel strokes at other ratios (1920x1200 to 1600x1000,
+1440p to 1080p). For any final reduction that is not 1:1 or exactly 2x it now runs a Lanczos-2
+pixel shader (kernel stretched by the ratio, normalised, exact `Load`s). The same taps exist on the
+CPU as `tlp_desk_capture::resample_lanczos2`, which is the reference in the tests and the fallback
+for CPU-only paths.
+
+**Colour.** BGRA to I420 is BT.709 limited range on the encoder side (signalled in the OpenH264 SPS
+VUI and in the Media Foundation media type) and the viewer decodes with the inverse BT.709
+limited-range matrix, so there is no washed-out or tinted picture. `tests/colour.rs` round-trips
+flat colours through the real codec (error at most 6 levels). 4:2:0 chroma still halves the colour
+resolution of coloured text; luminance, which carries the legibility, is full resolution.
+
+**Viewer display (app).** `ui::view_scale`: the image rectangle is snapped to physical pixels
+(fractional `pixels_per_point` safe); a 1:1 display (Actual size, or a fit that equals the frame size)
+uses nearest sampling, other scales bilinear. egui's wgpu backend has no mipmaps, so when a picture is
+shown smaller than it is and the screen has been still for 120 ms, the viewer pre-scales it once with
+Lanczos-2 (about 40 ms for 1080p to 720p) and shows that texture 1:1.
+
+### Measurements
+
+All from tests in the repository; run with `--nocapture` to reproduce.
+
+| Measurement | Result | Test |
+|---|---|---|
+| Synthetic dense text, 1280x720, 2.5 Mbps, scrolled 37 px/frame, last moving frame | 31.1 dB PSNR, SSIM 0.989 | `sharpness::refine_picture_is_much_sharper_than_a_moving_frame` |
+| Same scene after one refresh picture | 49.3 dB, SSIM 0.9999 (401 KB once) | same |
+| 1080p60 at the default 14.9 Mbps, same scroll | moving 30.9 dB / SSIM 0.988; refresh 48.7 dB / SSIM 0.9999 (about 1 MB once) | `sharpness::report_1080p_default_bitrate` |
+| Text image 1920x1200 to 1600x1000 (GPU, headless D3D11) | edge energy: source 131, box filter 72, Lanczos-2 107; GPU equals CPU reference at 72 dB | `windows_capture::d3d::tests::gpu_lanczos_matches_cpu_reference_and_is_sharper_than_box` |
+| Text image 2560x1440 to 1920x1080 | edge energy: source 131, box 74, Lanczos-2 103 | same |
+
+The synthetic scene is deliberately harsh (1-pixel strokes everywhere, no smooth areas), so real
+screens refresh far smaller than 1 MB and the moving picture is better than 31 dB; the point is the
+size of the *difference*. A refresh keyframe is one extra burst of a few hundred kilobytes about a
+third of a second after the screen settles, which is nothing on a LAN.
 
 ## Hardware encoding
 

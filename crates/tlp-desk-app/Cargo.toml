@@ -19,6 +19,7 @@ tlp-desk-host.workspace = true
 tlp-desk-viewer.workspace = true
 tlp-desk-files.workspace = true
 tlp-desk-input.workspace = true
+tlp-desk-capture.workspace = true
 tlp-desk-audio.workspace = true
 if-addrs = "0.13"
 raw-window-handle = "0.6"
@@ -52,7 +53,6 @@ tray-icon = { version = "0.26", default-features = false }
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 
 [dev-dependencies]
-tlp-desk-capture.workspace = true
 # Encodes real H.264 for the playback window tests.
 tlp-desk-codec.workspace = true
 tempfile = "3"

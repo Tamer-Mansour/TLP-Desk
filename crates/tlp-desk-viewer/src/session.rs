@@ -51,6 +51,9 @@ pub struct ViewerStats {
     pub decode_ms: f32,
     pub frames_received: u64,
     pub frames_decoded: u64,
+    /// Average H.264 quantiser (QP, 0-51, lower is sharper) of the frames received in the last
+    /// second, read from the bitstream; 0 when unknown.
+    pub qp: f32,
     /// Size of the latest decoded frame.
     pub width: u32,
     pub height: u32,
@@ -89,6 +92,10 @@ struct Counters {
     latency_us: AtomicU64,
     latency_samples: AtomicU64,
     size: AtomicU64,
+    qp_sum: AtomicU64,
+    qp_frames: AtomicU64,
+    /// Frames whose slice QP was not the 26 that some encoders always signal.
+    qp_varied: AtomicU64,
 }
 
 struct Shared {
@@ -431,7 +438,18 @@ fn decode_thread(shared: Arc<Shared>, mut jobs: mpsc::Receiver<Job>, rt: tokio::
         }
     };
     let mut need_keyframe = false;
+    let mut qp_probe = tlp_desk_codec::QpProbe::new();
     while let Some(job) = jobs.blocking_recv() {
+        if let Some(qp) = qp_probe.feed(&job.frame.data) {
+            shared
+                .counters
+                .qp_sum
+                .fetch_add(u64::from(qp), Ordering::Relaxed);
+            shared.counters.qp_frames.fetch_add(1, Ordering::Relaxed);
+            if qp != 26 {
+                shared.counters.qp_varied.fetch_add(1, Ordering::Relaxed);
+            }
+        }
         if need_keyframe && !job.frame.keyframe {
             lock(&shared.feedback).on_skipped();
             continue;
@@ -599,6 +617,7 @@ async fn stats_task(shared: Arc<Shared>, mut ended: watch::Receiver<Option<EndRe
     let mut last = Instant::now();
     let (mut last_dec, mut last_bytes, mut last_dec_us, mut last_lat, mut last_lat_n) =
         (0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut last_qp_sum, mut last_qp_n, mut last_qp_varied) = (0u64, 0u64, 0u64);
     loop {
         tokio::select! {
             _ = tick.tick() => {}
@@ -630,6 +649,23 @@ async fn stats_task(shared: Arc<Shared>, mut ended: watch::Receiver<Option<EndRe
             s.latency_ms = (lat - last_lat) as f32 / 1000.0 / lat_frames as f32;
             s.latency_synced = false;
         }
+        let (qp_sum, qp_n) = (
+            c.qp_sum.load(Ordering::Relaxed),
+            c.qp_frames.load(Ordering::Relaxed),
+        );
+        let qp_varied = c.qp_varied.load(Ordering::Relaxed);
+        let n = qp_n - last_qp_n;
+        if n > 0 {
+            // Intel's hardware encoder signals QP 26 in every slice header and varies the real
+            // quantiser per macroblock: a long run of exactly 26 means "unknown", not "26".
+            let uninformative = n >= 10 && qp_varied == last_qp_varied;
+            s.qp = if uninformative {
+                0.0
+            } else {
+                (qp_sum - last_qp_sum) as f32 / n as f32
+            };
+        }
+        (last_qp_sum, last_qp_n, last_qp_varied) = (qp_sum, qp_n, qp_varied);
         s.frames_received = c.received.load(Ordering::Relaxed);
         s.frames_decoded = dec;
         s.width = (size >> 32) as u32;

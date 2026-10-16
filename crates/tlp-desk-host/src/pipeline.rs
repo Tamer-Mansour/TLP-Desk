@@ -28,6 +28,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::adapt::{open_source, wanted_cap, AdaptShared, EncodeAdapter, QualityTarget, Source};
 use crate::cursor::{CursorOverlay, CursorPatch};
+use crate::refine::RefineGate;
 use crate::{CapturerFactory, EncoderFactory, MonitorLister};
 
 /// Consecutive non-fatal capture errors tolerated before the session is ended.
@@ -456,6 +457,10 @@ struct EncodeState {
     patch: CursorPatch,
     /// When the oldest not-yet-encoded change happened (None = nothing to send).
     pending_since: Option<Instant>,
+    /// When to send the high-quality refresh after the screen stops changing.
+    refine: RefineGate,
+    /// Resolution step last seen; a change means the capturer is about to be reopened.
+    last_scale: u32,
 }
 
 /// Why the encode thread woke up.
@@ -464,6 +469,8 @@ enum Wake {
     Encode,
     /// The adaptive controller is due.
     Tick,
+    /// The screen has been still long enough: send one high-quality refresh picture.
+    Refine,
 }
 
 /// Microseconds from the session clock to `t`.
@@ -492,6 +499,8 @@ fn encode_loop(
         cursor: CursorOverlay::new(),
         patch: CursorPatch::default(),
         pending_since: None,
+        refine: RefineGate::default(),
+        last_scale: mailbox.scale.load(Ordering::Acquire),
     };
 
     loop {
@@ -511,6 +520,10 @@ fn encode_loop(
         if let Wake::Tick = wake {
             adapter.tick(&ctx.session, &ctx.adapt, st.enc.as_deref_mut());
             interval = frame_interval(adapter.fps());
+            continue;
+        }
+        if let Wake::Refine = wake {
+            send_refine(ctx, &mut st, &mut seq)?;
             continue;
         }
 
@@ -566,6 +579,7 @@ fn encode_loop(
                         // The viewer is behind: the next frame must be a keyframe, and send it
                         // even if the screen stays static.
                         adapter.frame_dropped();
+                        st.refine.note_congestion(now);
                         enc.request_keyframe();
                         st.pending_since.get_or_insert(now);
                     }
@@ -581,6 +595,51 @@ fn encode_loop(
             Err(e) => return Err(format!("encoder failed: {e}")),
         }
     }
+}
+
+/// Encodes the last frame once as a high-quality refresh (keyframe at a very low quantiser)
+/// and sends it. The refresh is skipped silently if the encoder cannot produce one.
+fn send_refine(ctx: &PipelineCtx, st: &mut EncodeState, seq: &mut u64) -> Result<(), String> {
+    let now = Instant::now();
+    st.refine.note_refined(now);
+    let (Some(enc), Some((frame, monitor))) = (st.enc.as_mut(), st.last.as_mut()) else {
+        return Ok(());
+    };
+    let frame_size = (frame.width, frame.height);
+    frame.timestamp_us = clock_us(ctx, now);
+    let drawn = st.cursor.draw_scaled(frame, *monitor, &mut st.patch);
+    let encoded = enc.encode_refine(frame);
+    if drawn {
+        st.patch.restore(frame);
+    }
+    match encoded {
+        Ok(Some(ef)) => {
+            let vf = VideoFrame {
+                seq: *seq,
+                timestamp_us: clock_us(ctx, now),
+                width: frame_size.0,
+                height: frame_size.1,
+                codec: Codec::H264,
+                keyframe: ef.keyframe,
+                data: ef.data,
+            };
+            *seq += 1;
+            match ctx.session.send_video(vf) {
+                Ok(VideoSendStatus::Sent) => {}
+                Ok(VideoSendStatus::Dropped) => {
+                    // The viewer never saw this keyframe: resynchronise with the next picture.
+                    st.refine.note_congestion(now);
+                    enc.request_keyframe();
+                    st.pending_since.get_or_insert(now);
+                }
+                Err(e) => return Err(format!("cannot send video: {e}")),
+            }
+        }
+        Ok(None) => {}
+        Err(CodecError::SizeMismatch { .. }) => {}
+        Err(e) => tracing::debug!(%e, "refresh picture failed; skipped"),
+    }
+    Ok(())
 }
 
 /// Waits (without holding the lock while encoding) until there is something to send and the
@@ -601,6 +660,7 @@ fn wait_for_work(
         }
         if let Some(c) = slot.frame.take() {
             st.pending_since.get_or_insert(c.at);
+            st.refine.note_change(Instant::now());
             if st.gen != Some(c.gen) {
                 // New capturer: the old frame is stale and the stream must restart with a
                 // keyframe (the encoder is rebuilt if the size changed).
@@ -630,6 +690,23 @@ fn wait_for_work(
         if now >= adapter.next_tick() {
             return Some(Wake::Tick);
         }
+        // A resolution-ladder switch is pending: the capturer reopens at another size and the
+        // current frame is about to be replaced, so do not refine it; settle again afterwards.
+        let scale = mailbox.scale.load(Ordering::Acquire);
+        if scale != st.last_scale {
+            st.last_scale = scale;
+            st.refine.note_change(now);
+        }
+        let mut refine_wait = None;
+        if st.pending_since.is_none() && st.last.is_some() && st.enc.is_some() {
+            if st.refine.is_due(now) {
+                return Some(Wake::Refine);
+            }
+            refine_wait = st
+                .refine
+                .deadline()
+                .map(|at| at.saturating_duration_since(now));
+        }
         let wait = match st.pending_since {
             Some(_) if st.last.is_some() && now >= next_encode => return Some(Wake::Encode),
             Some(_) if st.last.is_some() => next_encode - now,
@@ -637,6 +714,7 @@ fn wait_for_work(
             _ => interval,
         };
         let wait = wait.min(adapter.next_tick().saturating_duration_since(now));
+        let wait = refine_wait.map_or(wait, |r| wait.min(r));
         slot = mailbox
             .cv
             .wait_timeout(slot, wait)

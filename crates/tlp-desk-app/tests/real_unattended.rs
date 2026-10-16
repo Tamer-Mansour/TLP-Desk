@@ -110,6 +110,8 @@ fn config(dir: &std::path::Path, port: u16, power: Arc<RecordingPower>) -> RealC
         system_permissions: true,
         // Never record or play real sound in tests.
         audio: tlp_desk_app::backend::audio::AudioDevices::fake(),
+        // Behave the same whether or not the real TLP-Desk service is installed here.
+        mirror_service: false,
         ..RealConfig::default()
     }
 }

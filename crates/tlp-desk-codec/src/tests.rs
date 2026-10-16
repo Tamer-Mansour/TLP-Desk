@@ -338,3 +338,49 @@ fn forced_half_downscale_keeps_quality() {
     let q = psnr(&src, &up);
     assert!(q > 25.0, "half-res PSNR {q:.1}");
 }
+
+/// Average slice QP the probe reads from `frames` noisy frames encoded at `kbps`.
+fn probed_qp(kbps: u32, tuning: H264Tuning) -> (f64, u8) {
+    let mut enc = H264Encoder::with_tuning(
+        EncoderConfig {
+            width: 640,
+            height: 480,
+            fps: 30,
+            bitrate_kbps: kbps,
+        },
+        tuning,
+    )
+    .unwrap();
+    let mut probe = crate::QpProbe::new();
+    let (mut sum, mut n, mut worst) = (0u32, 0u32, 0u8);
+    for t in 0..30 {
+        let Some(pkt) = enc.encode(&noisy_frame(640, 480, t)).unwrap() else {
+            continue;
+        };
+        let qp = probe
+            .feed(&pkt.data)
+            .expect("QP readable from OpenH264 output");
+        sum += u32::from(qp);
+        n += 1;
+        worst = worst.max(qp);
+    }
+    (f64::from(sum) / f64::from(n.max(1)), worst)
+}
+
+#[test]
+fn quality_floor_caps_the_quantiser_and_the_probe_reads_it() {
+    let (rich, _) = probed_qp(20_000, H264Tuning::default());
+    let (starved, worst) = probed_qp(100, H264Tuning::default());
+    assert!(rich < starved, "rich {rich} vs starved {starved}");
+    assert!(worst <= crate::QUALITY_MAX_QP, "QP {worst} above the floor");
+    // Without the floor the same starved stream goes far coarser.
+    let loose = H264Tuning {
+        qp: crate::QpBounds::UNBOUNDED,
+        ..H264Tuning::default()
+    };
+    let (_, loose_worst) = probed_qp(100, loose);
+    assert!(
+        loose_worst > crate::QUALITY_MAX_QP,
+        "unfloored QP only {loose_worst}"
+    );
+}

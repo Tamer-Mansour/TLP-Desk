@@ -4,7 +4,7 @@
 //! times per second and applies the returned [`AdaptDecision`]. That makes it testable against
 //! simulated network traces (see `adapt::simulation`).
 //!
-//! # Policy
+//! # Policy: quality first, smaller before blurrier
 //!
 //! *Latency first*: queueing delay is the main congestion signal, so the stream backs off
 //! before buffers fill instead of after packets are lost.
@@ -19,15 +19,21 @@
 //! * **Bitrate, AIMD**: mild x0.85, severe x0.6 (and, when frames were dropped, never above
 //!   85 % of what QUIC actually sent during that tick), at most once per 400 ms. After 1.5 s without congestion
 //!   the target grows additively (6 % of the ceiling + 10 % of the current target per second).
-//! * **Frame rate**: halved (60 -> 30 -> 15) when the bitrate sits at its floor and the link is
-//!   still congested for 2 s, or when the viewer's decoder needs more than 85 % of the frame
-//!   interval twice in a row. Raised again one step after 8 s without congestion.
-//! * **Resolution**: at the lowest frame rate and still congested at the floor for 3 s, the
-//!   capture cap is scaled to 75 %, then 50 % (each change costs a keyframe). Restored one step
-//!   after 12 s without congestion at full frame rate.
+//! * **The ladder**: the picture never gets blurrier to fit a smaller link. What a bitrate buys
+//!   is measured in *bits per pixel* (bpp = kbps / (pixels x fps)); text stays sharp above
+//!   about 0.07 bpp and goes soft below. When congestion has pushed the target so low that the
+//!   current size and rate would fall under that floor for 2.5 s, the stream moves down a
+//!   [`LADDER`] rung (1920x1200 -> 1600x1000 -> 1280x800 -> 1024x640, with 60 -> 45 -> 30 -> 15
+//!   fps interleaved) to the first rung that restores the floor, in one step. Every change
+//!   rebuilds the encoder at the new size and costs a keyframe.
+//! * **Back up** one rung only after 10 s without congestion and when the bigger picture would
+//!   still get at least 0.10 bpp at the current target (the gap to the 0.07 floor is the
+//!   hysteresis). A step down soon after a step up doubles the wait for the next step up (up
+//!   to 60 s), so a link that cannot carry the bigger picture is not retried every ten seconds.
+//! * **Decoder overload**: when the viewer's decoder needs more than 85 % of the frame interval
+//!   twice in a row the frame rate is halved, and restored after 8 s without congestion.
 //!
-//! Structural changes (frame rate, resolution) are at least 3 s apart (hysteresis), so the
-//! stream never oscillates between sizes.
+//! Structural changes (rungs, decoder frame rate) are at least 4 s apart.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -48,20 +54,57 @@ const INCREASE_HOLD: Duration = Duration::from_millis(1500);
 /// Mild / severe multiplicative decrease, in per mille.
 const MILD_DECREASE: u64 = 850;
 const SEVERE_DECREASE: u64 = 600;
-/// Congested at the bitrate floor this long before the frame rate drops.
-const FPS_DOWN_AFTER: Duration = Duration::from_secs(2);
-/// Congested at the floor at minimum fps this long before the resolution drops.
-const SCALE_DOWN_AFTER: Duration = Duration::from_secs(3);
-/// Minimum time between structural (fps / resolution) changes.
-const STRUCTURAL_HOLD: Duration = Duration::from_secs(3);
-/// Clear this long before the frame rate goes up again.
+/// Minimum time between structural (rung / decoder frame rate) changes.
+const STRUCTURAL_HOLD: Duration = Duration::from_secs(4);
+/// Clear this long before the decoder-limited frame rate goes up again.
 const FPS_UP_AFTER: Duration = Duration::from_secs(8);
-/// Clear this long before the resolution goes up again.
-const SCALE_UP_AFTER: Duration = Duration::from_secs(12);
-/// Resolution steps, per mille of the capture cap.
-const SCALE_STEPS: [u32; 3] = [1000, 750, 500];
 /// The frame rate is never adapted below this.
 const MIN_FPS: u32 = 15;
+
+/// One step of the quality ladder: resolution scale (per mille of the capture cap, applied
+/// to both dimensions) and frame rate (percent of the requested rate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rung {
+    /// Per mille of the capture cap (834 turns 1920x1200 into 1600x1000).
+    pub scale_permille: u32,
+    /// Percent of the requested frame rate.
+    pub fps_pct: u32,
+}
+
+const fn rung(scale_permille: u32, fps_pct: u32) -> Rung {
+    Rung {
+        scale_permille,
+        fps_pct,
+    }
+}
+
+/// The quality ladder, best first. Resolution drops first (text is mostly flat, so fewer
+/// pixels is the cheapest way to save bits), then the frame rate, alternating so neither is
+/// pushed to the extreme before the other has given something.
+pub const LADDER: [Rung; 7] = [
+    rung(1000, 100),
+    rung(834, 100),
+    rung(834, 75),
+    rung(667, 75),
+    rung(667, 50),
+    rung(534, 50),
+    rung(534, 25),
+];
+
+/// Below this many bits per pixel (at the current size and frame rate) text starts to smear.
+pub const MIN_BPP: f64 = 0.07;
+/// A bigger picture is only tried again if it would still get this many bits per pixel.
+pub const UP_BPP: f64 = 0.10;
+/// Under the floor and congested this long before the ladder moves.
+const BELOW_FOR: Duration = Duration::from_millis(2500);
+/// Congestion this recent still counts as "the link is the problem" for the ladder.
+const RECENT_CONGESTION: Duration = Duration::from_secs(3);
+/// Congestion-free time before the first step up.
+const UP_AFTER: Duration = Duration::from_secs(10);
+/// Longest wait before a step up after repeated failed attempts.
+const UP_AFTER_MAX: Duration = Duration::from_secs(60);
+/// A step down this soon after a step up counts as a failed attempt.
+const FLAP_WINDOW: Duration = Duration::from_secs(30);
 
 /// Bounds and mode of the controller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,17 +117,24 @@ pub struct ControllerConfig {
     pub max_fps: u32,
     /// `false`: fixed bitrate `max_kbps`, full frame rate and resolution, no adaptation.
     pub adaptive: bool,
+    /// Pixels of a full-size frame (the capture cap), for bits-per-pixel; 0 disables the
+    /// ladder.
+    pub frame_pixels: u64,
 }
 
 impl ControllerConfig {
-    /// Adaptive bounds for a ceiling: the floor is 1/16 of it (at least 300 kbps).
+    /// Adaptive bounds for a ceiling: the floor is 1/16 of it (at least 300 kbps). The frame
+    /// size defaults to the one a ceiling of 0.1 bpp implies; use
+    /// [`ControllerConfig::with_frame_pixels`] for the real one.
     pub fn adaptive(max_kbps: u32, max_fps: u32) -> Self {
         let max_kbps = max_kbps.max(300);
+        let max_fps = max_fps.max(1);
         Self {
             min_kbps: (max_kbps / 16).max(300).min(max_kbps),
             max_kbps,
-            max_fps: max_fps.max(1),
+            max_fps,
             adaptive: true,
+            frame_pixels: u64::from(max_kbps) * 10_000 / u64::from(max_fps),
         }
     }
 
@@ -95,7 +145,14 @@ impl ControllerConfig {
             max_kbps: kbps.max(1),
             max_fps: fps.max(1),
             adaptive: false,
+            frame_pixels: 0,
         }
+    }
+
+    /// Sets the pixel count of a full-size frame.
+    pub fn with_frame_pixels(mut self, pixels: u64) -> Self {
+        self.frame_pixels = pixels;
+        self
     }
 }
 
@@ -151,19 +208,22 @@ pub enum Congestion {
     Severe,
 }
 
-/// AIMD controller with hysteresis (see the module docs).
+/// AIMD controller with the quality ladder (see the module docs).
 #[derive(Debug, Clone)]
 pub struct Controller {
     cfg: ControllerConfig,
     target: u32,
-    fps: u32,
-    scale_idx: usize,
+    /// Frame rate limit from the viewer's decoder.
+    dec_fps: u32,
+    rung: usize,
     rtts: VecDeque<(Duration, Duration)>,
     last_at: Option<Duration>,
     last_decrease: Option<Duration>,
     last_structural: Option<Duration>,
+    last_up: Option<Duration>,
+    up_wait: Duration,
     clear_since: Option<Duration>,
-    floor_since: Option<Duration>,
+    below_since: Option<Duration>,
     slow_decodes: u32,
     last_level: Congestion,
 }
@@ -175,14 +235,16 @@ impl Controller {
         Self {
             cfg,
             target: cfg.max_kbps,
-            fps: cfg.max_fps,
-            scale_idx: 0,
+            dec_fps: cfg.max_fps,
+            rung: 0,
             rtts: VecDeque::new(),
             last_at: None,
             last_decrease: None,
             last_structural: None,
+            last_up: None,
+            up_wait: UP_AFTER,
             clear_since: None,
-            floor_since: None,
+            below_since: None,
             slow_decodes: 0,
             last_level: Congestion::Clear,
         }
@@ -190,13 +252,13 @@ impl Controller {
 
     /// New bounds (quality preset changed, or the encoder was rebuilt for another size).
     /// The current target is kept within the new bounds; a new frame-rate ceiling resets the
-    /// frame-rate step.
+    /// decoder frame-rate limit.
     pub fn reconfigure(&mut self, cfg: ControllerConfig) {
         if cfg.max_fps != self.cfg.max_fps || !cfg.adaptive {
-            self.fps = cfg.max_fps;
+            self.dec_fps = cfg.max_fps;
         }
-        if !cfg.adaptive {
-            self.scale_idx = 0;
+        if !cfg.adaptive || cfg.frame_pixels == 0 {
+            self.rung = 0;
         }
         // Coming from a fixed bitrate, or running unconstrained at the ceiling: follow the new
         // ceiling. A target lowered by congestion stays where it is.
@@ -205,12 +267,45 @@ impl Controller {
         }
         self.cfg = cfg;
         self.target = self.target.clamp(cfg.min_kbps, cfg.max_kbps);
-        self.fps = self.fps.clamp(1, cfg.max_fps);
+        self.dec_fps = self.dec_fps.clamp(1, cfg.max_fps);
     }
 
     /// The bounds in use.
     pub fn config(&self) -> ControllerConfig {
         self.cfg
+    }
+
+    /// The ladder rung in use (0 = full quality).
+    pub fn rung(&self) -> usize {
+        self.rung
+    }
+
+    fn rung_fps(&self, rung: usize) -> u32 {
+        let pct = LADDER.get(rung).map_or(100, |r| r.fps_pct);
+        (self.cfg.max_fps * pct / 100)
+            .max(self.min_fps())
+            .min(self.cfg.max_fps)
+    }
+
+    fn rung_scale(rung: usize) -> u32 {
+        LADDER.get(rung).map_or(1000, |r| r.scale_permille)
+    }
+
+    /// Bits per pixel `kbps` buys at `rung`; infinite when the ladder is disabled.
+    fn bpp(&self, kbps: u32, rung: usize) -> f64 {
+        if self.cfg.frame_pixels == 0 {
+            return f64::INFINITY;
+        }
+        let scale = f64::from(Self::rung_scale(rung)) / 1000.0;
+        let pixels = self.cfg.frame_pixels as f64 * scale * scale;
+        f64::from(kbps) * 1000.0 / (pixels * f64::from(self.rung_fps(rung)).max(1.0))
+    }
+
+    /// Floor and step-up thresholds, scaled down for ceilings that never reach the defaults
+    /// (a "Speed" preset capped at 60 % must still be able to climb back).
+    fn thresholds(&self) -> (f64, f64) {
+        let reference = self.bpp(self.cfg.max_kbps, 0);
+        (MIN_BPP.min(0.8 * reference), UP_BPP.min(0.95 * reference))
     }
 
     /// The current decision.
@@ -224,8 +319,8 @@ impl Controller {
         }
         AdaptDecision {
             bitrate_kbps: self.target,
-            fps: self.fps,
-            scale_permille: SCALE_STEPS.get(self.scale_idx).copied().unwrap_or(1000),
+            fps: self.rung_fps(self.rung).min(self.dec_fps).max(1),
+            scale_permille: Self::rung_scale(self.rung),
         }
     }
 
@@ -328,12 +423,6 @@ impl Controller {
                 }
             }
         }
-        let at_floor = self.target <= min.saturating_add(min / 5);
-        if level != Congestion::Clear && at_floor {
-            self.floor_since.get_or_insert(s.at);
-        } else if level == Congestion::Clear {
-            self.floor_since = None;
-        }
     }
 
     fn structural_allowed(&self, at: Duration) -> bool {
@@ -346,68 +435,93 @@ impl Controller {
     }
 
     fn adapt_structure(&mut self, s: &Signals, level: Congestion) {
+        let can_change = self.structural_allowed(s.at);
+        let since_change = self
+            .last_structural
+            .map_or(Duration::MAX, |t| s.at.saturating_sub(t));
+        let clear_for = self
+            .clear_since
+            .map_or(Duration::ZERO, |t| s.at.saturating_sub(t));
+
         // Decoder overload: the viewer cannot decode this many frames per second.
         if let Some(v) = s.viewer {
-            let budget = 1_000_000 / u64::from(self.fps.max(1));
+            let budget = 1_000_000 / u64::from(self.dec_fps.max(1));
             if u64::from(v.decode_us) * 100 > budget * 85 {
                 self.slow_decodes += 1;
             } else {
                 self.slow_decodes = 0;
             }
         }
-        let floor_for = |since: Option<Duration>| since.map(|t| s.at.saturating_sub(t));
-        let at_floor_long = |d: Duration| floor_for(self.floor_since).is_some_and(|f| f >= d);
-        let can_change = self.structural_allowed(s.at);
-
-        if can_change && self.fps > self.min_fps() {
-            let decoder = self.slow_decodes >= 2;
-            if decoder || at_floor_long(FPS_DOWN_AFTER) {
-                self.fps = (self.fps / 2).max(self.min_fps());
-                self.slow_decodes = 0;
-                self.last_structural = Some(s.at);
-                self.floor_since = None;
-                return;
-            }
+        if can_change && self.dec_fps > self.min_fps() && self.slow_decodes >= 2 {
+            self.dec_fps = (self.dec_fps / 2).max(self.min_fps());
+            self.slow_decodes = 0;
+            self.last_structural = Some(s.at);
+            return;
         }
-        if can_change && self.fps <= self.min_fps() && at_floor_long(SCALE_DOWN_AFTER) {
-            if self.scale_idx + 1 < SCALE_STEPS.len() {
-                self.scale_idx += 1;
-                self.last_structural = Some(s.at);
-                self.floor_since = None;
+
+        let (floor, up_bpp) = self.thresholds();
+        // Ladder down: the target is so low that this rung would fall under the bpp floor.
+        // (The AIMD sawtooth alternates clear and congested ticks, so "congested" means
+        // "within the last few seconds".)
+        let recently_congested = clear_for < RECENT_CONGESTION;
+        if recently_congested && self.bpp(self.target, self.rung) < floor {
+            self.below_since.get_or_insert(s.at);
+        } else {
+            self.below_since = None;
+        }
+        let below_for = self
+            .below_since
+            .map_or(Duration::ZERO, |t| s.at.saturating_sub(t));
+        if can_change && below_for >= BELOW_FOR && self.rung + 1 < LADDER.len() {
+            // The first rung that restores the floor with a margin, else the smallest.
+            let next = (self.rung + 1..LADDER.len())
+                .find(|&r| self.bpp(self.target, r) >= floor * 1.15)
+                .unwrap_or(LADDER.len() - 1);
+            self.rung = next;
+            self.last_structural = Some(s.at);
+            self.below_since = None;
+            if self
+                .last_up
+                .is_some_and(|t| s.at.saturating_sub(t) <= FLAP_WINDOW)
+            {
+                self.up_wait = (self.up_wait * 2).min(UP_AFTER_MAX);
             }
             return;
         }
         if level != Congestion::Clear {
             return;
         }
-        let clear_for = self
-            .clear_since
-            .map_or(Duration::ZERO, |t| s.at.saturating_sub(t));
-        let since_change = self
-            .last_structural
-            .map_or(Duration::MAX, |t| s.at.saturating_sub(t));
+        if since_change >= Duration::from_secs(120) {
+            self.up_wait = UP_AFTER;
+        }
+
+        // Decoder-limited frame rate recovers on its own clock.
         let room = |pct: u64| u64::from(self.target) * 100 >= u64::from(self.cfg.max_kbps) * pct;
-        if self.fps < self.cfg.max_fps
+        if self.dec_fps < self.cfg.max_fps
             && clear_for >= FPS_UP_AFTER
             && since_change >= FPS_UP_AFTER
             && room(50)
         {
-            let next = self.fps.saturating_mul(2).min(self.cfg.max_fps);
+            let next = self.dec_fps.saturating_mul(2).min(self.cfg.max_fps);
             // Only if the viewer's decoder has headroom for the higher rate.
             let decode_ok = s
                 .viewer
                 .is_none_or(|v| u64::from(v.decode_us) * u64::from(next) < 600_000);
             if decode_ok {
-                self.fps = next;
+                self.dec_fps = next;
                 self.last_structural = Some(s.at);
+                return;
             }
-        } else if self.scale_idx > 0
-            && self.fps >= self.cfg.max_fps
-            && clear_for >= SCALE_UP_AFTER
-            && since_change >= SCALE_UP_AFTER
-            && room(60)
+        }
+        // Ladder up: calm for a while and the bigger picture still gets enough bits.
+        if self.rung > 0
+            && can_change
+            && clear_for >= self.up_wait
+            && since_change >= self.up_wait
+            && self.bpp(self.target, self.rung - 1) >= up_bpp
         {
-            self.scale_idx -= 1;
+            self.rung -= 1;
+            self.last_up = Some(s.at);
             self.last_structural = Some(s.at);
         }
     }

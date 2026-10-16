@@ -27,6 +27,8 @@ pub struct H264Tuning {
     /// OpenH264's screen-content mode: noticeably smaller output for text/UI, but 2-3x the
     /// CPU per frame and it does not use multiple threads. Off by default (latency first).
     pub screen_content: bool,
+    /// Quantiser limits; [`QpBounds::FLOOR`] by default.
+    pub qp: crate::QpBounds,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,7 @@ impl Default for H264Tuning {
             complexity: H264Complexity::Low,
             downscale: Downscale::Auto,
             screen_content: false,
+            qp: crate::QpBounds::FLOOR,
         }
     }
 }
@@ -91,6 +94,11 @@ pub struct H264Encoder {
     raw: ffi::RawEncoder,
     yuv: I420Buffer,
     force_keyframe: bool,
+    /// Second OpenH264 instance for refresh pictures (fixed low quantiser), created on first
+    /// use. A separate instance because OpenH264 does not reliably take quantiser changes on a
+    /// running encoder; the main encoder is told to emit a keyframe after each refresh so the
+    /// viewer's reference stays in sync.
+    refiner: Option<ffi::RawEncoder>,
 }
 
 impl H264Encoder {
@@ -131,6 +139,7 @@ impl H264Encoder {
             threads,
             complexity: tuning.complexity,
             screen_content: tuning.screen_content,
+            qp: tuning.qp,
         })?;
         Ok(Self {
             config,
@@ -140,6 +149,7 @@ impl H264Encoder {
             raw,
             yuv: I420Buffer::default(),
             force_keyframe: false, // the first frame is always an IDR
+            refiner: None,
         })
     }
 
@@ -197,6 +207,58 @@ impl VideoEncoder for H264Encoder {
         self.force_keyframe = true;
     }
 
+    fn encode_refine(&mut self, frame: &BgraFrame) -> Result<Option<EncodedFrame>, CodecError> {
+        if frame.width != self.config.width || frame.height != self.config.height {
+            return Err(CodecError::SizeMismatch {
+                got_w: frame.width,
+                got_h: frame.height,
+                want_w: self.config.width,
+                want_h: self.config.height,
+            });
+        }
+        if !frame.is_well_formed() {
+            return Err(CodecError::Backend(
+                "BGRA frame buffer too small for its geometry".into(),
+            ));
+        }
+        if self.refiner.is_none() {
+            let q = crate::refine::REFINE_QP as u8;
+            self.refiner = Some(ffi::RawEncoder::new(&ffi::Params {
+                width: self.encoded.0,
+                height: self.encoded.1,
+                // Effectively unlimited: the quantiser, not the rate, decides the size.
+                bitrate_bps: 100_000_000,
+                fps: self.config.fps.max(1),
+                threads: resolve_threads(self.tuning.threads),
+                complexity: H264Complexity::Low,
+                screen_content: false,
+                qp: crate::QpBounds { min: q, max: q + 1 },
+            })?);
+        }
+        if self.half {
+            bgra_to_i420_half(frame, &mut self.yuv);
+        } else {
+            bgra_to_i420(frame, &mut self.yuv);
+        }
+        let Some(refiner) = self.refiner.as_mut() else {
+            return Ok(None);
+        };
+        refiner.force_idr()?;
+        let mut data = Vec::new();
+        let kind = refiner.encode(&self.yuv, (frame.timestamp_us / 1000) as i64, &mut data)?;
+        // The viewer now holds this picture, not the main encoder's reference: restart the
+        // main stream with a keyframe on the next change.
+        self.force_keyframe = true;
+        if kind == ffi::FrameKind::Skipped || data.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(EncodedFrame {
+            keyframe: true,
+            timestamp_us: frame.timestamp_us,
+            data,
+        }))
+    }
+
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError> {
         let kbps = kbps.max(1);
         self.raw.set_bitrate(kbps.saturating_mul(1000))?;
@@ -242,6 +304,7 @@ mod ffi {
         pub threads: u16,
         pub complexity: H264Complexity,
         pub screen_content: bool,
+        pub qp: crate::QpBounds,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,6 +435,11 @@ mod ffi {
             // big content changes into IDRs, which cost latency, so keep it off.
             params.bEnableSceneChangeDetect = p.screen_content;
             params.bEnableLongTermReference = false;
+            // Quality floor: rate control never quantises coarser than max_qp (H.264 range
+            // 0..=51; OpenH264 itself accepts 0..=51 with min <= max).
+            let max_qp = i32::from(p.qp.max.clamp(1, 51));
+            params.iMaxQp = max_qp;
+            params.iMinQp = i32::from(p.qp.min).clamp(0, max_qp);
             params.iEntropyCodingModeFlag = 0; // CAVLC (constrained baseline)
 
             let layer = &mut params.sSpatialLayers[0];

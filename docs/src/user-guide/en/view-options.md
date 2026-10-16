@@ -41,9 +41,19 @@ The **Quality** button (sliders icon) in the session toolbar picks a preset for 
 
 | Preset | Picture | Use it for |
 |---|---|---|
-| **Speed** | up to 1280 × 720, 60 fps, low bitrate | slow Wi-Fi, lowest delay |
+| **Speed** | up to 1280 × 720, 60 fps, lower bitrate | slow Wi-Fi, lowest delay |
 | **Balanced** | up to 1920 × 1200, 60 fps | everyday use (default) |
 | **Quality** | the remote monitor's full size, up to 3840 × 2160, 60 fps, high bitrate | reading small text or detail on a fast network |
 
 The change applies immediately. New sessions start with the preset chosen in **Settings**.
-Within the preset the remote PC still adapts the bitrate to the network by itself.
+Within the preset the remote PC still adapts to the network by itself, and it does so by making the
+picture **smaller** (for example 1920 × 1200, then 1600 × 1000, then 1280 × 800) instead of letting
+it turn blurry or blocky. The size in use is shown in the [statistics overlay](stats.md); it goes
+back up when the network is calm again.
+
+### Sharp text
+
+When the picture stops moving (you stop scrolling or typing) the remote PC sends one extra
+high-quality picture about a third of a second later, so text turns crisp on its own. In **Actual
+size** every remote pixel is shown on exactly one screen pixel, and when the window is smaller than
+the remote screen, TLP-Desk re-scales the still picture with a sharp filter. Nothing to configure.

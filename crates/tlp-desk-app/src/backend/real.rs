@@ -106,6 +106,10 @@ pub struct RealConfig {
     pub transfer: TransferConfig,
     /// Folder of the transfer history, `transfers.json` (`None` = keep it in memory only).
     pub history: Option<PathBuf>,
+    /// When the port is taken by the installed Windows service, mirror that service instead of
+    /// reporting `PortInUse`. Tests turn this off so they behave the same whether or not a real
+    /// service is installed on the machine.
+    pub mirror_service: bool,
 }
 
 impl Default for RealConfig {
@@ -138,6 +142,7 @@ impl Default for RealConfig {
                 ..TransferConfig::default()
             },
             history: None,
+            mirror_service: true,
         }
     }
 }
@@ -630,7 +635,8 @@ impl RealBackend {
         // TLP-service: the port is taken by the installed service, which hosts this device;
         // mirror it instead of reporting a problem.
         #[cfg(windows)]
-        if matches!(problem, Some(HostProblem::PortInUse(_)))
+        if cfg.mirror_service
+            && matches!(problem, Some(HostProblem::PortInUse(_)))
             && tlp_desk_host::service::windows::service_running()
         {
             problem = None;
@@ -1238,6 +1244,7 @@ impl Inner {
                         latency_ms: s.latency_ms,
                         latency_synced: s.latency_synced,
                         bitrate_kbps: s.bitrate_kbps.max(0.0).round() as u32,
+                        qp: s.qp.clamp(0.0, 51.0).round() as u8,
                     },
                 }),
                 ViewerEvent::HostInputPriority(local_active) => {

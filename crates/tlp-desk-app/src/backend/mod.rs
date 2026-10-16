@@ -297,6 +297,8 @@ pub struct SessionStats {
     pub latency_synced: bool,
     /// Video bitrate in kilobits per second.
     pub bitrate_kbps: u32,
+    /// Average H.264 quantiser of the last second (0 = unknown); lower is sharper.
+    pub qp: u8,
 }
 
 /// Events from the backend to the UI.

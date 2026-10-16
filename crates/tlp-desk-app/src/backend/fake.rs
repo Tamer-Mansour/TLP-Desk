@@ -412,6 +412,7 @@ impl Inner {
                     latency_ms: 14.0 + jitter * 9.0,
                     latency_synced: true,
                     bitrate_kbps: 9_000 + (jitter * 4_000.0) as u32,
+                    qp: 20 + (jitter * 3.0) as u8,
                 };
                 self.emit(BackendEvent::Stats { session, stats });
                 window_start = Instant::now();

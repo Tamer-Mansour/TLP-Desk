@@ -232,6 +232,7 @@ pub fn start_session(app: &mut App, lang: Lang, active: u32) {
         latency_ms: 17.0,
         latency_synced: true,
         bitrate_kbps: 12_400,
+        qp: 0,
     });
     view.set_fixed_elapsed(Some(Duration::from_secs(4 * 60 + 27)));
     view.set_monitors(fake_monitors(), active);
