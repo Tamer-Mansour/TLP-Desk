@@ -306,6 +306,8 @@ mod tests {
 
     #[test]
     fn software_preference_uses_openh264() {
+        // Off Windows the struct has no other fields, so the update looks redundant.
+        #[allow(clippy::needless_update)]
         let options = EncoderOptions {
             preference: EncoderPreference::Software,
             ..EncoderOptions::default()
