@@ -33,7 +33,7 @@ windows = { version = "0.62", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows-core = "0.62"
+windows-core = "0.100"
 
 # Linux/X11 capture. RustConnection is pure Rust: no libxcb build or run-time dependency.
 [target.'cfg(target_os = "linux")'.dependencies]
