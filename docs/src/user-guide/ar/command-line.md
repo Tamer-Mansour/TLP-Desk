@@ -41,7 +41,7 @@ TLP-Desk-cli connect 123456789 --code 042917 --seconds 10 --snapshot shot.png
 TLP-Desk-cli --lang ar info 123456789 --code 042917
 TLP-Desk-cli wol "مكتب المحاسبة"
 TLP-Desk-cli list --json
-TLP-Desk-cli chat 123456789 "مرحباً، hello" --code 042917 --wait 10   # send a chat message, print replies
+TLP-Desk-cli chat 123456789 "مرحبًا، hello" --code 042917 --wait 10   # send a chat message, print replies
 ```
 
 </div>
@@ -63,7 +63,7 @@ TLP-Desk-cli chat 123456789 "مرحباً، hello" --code 042917 --wait 10   # s
 | `clip-send <الهدف> <النص>` | يضع نصًا في حافظة الحاسوب الآخر |
 | `ls` و`mkdir` و`rm` و`mv` | تصفح المجلدات وتغييرها في الحاسوب الآخر (صلاحية الملفات) |
 | `send-file` و`get-file` | نسخ ملفات ومجلدات إلى الحاسوب الآخر أو منه |
-| `forward <الهدف> <محلي:مضيف:بعيد>` | توجيه منافذ TCP حتى Ctrl+C |
+| `forward <الهدف> <محلي:مضيف:بعيد>` | تمرير منافذ TCP حتى Ctrl+C |
 
 </div>
 

@@ -847,7 +847,7 @@ mod tests {
         ar_has(2 * 3600, "ساعتين");
         ar_has(4 * 3600, "ساعات");
         ar_has(3 * 86_400, "أيام");
-        ar_has(11 * 86_400, "يوماً");
+        ar_has(11 * 86_400, "يومًا");
         ar_has(100 * 86_400, "يوم");
         // The number is an LTR isolate in the user's digit style.
         let indic = Tx::new(Lang::Ar, DigitStyle::ArabicIndic);
