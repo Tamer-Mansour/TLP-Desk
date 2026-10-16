@@ -17,4 +17,11 @@ the session, the buttons update by themselves within a few seconds.
 
 With only one monitor, no picker is shown.
 
-Viewing **all monitors at once** is planned — see the roadmap (M2, "All monitors" view).
+## All monitors at once
+
+The last button in the picker (the grid icon, tooltip **All screens**) shows **every monitor in one
+picture** of the remote PC's whole desktop, laid out the way the monitors are arranged there
+(including monitors placed to the left of or above the main one). The picture is scaled down to the
+current quality limit, so text is smaller than on a single monitor. Your mouse still controls the
+right spot: a click lands on the monitor under the pointer. Click a number to go back to one
+monitor.
