@@ -8,6 +8,28 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Added
+
+- **Several viewers with full control at once.** Two (or more) colleagues can control one PC at
+  the same time, each with their own picture, monitor choice, quality, permissions and pointer
+  marker; one leaving does not disturb the others. Sessions on the same monitor share one screen
+  capturer (each keeps its own encoder), so a second viewer does not double the capture work
+  (`HostConfig::share_capture`, `serve --no-shared-capture` to compare).
+- **Pause input and View only per viewer.** While several people are connected, each line of the
+  host banner can mute that person's mouse and keyboard (permissions unchanged) or make them
+  view-only, live (`Host::set_input_paused`).
+- **Automatic reconnect after a network drop.** Every session gets a single-use resume ticket
+  (bound to the viewer's key, valid 150 s, renewed every 30 s and on every permission change).
+  If the connection drops, the viewer reconnects on its own for up to two minutes without a new
+  Accept and with the permissions the host allows at that moment, behind a "Connection lost.
+  Reconnecting…" overlay (Arabic and English). Deliberate ends revoke the ticket. No wire change:
+  it reuses `ReconnectTicket`.
+
+### Changed
+
+- High-resolution wheel deltas (precision touchpads) keep their sub-notch remainder, so slow
+  scrolling is no longer lost to rounding.
+
 ## [1.0.0-rc.2] - 2026-10-16
 
 Streaming quality and AnyDesk-style file transfer.
