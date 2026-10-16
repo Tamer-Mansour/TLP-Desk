@@ -118,10 +118,13 @@ impl KeyGrab for SystemKeyGrab {
     }
 }
 
-/// Raw `HWND` of an eframe window (Windows only), for [`SystemKeyGrab`].
+/// Raw `HWND` (Windows) or X11 window id of an eframe window, for [`SystemKeyGrab`].
 pub fn window_handle(w: &impl raw_window_handle::HasWindowHandle) -> Option<isize> {
     match w.window_handle().ok()?.as_raw() {
         raw_window_handle::RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
+        // X11: the window id the keyboard grab is placed on.
+        raw_window_handle::RawWindowHandle::Xlib(h) => isize::try_from(h.window).ok(),
+        raw_window_handle::RawWindowHandle::Xcb(h) => isize::try_from(h.window.get()).ok(),
         _ => None,
     }
 }
