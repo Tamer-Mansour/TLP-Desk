@@ -12,6 +12,8 @@ protocol bump is called out below.
 
 - **Copy in Explorer on one PC, paste in Explorer on the other.** Ctrl+C on files or folders on either PC and Ctrl+V in an Explorer window (or the desktop) on the other PC now works in both directions, with Explorer's own copy dialog. The files are offered as virtual clipboard files and pulled only when you paste, using the existing transfer engine (resume, BLAKE3 verification). Needs the Files and Clipboard permissions; revoking either removes the pending paste. The paste buttons and Ctrl+V in the session window stay as a fallback. No wire change.
 
+- **Complete file-transfer experience.** TLP-Desk asks what to do when a file already exists (keep both, replace, skip or resume, per file or for all); a transfer list with pause, resume, cancel, retry, per-file progress, sorting, total speed and a history of recent transfers with send again; a progress pill on the session toolbar; on the host, a **File transfers** window, a banner button and an arrival notice, so a viewer's transfers are never hidden; `--on-conflict` for `get-file` and `serve`. Thousands of small files copy faster.
+
 ### Fixed
 
 - **The session toolbar fits any window width.** Items that do not fit move into a **More** menu (least important first); the connection label is shortened with an ellipsis and **Disconnect** is always visible at the reading end, in English and Arabic. A running recording shows a red dot on **More** while its button is in the menu.
