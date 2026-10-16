@@ -5,6 +5,8 @@ one-time code, and **restart the remote PC** with an automatic reconnect once it
 
 ## The permanent password
 
+![The Unattended access card in Settings](../../media/settings-unattended-en-light.png)
+
 On the PC you want to reach:
 
 1. Open **Settings > Unattended access**.
