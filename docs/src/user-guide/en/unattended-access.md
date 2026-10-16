@@ -95,6 +95,35 @@ changed.
   `%ProgramData%\TLP-Desk\logs\service.log` (a technical log in English, for support; notices you
   see on screen are in your language, and nothing is written to the Windows Event Log).
 
+### Everything works under the service
+
+The session features work the same as without the service; the helper in your session does the
+parts that need your desktop:
+
+- **Clipboard sync** and **Explorer copy/paste**: copy files on the other PC, press Ctrl+V in
+  Explorer here, and they arrive with Explorer's own progress dialog.
+- **Files**: transfers sent to this PC land on the signed-in user's **Desktop**. Viewers can only
+  browse and transfer inside that user's own folder (`C:\Users\<name>`); while nobody is signed
+  in, file access is off. (The service runs as the system account, so it never offers the rest
+  of the disk.)
+- **Chat**, the **whiteboard** drawings, the green **pointer marker**, **local priority** (your own
+  mouse and keyboard win), **privacy mode** and the computer's **sound**.
+- The TLP-Desk window on this PC shows the transfers coming in, asks "replace or keep both?"
+  when **Ask before replacing** is on, shows chat, and lists the service's sessions in the
+  **Connection log**.
+
+### Settings under the service
+
+The service does not read your personal settings. When you change **Incoming connections**
+settings (permissions, allowed networks, accept timeout, one-time code, local priority, pointer
+marker, ask before replacing), the TLP-Desk window hands them to the service, which checks them,
+applies them at once and saves them for every user in `%ProgramData%\TLP-Desk\host-settings.json`
+(only administrators and the system may change that file; users may read it).
+
+The service log `service.log` is limited to 4 MB; older parts are kept as `service.1.log` to
+`service.5.log`. Typing `TLP-Desk.exe install-service` or `uninstall-service` in a terminal prints
+whether it worked.
+
 A viewer that has the permanent password or a valid reconnect ticket connects without an
 **Accept** click, so choose a strong password.
 

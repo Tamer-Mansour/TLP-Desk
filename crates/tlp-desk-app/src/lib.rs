@@ -15,6 +15,7 @@ pub mod keygrab;
 pub mod prompt;
 #[cfg(windows)]
 pub mod service_entry;
+pub mod service_host;
 pub mod settings;
 pub mod text_route;
 pub mod tray;

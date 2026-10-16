@@ -11,6 +11,7 @@
 
 mod agent_main;
 mod desktop;
+mod folders;
 mod launch;
 mod pipe;
 mod run;
@@ -21,6 +22,10 @@ use std::fs::File;
 
 pub use agent_main::run_agent;
 pub use desktop::WinDesktopSource;
+pub use folders::{
+    allow_interactive_com_calls, console_user, print_to_parent_console, set_file_dacl,
+    SETTINGS_FILE_SDDL,
+};
 pub use launch::{
     active_console_session, current_session_id, launch, user_logged_on, wait_for_exit, LaunchAs,
     WinAgentLauncher, WinProcess,
