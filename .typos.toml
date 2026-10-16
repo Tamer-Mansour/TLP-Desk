@@ -23,3 +23,5 @@ trak = "trak"
 trun = "trun"
 # H.264 syntax descriptor ue(v): unsigned Exp-Golomb code.
 ue = "ue"
+# Additive-increase / multiplicative-decrease (bitrate controller in tlp-desk-host adapt).
+AIMD = "AIMD"
