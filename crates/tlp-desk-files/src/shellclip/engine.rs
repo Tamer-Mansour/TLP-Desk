@@ -99,10 +99,6 @@ impl Stager for ViewerStager {
         );
         let outcome = self.outcome.clone();
         self.rt.spawn(async move {
-            if let Err(e) = tokio::fs::create_dir_all(&dir).await {
-                *lock(&outcome) = Some(Err(e.to_string()));
-                return;
-            }
             // The host finds the source folder from the announced id (empty `source_dir`).
             let res = engine
                 .start_download_items(
