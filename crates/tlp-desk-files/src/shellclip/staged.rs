@@ -99,6 +99,11 @@ impl StagedItems {
         self.stager.begin();
     }
 
+    /// How far the background pull has come (the service mirrors it into its agent).
+    pub fn state(&self) -> StageState {
+        self.stager.state()
+    }
+
     /// Makes every pending and future wait fail and stops the pull.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);

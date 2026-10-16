@@ -133,6 +133,43 @@ pub(crate) struct Inner {
     /// Host: where an upload offer with an empty `dest_dir` goes when its id was announced by
     /// the viewer's Explorer copy (the staging folder of the virtual clipboard files).
     pub announced_dest: Mutex<Option<SourceLookup>>,
+    /// Host: overrides `cfg.default_upload_dir` while running (the service follows the console
+    /// user).
+    pub upload_dir: Mutex<Option<std::path::PathBuf>>,
+    /// Host: folders uploads may land in and downloads may read from (`None`: anywhere).
+    pub allowed_roots: Mutex<Option<Vec<std::path::PathBuf>>>,
+}
+
+/// Whether `path` (absolute; it or an ancestor exists) lies inside one of `roots` once links
+/// are resolved, so a junction cannot lead outside. `roots` must already be canonical.
+pub(crate) fn path_within(path: &std::path::Path, roots: &[std::path::PathBuf]) -> bool {
+    let mut probe = Some(path);
+    while let Some(p) = probe {
+        if let Ok(real) = std::fs::canonicalize(p) {
+            let rest = path.strip_prefix(p).unwrap_or(std::path::Path::new(""));
+            if rest
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+            {
+                return false;
+            }
+            return roots
+                .iter()
+                .any(|r| crate::fs::path::within_roots(&real.join(rest), std::slice::from_ref(r)));
+        }
+        probe = p.parent();
+    }
+    false
+}
+
+impl Inner {
+    /// Whether host-side file access may touch `path` (see [`FileTransfer::set_allowed_roots`]).
+    pub(crate) fn path_allowed(&self, path: &std::path::Path) -> bool {
+        match &*lock(&self.allowed_roots) {
+            None => true,
+            Some(roots) => path_within(path, roots),
+        }
+    }
 }
 
 /// See [`FileTransfer::set_announced_source`].
@@ -185,6 +222,8 @@ impl FileTransfer {
                 incoming_conflict: AtomicU8::new(incoming),
                 announced_source: Mutex::new(None),
                 announced_dest: Mutex::new(None),
+                upload_dir: Mutex::new(None),
+                allowed_roots: Mutex::new(None),
             }),
         })
     }
@@ -371,6 +410,24 @@ impl FileTransfer {
             policy,
         };
         self.start(session_key, spec, None, wire_id).await
+    }
+
+    /// Host: where uploads go when the viewer names no folder (`None`: the configured default).
+    /// The service sets the console user's Desktop, since its own profile is SYSTEM's.
+    pub fn set_default_upload_dir(&self, dir: Option<std::path::PathBuf>) {
+        *lock(&self.inner.upload_dir) = dir;
+    }
+
+    /// Host: limits viewers' uploads and downloads to these folders and everything below them
+    /// (links resolved); `Some(vec![])` refuses all, `None` allows anywhere this process can
+    /// reach. The service, which writes as SYSTEM, sets the console user's profile folder.
+    pub fn set_allowed_roots(&self, roots: Option<Vec<std::path::PathBuf>>) {
+        let roots = roots.map(|v| {
+            v.into_iter()
+                .filter_map(|r| std::fs::canonicalize(&r).ok())
+                .collect::<Vec<_>>()
+        });
+        *lock(&self.inner.allowed_roots) = roots;
     }
 
     /// Changes what happens to files a viewer sends that already exist here, for uploads that
@@ -728,4 +785,39 @@ pub fn hash_file_for_bench(file: &std::fs::File, size: u64) -> [u8; 32] {
 /// `true` if `perms` allow file transfers.
 pub fn files_permitted(perms: Permissions) -> bool {
     perms.contains(Permissions::FILES)
+}
+
+#[cfg(test)]
+mod roots_tests {
+    use super::*;
+
+    #[test]
+    fn allowed_roots_resolve_links_and_refuse_outside() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("المستخدم");
+        let other = tmp.path().join("Windows");
+        std::fs::create_dir_all(home.join("Desktop")).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let roots = vec![std::fs::canonicalize(&home).unwrap()];
+        // Existing and not-yet-existing folders inside the root.
+        assert!(path_within(&home.join("Desktop"), &roots));
+        assert!(path_within(&home.join("Desktop").join("مجلد جديد"), &roots));
+        assert!(!path_within(&other, &roots));
+        assert!(!path_within(&other.join("System32"), &roots));
+        // `..` below the existing part cannot climb out.
+        assert!(!path_within(&home.join("nope").join("..").join(".."), &roots));
+
+        let engine = FileTransfer::new(TransferConfig::default());
+        assert!(engine.inner.path_allowed(&other));
+        engine.set_allowed_roots(Some(vec![home.clone()]));
+        assert!(engine.inner.path_allowed(&home.join("Desktop")));
+        assert!(!engine.inner.path_allowed(&other));
+        engine.set_allowed_roots(Some(Vec::new()));
+        assert!(!engine.inner.path_allowed(&home));
+        engine.set_default_upload_dir(Some(home.join("Desktop")));
+        assert_eq!(
+            lock(&engine.inner.upload_dir).clone(),
+            Some(home.join("Desktop"))
+        );
+    }
 }
