@@ -74,7 +74,7 @@ pub fn resolve(data_dir: &Path, target: &str) -> Result<[u8; 6]> {
     Err(CliError::NotFound(target.to_owned()).into())
 }
 
-/// The GUI's address book file name (`%APPDATA%\TLP-Deskddress_book.json`).
+/// The GUI's address book file name (`%APPDATA%\TLP-Desk\address_book.json`).
 pub const ADDRESS_BOOK_FILE: &str = "address_book.json";
 
 /// Folders that may hold the address book: the per-user app folder, then the data dir.
