@@ -484,9 +484,7 @@ pub fn caption(ui: &Ui, text: &str) -> RichText {
 
 /// Screen or dialog title.
 pub fn title(ui: &Ui, text: &str) -> RichText {
-    RichText::new(text)
-        .size(font::TITLE)
-        .color(tokens(ui).text)
+    RichText::new(text).size(font::TITLE).color(tokens(ui).text)
 }
 
 /// Monospace value (IDs, codes, IP addresses).
@@ -564,8 +562,16 @@ pub fn paint_brand_mark(painter: &egui::Painter, rect: egui::Rect, dark: bool) {
         Stroke::new(3.0 * u, p.on_fill),
         egui::StrokeKind::Inside,
     );
-    painter.rect_filled(egui::Rect::from_min_max(at(29.0, 40.0), at(35.0, 46.0)), 0.0, p.on_fill);
-    painter.rect_filled(egui::Rect::from_min_max(at(22.0, 46.0), at(42.0, 49.0)), 1.0, p.on_fill);
+    painter.rect_filled(
+        egui::Rect::from_min_max(at(29.0, 40.0), at(35.0, 46.0)),
+        0.0,
+        p.on_fill,
+    );
+    painter.rect_filled(
+        egui::Rect::from_min_max(at(22.0, 46.0), at(42.0, 49.0)),
+        1.0,
+        p.on_fill,
+    );
 }
 
 /// WCAG relative luminance of an opaque color.
