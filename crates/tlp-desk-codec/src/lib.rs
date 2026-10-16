@@ -31,6 +31,13 @@ pub use select::{
     new_encoder_with, EncoderOptions, EncoderPreference, FallbackEncoder, ADAPTER_ENV, ENCODER_ENV,
 };
 
+/// Quality floor: the coarsest quantiser (H.264 QP, 0-51) the encoders may use. About 32 keeps
+/// UI text legible; a stream that cannot afford it is made smaller (lower resolution) by the
+/// host's adaptive controller instead of blurrier.
+pub const QUALITY_MAX_QP: u8 = 32;
+/// The finest quantiser the encoders use (below this the bits buy nothing visible).
+pub const QUALITY_MIN_QP: u8 = 12;
+
 /// Encoder settings. `width`/`height` are the size of the *input* frames (the captured
 /// monitor); the encoded size may be smaller, see [`H264Encoder::encoded_size`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

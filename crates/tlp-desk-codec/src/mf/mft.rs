@@ -17,7 +17,7 @@ use windows::Win32::Media::MediaFoundation::{
     CODECAPI_AVEncCommonMaxBitRate, CODECAPI_AVEncCommonMeanBitRate,
     CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncH264CABACEnable,
     CODECAPI_AVEncMPVDefaultBPictureCount, CODECAPI_AVEncMPVGOPSize,
-    CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVLowLatencyMode, ICodecAPI, IMFActivate,
+    CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVEncVideoMaxQP, CODECAPI_AVEncVideoMinQP, CODECAPI_AVLowLatencyMode, ICodecAPI, IMFActivate,
     IMFAttributes, IMFMediaEvent, IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform,
     MEError, METransformHaveOutput, METransformNeedInput, MFCreateAttributes, MFCreateMediaType,
     MFCreateMemoryBuffer, MFCreateSample, MFMediaType_Video, MFNominalRange_16_235, MFShutdown,
@@ -382,6 +382,24 @@ impl Mft {
         let _ = set_codec(&codec, &CODECAPI_AVEncH264CABACEnable, false.into());
         // IDR only on request: the longest GOP the MFT accepts.
         let _ = set_codec(&codec, &CODECAPI_AVEncMPVGOPSize, 0u32.into());
+        // Quality floor: no coarser quantiser than the OpenH264 path uses. Vendors differ in
+        // which of these they honour; a refusal only means the MFT keeps its own limits.
+        let max_qp = set_codec(
+            &codec,
+            &CODECAPI_AVEncVideoMaxQP,
+            u32::from(crate::QUALITY_MAX_QP).into(),
+        );
+        let min_qp = set_codec(
+            &codec,
+            &CODECAPI_AVEncVideoMinQP,
+            u32::from(crate::QUALITY_MIN_QP).into(),
+        );
+        tracing::debug!(
+            vendor = ?cand.vendor_id,
+            max_qp = max_qp.is_ok(),
+            min_qp = min_qp.is_ok(),
+            "hardware encoder QP bounds"
+        );
 
         let mut profile = None;
         for (value, name) in PROFILES {
