@@ -276,7 +276,7 @@ the workspace when all crates are:
 
 | Lint | Open hits | Notes |
 |---|---|---|
-| `clippy::unwrap_used`, `expect_used`, `panic` | ~40 | the never-crash set; new crates start with `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]` *(craft-libs, gridcraft)* |
+| `clippy::unwrap_used`, `expect_used`, `panic` | ~33 | **denied (with `indexing_slicing`) at the roots of `proto`, `crypto` and `net`**; the never-crash set; new crates start with `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]` *(craft-libs, gridcraft)* |
 | `clippy::indexing_slicing` | ~160 | most in pixel/YUV loops with checked dimensions; convert the wire-facing ones first |
 | `clippy::cast_possible_truncation` | ~100 | `as` casts in capture/codec/input math |
 | `missing_docs` | ~530 | mostly fields and variants; start with `proto` and `crypto` |

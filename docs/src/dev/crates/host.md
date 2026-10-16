@@ -142,9 +142,18 @@ A per-session input thread (`tlp-host-input-<id>`, 40 ms tick) owns the injector
   `wrong_device_id_is_rejected`, `public_addresses_are_refused`, `viewer_switches_monitor_live`,
   `local_input_priority_reaches_viewer`, `slow_encoder_drops_frames_instead_of_queueing`,
   `scaled_video_maps_clicks_to_physical_monitor_pixels`.
-- **Ignored:** `real_capture_end_to_end` — needs a real interactive desktop.
+- `tests/hostile_viewer.rs` — an authorized viewer that misbehaves, on
+  [`tlp-desk-testkit`](testkit.md) with a probe feature: every gated feature message is blocked
+  without its permission and passes only while it is granted live; input needs `CONTROL` /
+  `KEYBOARD`; host-only messages from the viewer (a forged `Permissions(ALL)`, `Accepted`,
+  `Hello`, video on the control stream, ...) grant nothing; unknown monitor indices are ignored;
+  floods and a 14 MiB payload do not end the session; revoking `VIEW` and a reconnect loop leave
+  no session, thread or feature task behind and release held keys.
+- **Ignored:** `real_capture_end_to_end` — needs a real interactive desktop;
+  `tests/soak.rs` `soak_host_and_viewer_stay_bounded` — runs for `TLP_SOAK_SECS` (default 600).
 
 ```powershell
 cargo test -p tlp-desk-host
 cargo test -p tlp-desk-host --test e2e -- --ignored real_capture_end_to_end
+$env:TLP_SOAK_SECS = "600"; cargo test --release -p tlp-desk-host --test soak -- --ignored --nocapture
 ```

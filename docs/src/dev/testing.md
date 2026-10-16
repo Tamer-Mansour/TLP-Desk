@@ -30,8 +30,12 @@ typos              # spelling — see .typos.toml
 |---|---|---|---|
 | Unit tests | `src/**` `#[cfg(test)]` in every crate | nothing | yes |
 | Protocol round trips | `tlp-desk-proto/tests/roundtrip.rs` | nothing | yes |
+| Protocol properties | `tlp-desk-proto/tests/properties.rs` (`proptest`) | nothing | yes (long runs ignored) |
 | Network integration | `tlp-desk-net/tests/session.rs`, `tests/discovery.rs` | loopback UDP | yes (except mDNS) |
+| Hostile peer | `tlp-desk-net/tests/hostile.rs` | loopback UDP | yes |
 | End-to-end host ↔ viewer | `tlp-desk-host/tests/e2e.rs` | loopback; fake capturer | yes (except real capture) |
+| Hostile viewer | `tlp-desk-host/tests/hostile_viewer.rs` | loopback; `tlp-desk-testkit` | yes |
+| Soak / leak | `tlp-desk-host/tests/soak.rs` | loopback; minutes of CPU | **no** — run by hand |
 | Real backend | `tlp-desk-app/tests/real_backend.rs` | loopback; real QUIC, TLS, SPAKE2, H.264 | yes |
 | Headless UI | `tlp-desk-app/src/ui/session.rs`, `i18n/shaping.rs` | egui without a window | yes |
 | Hardware tests | marked `#[ignore = "..."]` | a real, unlocked Windows desktop | **no** — run by hand |
@@ -43,6 +47,58 @@ typos              # spelling — see .typos.toml
 pointer marker and monitor lister. The e2e tests plug in fakes and then run a real `Host` and a
 real `Viewer` over QUIC on `127.0.0.1`. That is how accept/reject, codes, rate limits, TOFU, the
 allow-list, monitor switching, local priority and frame dropping are all tested in CI.
+
+### The test kit (`tlp-desk-testkit`)
+
+New end-to-end tests should not copy those fakes: the dev-only crate
+[`tlp-desk-testkit`](crates/testkit.md) has them all (capturer, encoder, injector, local
+activity, pointer marker, clipboard, audio source), a `TestPair` that starts a real host and
+viewer in one call, a `ProbeFeature` that records what reaches session features, bounded waits,
+and memory/task counters. Add it to your crate's `[dev-dependencies]`:
+
+```toml
+[dev-dependencies]
+tlp-desk-testkit.workspace = true
+```
+
+```rust,ignore
+let mut pair = TestPair::start_with(|host, viewer| { /* register features, tweak config */ }).await;
+let conn = pair.connect(Permissions::ALL).await;   // prompt shown and accepted
+wait::next_frame(&conn.session).await;
+conn.session.disconnect();
+pair.all_released().await;                          // sessions gone, every fake dropped
+```
+
+### Hostile input
+
+Every decoder and every message handler must turn bad input into an error, never a panic
+(CODE_STYLE section 2). Three layers check that:
+
+- `tlp-desk-proto/tests/properties.rs` — random, truncated, mutated and oversized bytes into the
+  frame decoder; every message round-trips. The `*_long` tests run 200 000 cases each and stand in
+  for `cargo fuzz` (which needs nightly):
+  `cargo test --release -p tlp-desk-proto --test properties -- --ignored`.
+- `tlp-desk-net/tests/hostile.rs` — a peer with a valid key that sends garbage, the wrong order,
+  huge frames, stalls (slowloris), floods streams, connects and vanishes in a storm, or brute-forces
+  the password.
+- `tlp-desk-host/tests/hostile_viewer.rs` — an authorized viewer that sends what it has no
+  permission for, forges host-only messages, floods, and reconnects in a loop.
+
+When your lane adds a message handler, add its malformed and unpermitted cases there (or next to
+your feature's tests with the test kit): wrong ids, Arabic and over-long text, `..` paths,
+absurd sizes.
+
+### Soak test
+
+`tlp-desk-host/tests/soak.rs` runs a host and a viewer (fake capture, real OpenH264) with
+continuous input and periodic reconnects, sampling resident memory and tokio tasks every 5 s. It
+fails if memory grows by more than 48 MiB between the first and the last third of the run, if
+video stalls, or if tasks, connections or per-session threads are left behind.
+
+```powershell
+$env:TLP_SOAK_SECS = "600"    # default 10 minutes
+cargo test --release -p tlp-desk-host --test soak -- --ignored --nocapture
+```
 
 ## Ignored hardware tests
 
@@ -58,6 +114,8 @@ item:
 | net | `mdns_advertise_and_browse` | needs a multicast-capable adapter | `cargo test -p tlp-desk-net --test discovery -- --ignored` |
 | host | `real_capture_end_to_end` | needs a real interactive desktop session | `cargo test -p tlp-desk-host --test e2e -- --ignored` |
 | net | `bulk_side_stream_throughput` | benchmark: moves several GB over loopback (target ≥ 1 GB/s) | `cargo test --release -p tlp-desk-net --test session -- --ignored --nocapture bulk_side_stream_throughput` |
+| proto | `every_message_roundtrips_long`, `random_bodies_never_panic_long`, `random_streams_never_panic_long`, `mutated_frames_never_panic_long` | 200 000 cases each (about a minute in release) | `cargo test --release -p tlp-desk-proto --test properties -- --ignored` |
+| host | `soak_host_and_viewer_stay_bounded` | runs for `TLP_SOAK_SECS` (default 600 s) | `cargo test --release -p tlp-desk-host --test soak -- --ignored --nocapture` |
 
 Tips:
 
