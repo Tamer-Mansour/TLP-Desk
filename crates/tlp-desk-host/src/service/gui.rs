@@ -47,6 +47,19 @@ pub trait GuiCommands: Send + Sync {
     fn disconnect(&self, session: u64) -> bool;
     /// `false` if the session no longer exists.
     fn set_permissions(&self, session: u64, permissions: Permissions) -> bool;
+
+    /// Runs an app-defined command ([`GuiCommand::App`]) and returns the app's answer;
+    /// `None` when there is no app layer (the GUI gets [`GuiReply::NotFound`]).
+    fn app_command(&self, request: &[u8]) -> Option<Vec<u8>> {
+        let _ = request;
+        None
+    }
+
+    /// App-defined events a newly connected GUI needs to catch up (running transfers, open
+    /// questions), sent right after the status snapshot as [`GuiEvent::App`].
+    fn app_snapshot(&self) -> Vec<Vec<u8>> {
+        Vec::new()
+    }
 }
 
 impl GuiCommands for crate::Host {
@@ -230,6 +243,8 @@ fn apply(status: &mut ServiceStatus, ev: &GuiEvent) {
         GuiEvent::SessionEnded { id } => status.sessions.retain(|s| s.id != *id),
         GuiEvent::CodeChanged { code } => status.one_time_code.clone_from(code),
         GuiEvent::Desktop(d) => status.desktop = *d,
+        // The app keeps its own state and replays it with `GuiCommands::app_snapshot`.
+        GuiEvent::App(_) => {}
     }
 }
 
@@ -282,6 +297,9 @@ pub fn serve_gui_connection<C: Read + Write + ?Sized>(
             let _connected = Connected::new(&hub.connected);
             let (snapshot, events) = hub.subscribe();
             ipc::write_msg(conn, &GuiEvent::Status(snapshot))?;
+            for app in commands.app_snapshot() {
+                ipc::write_msg(conn, &GuiEvent::App(app))?;
+            }
             // Ends when the GUI disconnects (a write fails) or the hub drops us. Without
             // events, a heartbeat (the current desktop state, harmless to repeat) finds a
             // GUI that went away.
@@ -304,6 +322,11 @@ pub fn serve_gui_connection<C: Read + Write + ?Sized>(
 
 fn run_command(commands: &dyn GuiCommands, cmd: GuiCommand) -> GuiReply {
     let found = match cmd {
+        GuiCommand::App(request) => {
+            return commands
+                .app_command(&request)
+                .map_or(GuiReply::NotFound, GuiReply::App)
+        }
         GuiCommand::Respond { request, accept } => {
             tracing::info!(request, accept, "accept prompt answered in the GUI");
             commands.respond(request, accept)

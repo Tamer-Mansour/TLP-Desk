@@ -76,6 +76,13 @@ impl ConnLogUi {
             self.entries = LogStore::default_location()
                 .map(|s| s.read_all())
                 .unwrap_or_default();
+            // TLP-service: sessions the installed service hosted (machine-wide log; users may
+            // read it). Missing or unreadable means there are none.
+            let machine =
+                LogStore::new(crate::service_host::log_dir(&tlp_desk_crypto::default_dir()));
+            if LogStore::default_location().map(|s| s.path()) != Some(machine.path()) {
+                self.entries.extend(machine.read_all());
+            }
         }
     }
 }

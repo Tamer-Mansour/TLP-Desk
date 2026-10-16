@@ -10,17 +10,18 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tlp_desk_crypto::Identity;
-use tlp_desk_input::InputError;
 use tlp_desk_net::{Endpoint, EndpointConfig, DEFAULT_PORT};
 use tokio::sync::watch;
 
+use super::folders::console_user;
 use super::launch::{active_console_session, launch, user_logged_on, LaunchAs, WinAgentLauncher};
 use super::{pipe, sas};
 use crate::service::ipc::{self, AgentChannel, AgentEvent, WireDesktop};
 use crate::service::{
     agent_pipe_name, check_gui_client, route_prompt, serve_gui_connection, AgentConn,
-    AgentConnector, AgentLink, AgentSupervisor, DesktopStatus, GuiClientFacts, GuiClientRefusal,
-    GuiHub, PipeSpec, PromptRoute, RestartPolicy, SessionAction, SessionChange, SessionTracker,
+    AgentConnector, AgentFeatureHub, AgentLink, AgentSupervisor, DesktopStatus, GuiClientFacts,
+    GuiClientRefusal, GuiHub, PipeSpec, PromptRoute, RestartPolicy, ServiceCommands,
+    ServiceContext, ServiceExtension, SessionAction, SessionChange, SessionTracker,
     SupervisorEvent, SystemActions, SystemControl, NO_CONSOLE_SESSION,
 };
 use crate::{Host, HostConfig, HostError, HostEvent, HostEvents, MAX_CAPTURE_SIZE};
@@ -34,7 +35,7 @@ pub enum ControlEvent {
 }
 
 /// How the service runs; built by the app when the SCM starts the service.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServiceOptions {
     /// Host settings (device name, permissions, password verifier, features...). The capture,
     /// input and monitor factories are replaced by the agent proxies; the `system` feature is
@@ -46,6 +47,20 @@ pub struct ServiceOptions {
     pub bind: SocketAddr,
     /// `TLP-Desk.exe` (started as the agent and, for Accept prompts, as the user's GUI).
     pub exe: PathBuf,
+    /// The app's session features, settings and GUI messages (see [`ServiceExtension`]).
+    pub extension: Option<Arc<dyn ServiceExtension>>,
+}
+
+impl std::fmt::Debug for ServiceOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServiceOptions")
+            .field("host", &self.host)
+            .field("data_dir", &self.data_dir)
+            .field("bind", &self.bind)
+            .field("exe", &self.exe)
+            .field("extension", &self.extension.is_some())
+            .finish()
+    }
 }
 
 impl Default for ServiceOptions {
@@ -55,6 +70,7 @@ impl Default for ServiceOptions {
             data_dir: tlp_desk_crypto::default_dir(),
             bind: SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), DEFAULT_PORT),
             exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("TLP-Desk.exe")),
+            extension: None,
         }
     }
 }
@@ -114,7 +130,11 @@ struct Runner {
     tracker: SessionTracker,
     desktop: watch::Sender<DesktopStatus>,
     hub: Arc<GuiHub>,
+    features: Arc<AgentFeatureHub>,
+    extension: Option<Arc<dyn ServiceExtension>>,
     console: Arc<AtomicU32>,
+    /// The console user last reported to the extension.
+    console_user: Option<u32>,
     generation: Arc<AtomicU64>,
     service_pid: u32,
 }
@@ -154,6 +174,24 @@ impl Runner {
             };
             self.handle(events);
         }
+        self.refresh_console_user();
+    }
+
+    /// Tells the extension who is logged on at the console (their folders), when it changed.
+    fn refresh_console_user(&mut self) {
+        let session = self.console.load(Ordering::Acquire);
+        let user = (session != NO_CONSOLE_SESSION)
+            .then(|| console_user(session))
+            .flatten();
+        let key = user.as_ref().map(|u| u.session);
+        if key == self.console_user {
+            return;
+        }
+        self.console_user = key;
+        tracing::info!(session = ?key, "console user changed");
+        if let Some(ext) = &self.extension {
+            ext.console_user(user);
+        }
     }
 
     fn handle(&mut self, events: Vec<SupervisorEvent>) {
@@ -176,10 +214,12 @@ impl Runner {
                 } => {
                     tracing::warn!(session, pid, code, ?retry_in, "agent exited; restarting");
                     self.link.set(None);
+                    self.features.agent_changed();
                 }
                 SupervisorEvent::Stopped { session, pid } => {
                     tracing::info!(session, pid, "agent stopped");
                     self.link.set(None);
+                    self.features.agent_changed();
                 }
                 SupervisorEvent::LaunchFailed {
                     session,
@@ -198,6 +238,7 @@ impl Runner {
         let generation = self.generation.clone();
         let desktop = self.desktop.clone();
         let hub = self.hub.clone();
+        let features = self.features.clone();
         let spawned = std::thread::Builder::new()
             .name("tlp-svc-agent-events".into())
             .spawn(move || {
@@ -218,13 +259,20 @@ impl Runner {
                         Err(_) => std::thread::sleep(Duration::from_millis(200)),
                     }
                 };
-                while let Ok(AgentEvent::Desktop { name, secure }) = ipc::read_msg(&mut conn) {
+                // A new agent: its user-session features start from scratch.
+                features.agent_changed();
+                while let Ok(ev) = ipc::read_msg::<_, AgentEvent>(&mut conn) {
                     if generation.load(Ordering::Acquire) != gen {
                         return;
                     }
-                    tracing::info!(desktop = %name, secure, "viewer desktop state");
-                    desktop.send_modify(|d| d.secure_desktop = secure);
-                    hub.set_desktop(wire(*desktop.borrow()));
+                    match ev {
+                        AgentEvent::Desktop { name, secure } => {
+                            tracing::info!(desktop = %name, secure, "viewer desktop state");
+                            desktop.send_modify(|d| d.secure_desktop = secure);
+                            hub.set_desktop(wire(*desktop.borrow()));
+                        }
+                        other => features.on_event(other),
+                    }
                 }
             });
         if let Err(e) = spawned {
@@ -245,31 +293,39 @@ pub fn run_service(
         .build()?;
     let identity = Arc::new(Identity::load_or_generate(&opts.data_dir)?);
     let device_name = opts.host.device_name.clone();
-    let ep_cfg = EndpointConfig {
+    let extension = opts.extension.clone();
+    let mut ep_cfg = EndpointConfig {
         bind: opts.bind,
         device_name: device_name.clone(),
         listen: true,
         ..EndpointConfig::default()
     };
+    if let Some(ext) = &extension {
+        ep_cfg = ext.endpoint_config(ep_cfg);
+    }
     let endpoint = Arc::new(rt.block_on(async move { Endpoint::bind(identity, ep_cfg) })?);
 
     let link = AgentLink::new();
+    let features = AgentFeatureHub::new(link.clone());
     let (desktop_tx, desktop_rx) = watch::channel(DesktopStatus::default());
     let system = SystemControl::new(
         Arc::new(WinSystemActions { link: link.clone() }),
         desktop_rx,
     );
-    let cfg = HostConfig {
+    let mut cfg = HostConfig {
         capturer_factory: link.capturer_factory(Some(MAX_CAPTURE_SIZE)),
         injector_factory: link.injector_factory(),
         monitor_lister: link.monitor_lister(),
-        // Low-level hooks and the marker window would live in session 0, which nobody sees.
-        local_activity_factory: Arc::new(|| Err(InputError::Unsupported)),
-        remote_pointer_marker: false,
+        // Low-level hooks and the marker window run in the agent, on the user's desktop.
+        local_activity_factory: features.local_activity_factory(),
+        pointer_marker_factory: features.pointer_marker_factory(),
         features: opts.host.features.clone().with(Arc::new(system)),
         ..opts.host
     };
-    let (host, events) = rt.block_on(Host::start(endpoint, cfg))?;
+    if let Some(ext) = &extension {
+        cfg = ext.configure(&features, cfg);
+    }
+    let (host, events) = rt.block_on(Host::start(endpoint.clone(), cfg))?;
     let host = Arc::new(host);
     let hub = Arc::new(GuiHub::new(
         host.device_id().as_u32(),
@@ -283,8 +339,21 @@ pub fn run_service(
         hub.clone(),
         console.clone(),
         opts.exe.clone(),
+        extension.clone(),
     ));
-    spawn_gui_server(hub.clone(), host.clone(), opts.exe.clone());
+    if let Some(ext) = &extension {
+        ext.started(ServiceContext {
+            host: host.clone(),
+            endpoint,
+            hub: hub.clone(),
+            features: features.clone(),
+        });
+    }
+    spawn_gui_server(
+        hub.clone(),
+        Arc::new(ServiceCommands::new(host.clone(), extension.clone())),
+        opts.exe.clone(),
+    );
 
     let service_pid = std::process::id();
     let mut runner = Runner {
@@ -299,7 +368,10 @@ pub fn run_service(
         tracker: SessionTracker::new(),
         desktop: desktop_tx,
         hub,
+        features,
+        extension,
         console,
+        console_user: None,
         generation: Arc::default(),
         service_pid,
     };
@@ -336,10 +408,14 @@ async fn pump_host_events(
     hub: Arc<GuiHub>,
     console: Arc<AtomicU32>,
     exe: PathBuf,
+    extension: Option<Arc<dyn ServiceExtension>>,
 ) {
     let last_launch: Arc<Mutex<Option<Instant>>> = Arc::default();
     while let Some(ev) = events.recv().await {
         hub.on_host_event(&ev, || host.one_time_code().current());
+        if let Some(ext) = &extension {
+            ext.on_host_event(&ev);
+        }
         let HostEvent::IncomingRequest(req) = &ev else {
             continue;
         };
@@ -415,7 +491,7 @@ fn gui_client_facts(pipe: &File) -> GuiClientFacts {
 
 /// Accepts GUI connections forever (the thread ends with the process). Only clients that
 /// pass [`check_gui_client`] against `exe` (the service's own `TLP-Desk.exe`) are served.
-fn spawn_gui_server(hub: Arc<GuiHub>, host: Arc<Host>, exe: PathBuf) {
+fn spawn_gui_server(hub: Arc<GuiHub>, commands: Arc<ServiceCommands>, exe: PathBuf) {
     let spawned = std::thread::Builder::new()
         .name("tlp-svc-gui".into())
         .spawn(move || {
@@ -441,7 +517,7 @@ fn spawn_gui_server(hub: Arc<GuiHub>, host: Arc<Host>, exe: PathBuf) {
                     continue;
                 }
                 let hub = hub.clone();
-                let host = host.clone();
+                let commands = commands.clone();
                 let exe = exe.clone();
                 let spawned = std::thread::Builder::new()
                     .name("tlp-svc-gui-conn".into())
@@ -453,7 +529,8 @@ fn spawn_gui_server(hub: Arc<GuiHub>, host: Arc<Host>, exe: PathBuf) {
                             Ok(p) => check_gui_client(&gui_client_facts(p), &exe),
                             Err(_) => Err(GuiClientRefusal::NotConsoleSession),
                         };
-                        if let Err(e) = serve_gui_connection(&mut conn, &hub, &*host, verify) {
+                        if let Err(e) = serve_gui_connection(&mut conn, &hub, &*commands, verify)
+                        {
                             tracing::debug!(%e, "GUI connection ended");
                         }
                     });

@@ -125,6 +125,38 @@ A per-session input thread (`tlp-host-input-<id>`, 40 ms tick) owns the injector
 - The marker is labelled with the viewer's name (or ID if the name is empty) and is visible while
   the viewer moved the pointer within the last 1.5 s (`MARKER_HOLD`) and the local user is idle.
 
+## The Windows service (`service/`)
+
+The service (`TLP-Desk.exe --service`, SYSTEM, session 0) owns UDP 47400 and the `Host`; a
+**session agent** (`--agent`, SYSTEM token in the console session) does everything that needs the
+user's desktop. They talk over SYSTEM-only named pipes with the local IPC in `service/ipc.rs`
+(`IPC_VERSION` 2; both ends are the same binary).
+
+| Channel | Direction | What |
+|---|---|---|
+| `Capture`, `Input`, `Command`, `Events` | service -> agent | screen, input, monitors/lock, desktop switches (v1) |
+| `Feature` | service -> agent, request/reply | clipboard, Explorer virtual files, whiteboard overlay, pointer marker, local-input hooks, privacy shield (v2) |
+| `Audio` | agent -> service | loopback sound, with keep-alives (v2) |
+
+* Agent side: `FeatureHost` (`agent_features.rs`) drives the objects created by the app's
+  `AgentFeatures` (`tlp-desk-app/src/service_host/agent.rs`); their signals (clipboard changed,
+  local input, shield off, overlay clear, paste begin/cancel) go out on the events channel.
+* Service side: `AgentFeatureHub` (`feature_proxy.rs`) hands the host and the session features
+  proxies (`LocalActivity`, `PointerMarker`, `WhiteboardOverlay`, `PrivacyShield`, plus clipboard,
+  shell offer and audio calls). Updates that must not block go through one worker thread; after
+  an agent restart overlays and markers re-create themselves, the hooks restart and an engaged
+  shield reports `Failed` (privacy mode turns off).
+* The app plugs in with `ServiceExtension` (`extension.rs`): endpoint/host configuration, every
+  host event, the console user's folders (`windows::console_user`, resolved with the user's
+  token), and opaque app messages on the GUI pipe (`GuiEvent::App`, `GuiCommand::App`). The app's
+  `service_host` defines those messages (transfers, upload questions, chat, privacy, settings)
+  and the GUI's `ServiceMirror` turns them into the usual `BackendEvent`s.
+* Because the service writes as SYSTEM, file transfers are limited to the console user's profile
+  (`FileTransfer::set_allowed_roots`, links resolved) and uploads go to their Desktop.
+* Tests: `agent_features/tests.rs` and `feature_proxy/tests.rs` run the agent's `FeatureHost`
+  with fake OS objects (`testutil/features.rs`) over in-memory pipes, end to end through
+  `AgentLink`.
+
 ## Tests
 
 - Unit: `input_gating_follows_permissions`; priority (`remote_events_blocked_during_grace`,

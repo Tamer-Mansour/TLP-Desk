@@ -70,6 +70,23 @@ impl FilesBridge {
         );
     }
 
+    /// Like [`FilesBridge::enable_explorer_paste`] with a given shell clipboard and staging
+    /// folder (the service: virtual files go on the user's clipboard through its agent).
+    pub fn enable_explorer_paste_with(
+        &self,
+        engine: &Arc<FileTransfer>,
+        policy: ConflictPolicy,
+        shell: Arc<ShellClipboard>,
+        staging: PathBuf,
+    ) {
+        shellclip::engine::install(&self.clip, engine, shell, policy, staging);
+    }
+
+    /// Replaces the host's file-browsing settings (e.g. the folders viewers may browse).
+    pub fn set_fs_config(&self, cfg: FsConfig) {
+        self.fs.set_config(cfg);
+    }
+
     /// `set` plus the files features (registration for host and viewer sessions).
     pub fn register(&self, set: FeatureSet) -> FeatureSet {
         set.with(self.fs.clone()).with(self.clip.clone())

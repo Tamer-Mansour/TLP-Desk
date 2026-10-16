@@ -15,18 +15,33 @@
 //! This is a *local* protocol between processes of the same binary (version checked in the
 //! first message of every connection with [`IPC_VERSION`]); it never crosses the network: the
 //! pipes reject remote clients and are ACL-restricted (see `pipe_security`).
+//!
+//! # Channels
+//!
+//! * service -> agent: capture, input, commands, desktop events (v1), plus the **user-session
+//!   features** the agent owns for the service (v2): [`AgentChannel::Feature`] (clipboard,
+//!   Explorer paste, whiteboard overlay, pointer marker, local-input hooks, privacy shield) and
+//!   [`AgentChannel::Audio`] (loopback sound). Their events ride the existing events channel
+//!   ([`AgentEvent`]).
+//! * GUI -> service: status, Accept prompts and session control (v1), plus opaque **app
+//!   messages** (v2: [`GuiEvent::App`], [`GuiCommand::App`], [`GuiReply::App`]) whose types
+//!   the app defines (transfers, chat, conflict prompts, settings, connection log), so this
+//!   crate stays free of file-transfer and UI types.
 
 use std::io::{ErrorKind, Read, Write};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tlp_desk_proto::{InputEvent, Permissions};
+use tlp_desk_proto::{InputEvent, Permissions, TransferItem};
 
 use crate::HostError;
 
 /// Version of the local IPC messages. Both ends must match (they are the same binary, so a
 /// mismatch means a half-finished upgrade: the old process is told to exit).
-pub const IPC_VERSION: u32 = 1;
+///
+/// * v1: capture, input, commands, desktop events, GUI status and prompts.
+/// * v2: user-session features in the agent, loopback audio, app messages on the GUI pipe.
+pub const IPC_VERSION: u32 = 2;
 
 /// Largest postcard header (control messages are tiny; a monitor list or status with Arabic
 /// names is a few KB).
@@ -166,8 +181,14 @@ pub enum AgentChannel {
     Input { rect: WireRect },
     /// Request/reply: [`AgentCommand`] -> [`CommandReply`].
     Command,
-    /// One-way agent -> service: [`AgentEvent`]s (desktop switches).
+    /// One-way agent -> service: [`AgentEvent`]s (desktop switches, feature events).
     Events,
+    /// Request/reply: [`FeatureRequest`] -> [`FeatureReply`]. The user-session features the
+    /// agent runs on behalf of the service (v2).
+    Feature,
+    /// One-way agent -> service: [`AudioPacket`]s of the session's system sound (loopback),
+    /// until the service closes the connection (v2).
+    Audio,
 }
 
 /// Agent's answer to [`AgentHello`].
@@ -245,6 +266,301 @@ pub enum CommandReply {
 pub enum AgentEvent {
     /// The input desktop changed (`Default` <-> `Winlogon` for lock/login/UAC/Ctrl+Alt+Del).
     Desktop { name: String, secure: bool },
+    /// The user's clipboard changed; `seq` is its change sequence number (v2).
+    ClipboardChanged { seq: u64 },
+    /// The user at the machine used their own keyboard and/or mouse (physical input, while
+    /// the local-input hooks run; rate limited by the agent) (v2).
+    LocalInput { keyboard: bool, pointer: bool },
+    /// A privacy shield turned itself off (v2).
+    Shield { id: u64, signal: WireShieldSignal },
+    /// The user clicked the clear badge of a whiteboard overlay (v2).
+    OverlayClear { id: u64 },
+    /// Explorer started pasting the virtual files of `offer`: start pulling them (v2).
+    StageBegin { offer: u64 },
+    /// The virtual files of `offer` are gone from the clipboard: stop pulling (v2).
+    StageCancel { offer: u64 },
+}
+
+// ----- user-session features (v2) -------------------------------------------------------------
+
+/// Service -> agent on a [`AgentChannel::Feature`] connection. Ids (`id`, `offer`) are chosen
+/// by the service; an unknown id is ignored (the object is gone).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FeatureRequest {
+    /// Read the clipboard: answered with [`FeatureReply::Clip`].
+    ClipboardRead,
+    /// Replace the clipboard; the [`WireClip`] payload follows. Answered with
+    /// [`FeatureReply::ClipboardSeq`].
+    ClipboardWrite(WireClip),
+    /// The files copied in Explorer: answered with [`FeatureReply::Files`].
+    ClipboardFiles,
+    /// Put the peer's announced files on the clipboard as virtual files staged in `dir`.
+    ShellOffer {
+        offer: u64,
+        dir: String,
+        items: Vec<TransferItem>,
+    },
+    /// How far the pull of `offer` has come.
+    ShellStage {
+        offer: u64,
+        state: WireStage,
+    },
+    /// Take `offer` off the clipboard.
+    ShellClear {
+        offer: u64,
+    },
+    /// Create a (hidden) whiteboard overlay.
+    OverlayOpen {
+        id: u64,
+    },
+    /// Place the overlay over `rect`.
+    OverlayTarget {
+        id: u64,
+        rect: WireRect,
+    },
+    /// New strokes or points for the overlay (`reset`: erase the board first). Chunks with the
+    /// id of a stroke already on the board extend it.
+    OverlayStrokes {
+        id: u64,
+        reset: bool,
+        strokes: Vec<WireStroke>,
+    },
+    OverlayClose {
+        id: u64,
+    },
+    /// Create the remote-pointer marker labelled `label`.
+    MarkerOpen {
+        id: u64,
+        label: String,
+    },
+    MarkerVisible {
+        id: u64,
+        visible: bool,
+    },
+    MarkerLabel {
+        id: u64,
+        label: String,
+    },
+    MarkerClose {
+        id: u64,
+    },
+    /// Start reporting physical local input ([`AgentEvent::LocalInput`]).
+    ActivityStart,
+    /// Stop the local-input hooks.
+    ActivityStop,
+    /// Create a privacy shield and engage it with `lines`.
+    ShieldEngage {
+        id: u64,
+        lines: Vec<WireScreenLine>,
+    },
+    ShieldText {
+        id: u64,
+        lines: Vec<WireScreenLine>,
+    },
+    ShieldRelease {
+        id: u64,
+    },
+}
+
+/// Agent -> service answer to a [`FeatureRequest`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FeatureReply {
+    Ok,
+    /// The clipboard content (`None`: empty or nothing we sync); a payload follows.
+    Clip(Option<WireClip>),
+    /// The clipboard's change sequence number right after a write.
+    ClipboardSeq(u64),
+    /// Files copied in Explorer (`None`: no files on the clipboard).
+    Files(Option<Vec<String>>),
+    Error(WireError),
+}
+
+/// Clipboard content header; the bytes follow as the message payload (big images and texts
+/// would not fit in a header).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WireClip {
+    /// UTF-8 text, `len` bytes.
+    Text { len: u64 },
+    /// UTF-8 HTML fragment (`html_len` bytes) then its plain-text alternative (`alt_len`).
+    Html { html_len: u64, alt_len: u64 },
+    /// RGBA8, `width * height * 4` bytes.
+    Image { width: u32, height: u32 },
+}
+
+impl WireClip {
+    /// Bytes of payload that follow the header (saturating: a hostile size is refused by the
+    /// payload cap).
+    pub fn payload_len(&self) -> u64 {
+        match *self {
+            Self::Text { len } => len,
+            Self::Html { html_len, alt_len } => html_len.saturating_add(alt_len),
+            Self::Image { width, height } => u64::from(width)
+                .saturating_mul(u64::from(height))
+                .saturating_mul(4),
+        }
+    }
+}
+
+/// Clipboard content in owned form (what the agent's OS clipboard reads and writes).
+#[derive(Clone, PartialEq, Eq)]
+pub enum ClipData {
+    Text(String),
+    Html {
+        html: String,
+        alt_text: String,
+    },
+    Image {
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+    },
+}
+
+impl std::fmt::Debug for ClipData {
+    /// Kind and size only: clipboard contents are never printed.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(t) => write!(f, "ClipData::Text({} bytes)", t.len()),
+            Self::Html { html, alt_text } => write!(
+                f,
+                "ClipData::Html({} bytes)",
+                html.len().saturating_add(alt_text.len())
+            ),
+            Self::Image { width, height, .. } => write!(f, "ClipData::Image({width}x{height})"),
+        }
+    }
+}
+
+fn byte_len(s: &str) -> u64 {
+    u64::try_from(s.len()).unwrap_or(u64::MAX)
+}
+
+impl ClipData {
+    /// The header announcing this content.
+    pub fn header(&self) -> WireClip {
+        match self {
+            Self::Text(t) => WireClip::Text { len: byte_len(t) },
+            Self::Html { html, alt_text } => WireClip::Html {
+                html_len: byte_len(html),
+                alt_len: byte_len(alt_text),
+            },
+            Self::Image { width, height, .. } => WireClip::Image {
+                width: *width,
+                height: *height,
+            },
+        }
+    }
+
+    /// The payload bytes (HTML then its alternative text, for HTML).
+    pub fn payload(&self) -> Vec<u8> {
+        match self {
+            Self::Text(t) => t.as_bytes().to_vec(),
+            Self::Html { html, alt_text } => {
+                let mut v = Vec::with_capacity(html.len().saturating_add(alt_text.len()));
+                v.extend_from_slice(html.as_bytes());
+                v.extend_from_slice(alt_text.as_bytes());
+                v
+            }
+            Self::Image { rgba, .. } => rgba.clone(),
+        }
+    }
+
+    /// Rebuilds the content from a header and its payload. Invalid UTF-8 or a payload of
+    /// the wrong size is an error, never a panic.
+    pub fn from_wire(header: WireClip, payload: Vec<u8>) -> Result<Self, HostError> {
+        let bad = |what: &str| HostError::IpcRefused(format!("malformed clipboard {what}"));
+        if u64::try_from(payload.len()).ok() != Some(header.payload_len()) {
+            return Err(bad("size"));
+        }
+        match header {
+            WireClip::Text { .. } => String::from_utf8(payload)
+                .map(Self::Text)
+                .map_err(|_| bad("text")),
+            WireClip::Html { html_len, .. } => {
+                let split = usize::try_from(html_len).map_err(|_| bad("html"))?;
+                let mut html = payload;
+                let alt = html.split_off(split.min(html.len()));
+                Ok(Self::Html {
+                    html: String::from_utf8(html).map_err(|_| bad("html"))?,
+                    alt_text: String::from_utf8(alt).map_err(|_| bad("html"))?,
+                })
+            }
+            WireClip::Image { width, height } => Ok(Self::Image {
+                width,
+                height,
+                rgba: payload,
+            }),
+        }
+    }
+}
+
+/// Writes a [`FeatureReply::Clip`] with the payload of `clip` (if any).
+pub fn write_clip_reply<W: Write + ?Sized>(
+    w: &mut W,
+    clip: Option<&ClipData>,
+) -> Result<(), HostError> {
+    match clip {
+        Some(c) => write_msg_with_payload(w, &FeatureReply::Clip(Some(c.header())), &c.payload()),
+        None => write_msg(w, &FeatureReply::Clip(None)),
+    }
+}
+
+/// Reads the payload announced by `header` and rebuilds the content.
+pub fn read_clip_payload<R: Read + ?Sized>(
+    r: &mut R,
+    header: WireClip,
+) -> Result<ClipData, HostError> {
+    let mut buf = Vec::new();
+    read_payload_into(r, header.payload_len(), &mut buf)?;
+    ClipData::from_wire(header, buf)
+}
+
+/// How far the pull of a virtual-files offer has come (mirrors the files crate's stage
+/// state).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WireStage {
+    Idle,
+    Running,
+    Finished,
+    /// The text is for the log only.
+    Failed(String),
+}
+
+/// One whiteboard stroke chunk (mirrors `tlp_desk_input::whiteboard::Stroke`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireStroke {
+    pub id: u64,
+    /// `0xRRGGBBAA`.
+    pub color: u32,
+    /// 1/10000 of the monitor height.
+    pub width: u16,
+    /// Normalized to `0..=65535` over the target rectangle.
+    pub points: Vec<(u16, u16)>,
+}
+
+/// One line of the privacy screen (mirrors `tlp_desk_input::ScreenLine`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireScreenLine {
+    pub text: String,
+    pub large: bool,
+}
+
+/// Why a privacy shield turned itself off (mirrors `tlp_desk_input::privacy::ShieldSignal`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WireShieldSignal {
+    EmergencyExit,
+    SecureDesktop,
+    Failed,
+}
+
+/// Agent -> service on an audio connection: interleaved little-endian `f32` samples follow
+/// (`payload_len` bytes). `payload_len == 0` is a keep-alive while nothing plays (loopback
+/// capture delivers no packets during silence), so the service notices a closed agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioPacket {
+    pub rate: u32,
+    pub channels: u16,
+    pub payload_len: u64,
 }
 
 /// An error that crosses the pipe, mapped back to capture/input errors on the service side.
@@ -397,6 +713,9 @@ pub enum GuiEvent {
         code: String,
     },
     Desktop(WireDesktop),
+    /// An app-defined event (postcard bytes of the app's own type: transfers, chat, conflict
+    /// prompts, ...). The hub forwards it and keeps nothing (v2).
+    App(Vec<u8>),
 }
 
 /// GUI -> service on a command connection.
@@ -415,6 +734,9 @@ pub enum GuiCommand {
         session: u64,
         permissions: Permissions,
     },
+    /// An app-defined command (postcard bytes of the app's own type), answered with
+    /// [`GuiReply::App`] (v2).
+    App(Vec<u8>),
 }
 
 /// Service -> GUI answer to a [`GuiCommand`].
@@ -424,6 +746,8 @@ pub enum GuiReply {
     /// The request/session no longer exists.
     NotFound,
     Error(WireError),
+    /// Answer to [`GuiCommand::App`] (postcard bytes of the app's own type).
+    App(Vec<u8>),
 }
 
 #[cfg(test)]
@@ -518,6 +842,174 @@ mod tests {
             session: 4,
             permissions: Permissions::VIEW,
         });
+    }
+
+    #[test]
+    fn feature_messages_roundtrip_with_arabic() {
+        roundtrip(&AgentHello {
+            version: IPC_VERSION,
+            channel: AgentChannel::Feature,
+        });
+        roundtrip(&AgentHello {
+            version: IPC_VERSION,
+            channel: AgentChannel::Audio,
+        });
+        roundtrip(&FeatureRequest::ShellOffer {
+            offer: 3,
+            dir: r"C:\ProgramData\TLP-Desk\paste\مجلد 1".into(),
+            items: vec![
+                TransferItem {
+                    rel_path: "تقارير/الربع الأول.xlsx".into(),
+                    size: 1234,
+                    modified_unix_ms: 1_700_000_000_000,
+                    is_dir: false,
+                },
+                TransferItem {
+                    rel_path: "تقارير".into(),
+                    size: 0,
+                    modified_unix_ms: 0,
+                    is_dir: true,
+                },
+            ],
+        });
+        roundtrip(&FeatureRequest::ShellStage {
+            offer: 3,
+            state: WireStage::Failed("انقطع الاتصال".into()),
+        });
+        roundtrip(&FeatureRequest::OverlayStrokes {
+            id: 9,
+            reset: true,
+            strokes: vec![WireStroke {
+                id: 1,
+                color: 0xff00_00ff,
+                width: 30,
+                points: vec![(0, 0), (65_535, 65_535)],
+            }],
+        });
+        roundtrip(&FeatureRequest::OverlayTarget {
+            id: 9,
+            rect: WireRect {
+                x: -1920,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+        });
+        roundtrip(&FeatureRequest::MarkerOpen {
+            id: 2,
+            label: "حاسوب سارة".into(),
+        });
+        roundtrip(&FeatureRequest::ShieldEngage {
+            id: 4,
+            lines: vec![
+                WireScreenLine {
+                    text: "هذا الجهاز قيد الاستخدام عن بُعد".into(),
+                    large: true,
+                },
+                WireScreenLine {
+                    text: "Laptop-١ (123 456 789)".into(),
+                    large: false,
+                },
+            ],
+        });
+        roundtrip(&FeatureRequest::ClipboardWrite(WireClip::Html {
+            html_len: 10,
+            alt_len: 4,
+        }));
+        roundtrip(&FeatureReply::Files(Some(vec![
+            r"C:\Users\تامر\ملف.txt".into()
+        ])));
+        roundtrip(&FeatureReply::Error(WireError::Unsupported));
+        roundtrip(&AgentEvent::LocalInput {
+            keyboard: true,
+            pointer: false,
+        });
+        roundtrip(&AgentEvent::Shield {
+            id: 4,
+            signal: WireShieldSignal::EmergencyExit,
+        });
+        roundtrip(&AgentEvent::StageBegin { offer: 3 });
+        roundtrip(&AudioPacket {
+            rate: 48_000,
+            channels: 2,
+            payload_len: 3840,
+        });
+        roundtrip(&GuiEvent::App("نقل ملف".as_bytes().to_vec()));
+        roundtrip(&GuiCommand::App(vec![0, 1, 2]));
+        roundtrip(&GuiReply::App(Vec::new()));
+    }
+
+    #[test]
+    fn clipboard_payloads_roundtrip_byte_exact() {
+        let cases = [
+            ClipData::Text("مرحبا\r\n\u{200f}عالم\u{200d}ـ".into()),
+            ClipData::Html {
+                html: "<b dir=\"rtl\">مرحبا</b>".into(),
+                alt_text: "مرحبا".into(),
+            },
+            ClipData::Html {
+                html: String::new(),
+                alt_text: "only alt".into(),
+            },
+            ClipData::Image {
+                width: 2,
+                height: 1,
+                rgba: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            },
+        ];
+        for clip in cases {
+            let mut buf = Vec::new();
+            write_clip_reply(&mut buf, Some(&clip)).unwrap();
+            let mut r = Cursor::new(buf);
+            let FeatureReply::Clip(Some(header)) = read_msg(&mut r).unwrap() else {
+                panic!("expected a clip header");
+            };
+            assert_eq!(read_clip_payload(&mut r, header).unwrap(), clip);
+        }
+        let mut buf = Vec::new();
+        write_clip_reply(&mut buf, None).unwrap();
+        assert_eq!(
+            read_msg::<_, FeatureReply>(&mut Cursor::new(buf)).unwrap(),
+            FeatureReply::Clip(None)
+        );
+    }
+
+    #[test]
+    fn hostile_clipboard_headers_are_errors() {
+        // Wrong size for the image.
+        assert!(ClipData::from_wire(
+            WireClip::Image {
+                width: 2,
+                height: 2
+            },
+            vec![0; 4]
+        )
+        .is_err());
+        // Invalid UTF-8.
+        assert!(ClipData::from_wire(WireClip::Text { len: 2 }, vec![0xff, 0xfe]).is_err());
+        // An HTML split in the middle of a character.
+        let bytes = "مر".as_bytes().to_vec();
+        assert!(ClipData::from_wire(
+            WireClip::Html {
+                html_len: 1,
+                alt_len: 3
+            },
+            bytes
+        )
+        .is_err());
+        // Sizes that overflow saturate and are refused before allocating.
+        let huge = WireClip::Image {
+            width: u32::MAX,
+            height: u32::MAX,
+        };
+        assert_eq!(huge.payload_len(), u64::MAX);
+        assert!(matches!(
+            read_clip_payload(&mut Cursor::new(Vec::new()), huge),
+            Err(HostError::IpcTooLarge { .. })
+        ));
+        // Contents are never printed.
+        let secret = ClipData::Text("كلمة السر 1234".into());
+        assert!(!format!("{secret:?}").contains("1234"));
     }
 
     #[test]
