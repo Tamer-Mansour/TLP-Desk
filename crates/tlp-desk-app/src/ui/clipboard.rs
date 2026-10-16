@@ -166,10 +166,7 @@ pub fn settings_card(ui: &mut egui::Ui, tx: Tx, settings: &mut Settings, backend
             widgets::icon_heading(ui, tx, Icon::Clipboard, tx.t(S::ClipboardSettings));
             ui.add_space(6.0);
             let mut on = !settings.clipboard_sync_off;
-            if ui
-                .checkbox(&mut on, tx.t(S::ClipboardSyncDefault))
-                .changed()
-            {
+            if super::settings::check_row(ui, tx, &mut on, tx.t(S::ClipboardSyncDefault)) {
                 settings.clipboard_sync_off = !on;
                 settings.save();
                 backend.set_clipboard_default(on);

@@ -35,16 +35,11 @@ pub struct SettingsUi {
     pub scroll_offset: Option<f32>,
 }
 
-/// A checkbox whose label sits on the reading side (RTL-aware); returns `true` if toggled.
+/// An on/off switch whose label sits on the reading side (RTL-aware); returns `true` if toggled.
+/// Accessibility (and the UI tests) still see a checkbox with the label as its name.
 pub(crate) fn check_row(ui: &mut egui::Ui, tx: Tx, value: &mut bool, text: &str) -> bool {
     theme::row(ui, tx.rtl(), |ui| {
-        let mut changed = ui.checkbox(value, "").changed();
-        let label = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
-        if label.clicked() {
-            *value = !*value;
-            changed = true;
-        }
-        changed
+        widgets::switch(ui, tx, value, text).changed()
     })
 }
 
@@ -79,27 +74,27 @@ impl App {
                     theme::column(ui, tx.rtl(), |ui| {
                         ui.set_max_width(620.0_f32.min(ui.available_width()));
                         self.appearance_card(ui);
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         self.device_card_settings(ui);
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         self.incoming_card(ui);
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         // Permanent password for unattended access (TLP-unattended).
                         self.unattended.settings_card(ui, tx, self.backend.as_ref());
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         self.allow_list_card(ui);
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         self.quality_card(ui);
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         self.startup_card(ui);
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         crate::ui::clipboard::settings_card(
                             ui,
                             tx,
                             &mut self.settings,
                             self.backend.as_ref(),
                         );
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         crate::ui::typing::settings_card(ui, tx, &mut self.settings);
                         if let Some(view) = self.session.as_mut() {
                             view.typing.set_route(
@@ -108,7 +103,7 @@ impl App {
                                 ),
                             );
                         }
-                        ui.add_space(12.0);
+                        ui.add_space(theme::space::L);
                         crate::ui::audio::settings_card(
                             ui,
                             tx,
@@ -139,28 +134,30 @@ impl App {
                 widgets::icon_heading(ui, tx, Icon::Language, tx.t(S::Appearance));
                 ui.add_space(6.0);
                 ui.label(theme::caption(ui, tx.t(S::Language)));
-                theme::row(ui, tx.rtl(), |ui| {
-                    for l in Lang::ALL {
-                        if ui.selectable_label(tx.lang == l, l.native_name()).clicked()
-                            && tx.lang != l
-                        {
-                            new_lang = Some(l);
-                        }
-                    }
-                });
-                ui.add_space(6.0);
+                let mut lang = tx.lang;
+                let langs: Vec<_> = Lang::ALL
+                    .iter()
+                    .map(|l| (*l, None, l.native_name()))
+                    .collect();
+                if widgets::segmented(ui, tx, &mut lang, &langs) {
+                    new_lang = Some(lang);
+                }
+                ui.add_space(theme::space::S);
                 ui.label(theme::caption(ui, tx.t(S::Digits)));
-                theme::row(ui, tx.rtl(), |ui| {
-                    for d in DigitStyle::ALL {
+                let mut digits = tx.digits;
+                let styles: Vec<_> = DigitStyle::ALL
+                    .iter()
+                    .map(|d| {
                         let key = match d {
                             DigitStyle::Western => S::DigitsWestern,
                             DigitStyle::ArabicIndic => S::DigitsArabicIndic,
                         };
-                        if ui.selectable_label(tx.digits == d, tx.t(key)).clicked() {
-                            new_digits = Some(d);
-                        }
-                    }
-                });
+                        (*d, None, tx.t(key))
+                    })
+                    .collect();
+                if widgets::segmented(ui, tx, &mut digits, &styles) {
+                    new_digits = Some(digits);
+                }
                 ui.label(theme::caption(ui, tx.t(S::DigitsHint)));
             });
         });
