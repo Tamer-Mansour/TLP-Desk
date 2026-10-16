@@ -91,7 +91,7 @@ const ENTRIES: &[Entry] = &[
 ];
 
 /// Narrowest the connection label is squeezed to before items move into "More".
-const MIN_NAME_W: f32 = 110.0;
+const MIN_NAME_W: f32 = 200.0;
 /// Absolute minimum of the connection label.
 const MIN_NAME_FLOOR: f32 = 40.0;
 /// Width of the overflow popup.

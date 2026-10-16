@@ -1353,6 +1353,74 @@ mod tests {
         }
     }
 
+    /// The More button opens and closes the menu holding the overflowed items, in both directions.
+    #[test]
+    fn more_menu_opens_and_closes() {
+        for lang in [Lang::En, Lang::Ar] {
+            let ctx = egui::Context::default();
+            icons::install(&ctx);
+            let backend = Recorder::default();
+            let peer = PeerInfo {
+                device_id: DeviceId(2),
+                name: "peer".into(),
+                address: "192.168.1.2".parse().unwrap(),
+            };
+            let mut session =
+                ViewerSession::new(SessionId(1), peer, Permissions::ALL, FrameSlot::new());
+            let tx = Tx::new(lang, DigitStyle::Western);
+            let screen = Rect::from_min_size(Pos2::ZERO, vec2(640.0, 600.0));
+            let run = |session: &mut ViewerSession, events: Vec<egui::Event>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| session.ui(ui, tx, &backend, false));
+                out.textures_delta.clear();
+            };
+            let click = |session: &mut ViewerSession, p: Pos2| {
+                run(session, vec![egui::Event::PointerMoved(p)]);
+                for pressed in [true, false] {
+                    run(
+                        session,
+                        vec![egui::Event::PointerButton {
+                            pos: p,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        }],
+                    );
+                }
+            };
+            run(&mut session, vec![]);
+            run(&mut session, vec![]);
+            let more = session.toolbar_layout.more.expect("overflow at 640 px");
+            assert!(session
+                .toolbar_layout
+                .overflow
+                .contains(&toolbar::Item::Clipboard));
+            assert!(!egui::Popup::is_any_open(&ctx));
+            click(&mut session, more.center());
+            run(&mut session, vec![]);
+            assert!(
+                egui::Popup::is_any_open(&ctx),
+                "{lang:?}: menu did not open"
+            );
+            // It stays open across frames, and a click on the button closes it again.
+            run(&mut session, vec![]);
+            assert!(
+                egui::Popup::is_any_open(&ctx),
+                "{lang:?}: menu closed by itself"
+            );
+            click(&mut session, more.center());
+            run(&mut session, vec![]);
+            assert!(
+                !egui::Popup::is_any_open(&ctx),
+                "{lang:?}: menu did not close"
+            );
+        }
+    }
+
     #[test]
     fn picker_hidden_with_one_monitor_and_banner_renders() {
         let ctx = egui::Context::default();
