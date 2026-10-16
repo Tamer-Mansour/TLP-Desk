@@ -94,6 +94,8 @@ struct Counters {
     size: AtomicU64,
     qp_sum: AtomicU64,
     qp_frames: AtomicU64,
+    /// Frames whose slice QP was not the 26 that some encoders always signal.
+    qp_varied: AtomicU64,
 }
 
 struct Shared {
@@ -442,6 +444,9 @@ fn decode_thread(shared: Arc<Shared>, mut jobs: mpsc::Receiver<Job>, rt: tokio::
                 .qp_sum
                 .fetch_add(u64::from(qp), Ordering::Relaxed);
             shared.counters.qp_frames.fetch_add(1, Ordering::Relaxed);
+            if qp != 26 {
+                shared.counters.qp_varied.fetch_add(1, Ordering::Relaxed);
+            }
         }
         if need_keyframe && !job.frame.keyframe {
             lock(&shared.feedback).on_skipped();
@@ -610,7 +615,7 @@ async fn stats_task(shared: Arc<Shared>, mut ended: watch::Receiver<Option<EndRe
     let mut last = Instant::now();
     let (mut last_dec, mut last_bytes, mut last_dec_us, mut last_lat, mut last_lat_n) =
         (0u64, 0u64, 0u64, 0u64, 0u64);
-    let (mut last_qp_sum, mut last_qp_n) = (0u64, 0u64);
+    let (mut last_qp_sum, mut last_qp_n, mut last_qp_varied) = (0u64, 0u64, 0u64);
     loop {
         tokio::select! {
             _ = tick.tick() => {}
@@ -646,10 +651,19 @@ async fn stats_task(shared: Arc<Shared>, mut ended: watch::Receiver<Option<EndRe
             c.qp_sum.load(Ordering::Relaxed),
             c.qp_frames.load(Ordering::Relaxed),
         );
-        if qp_n > last_qp_n {
-            s.qp = (qp_sum - last_qp_sum) as f32 / (qp_n - last_qp_n) as f32;
+        let qp_varied = c.qp_varied.load(Ordering::Relaxed);
+        let n = qp_n - last_qp_n;
+        if n > 0 {
+            // Intel's hardware encoder signals QP 26 in every slice header and varies the real
+            // quantiser per macroblock: a long run of exactly 26 means "unknown", not "26".
+            let uninformative = n >= 10 && qp_varied == last_qp_varied;
+            s.qp = if uninformative {
+                0.0
+            } else {
+                (qp_sum - last_qp_sum) as f32 / n as f32
+            };
         }
-        (last_qp_sum, last_qp_n) = (qp_sum, qp_n);
+        (last_qp_sum, last_qp_n, last_qp_varied) = (qp_sum, qp_n, qp_varied);
         s.frames_received = c.received.load(Ordering::Relaxed);
         s.frames_decoded = dec;
         s.width = (size >> 32) as u32;
