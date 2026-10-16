@@ -375,7 +375,7 @@ fn quality_floor_caps_the_quantiser_and_the_probe_reads_it() {
     assert!(worst <= crate::QUALITY_MAX_QP, "QP {worst} above the floor");
     // Without the floor the same starved stream goes far coarser.
     let loose = H264Tuning {
-        max_qp: 51,
+        qp: crate::QpBounds::UNBOUNDED,
         ..H264Tuning::default()
     };
     let (_, loose_worst) = probed_qp(100, loose);

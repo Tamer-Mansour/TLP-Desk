@@ -17,16 +17,17 @@ use windows::Win32::Media::MediaFoundation::{
     CODECAPI_AVEncCommonMaxBitRate, CODECAPI_AVEncCommonMeanBitRate,
     CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncH264CABACEnable,
     CODECAPI_AVEncMPVDefaultBPictureCount, CODECAPI_AVEncMPVGOPSize,
-    CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVEncVideoMaxQP, CODECAPI_AVEncVideoMinQP, CODECAPI_AVLowLatencyMode, ICodecAPI, IMFActivate,
-    IMFAttributes, IMFMediaEvent, IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform,
-    MEError, METransformHaveOutput, METransformNeedInput, MFCreateAttributes, MFCreateMediaType,
-    MFCreateMemoryBuffer, MFCreateSample, MFMediaType_Video, MFNominalRange_16_235, MFShutdown,
-    MFStartup, MFTEnum2, MFT_ENUM_HARDWARE_VENDOR_ID_Attribute, MFT_FRIENDLY_NAME_Attribute,
-    MFVideoFormat_H264, MFVideoFormat_NV12, MFVideoInterlace_Progressive,
-    MFVideoTransferMatrix_BT709, MFSTARTUP_LITE, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_ADAPTER_LUID,
-    MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER, MFT_MESSAGE_COMMAND_FLUSH,
-    MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_END_OF_STREAM,
-    MFT_MESSAGE_NOTIFY_END_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER,
+    CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVEncVideoMaxQP, CODECAPI_AVEncVideoMinQP,
+    CODECAPI_AVLowLatencyMode, ICodecAPI, IMFActivate, IMFAttributes, IMFMediaEvent,
+    IMFMediaEventGenerator, IMFMediaType, IMFSample, IMFTransform, MEError, METransformHaveOutput,
+    METransformNeedInput, MFCreateAttributes, MFCreateMediaType, MFCreateMemoryBuffer,
+    MFCreateSample, MFMediaType_Video, MFNominalRange_16_235, MFShutdown, MFStartup, MFTEnum2,
+    MFT_ENUM_HARDWARE_VENDOR_ID_Attribute, MFT_FRIENDLY_NAME_Attribute, MFVideoFormat_H264,
+    MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoTransferMatrix_BT709, MFSTARTUP_LITE,
+    MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_ADAPTER_LUID, MFT_ENUM_FLAG_HARDWARE,
+    MFT_ENUM_FLAG_SORTANDFILTER, MFT_MESSAGE_COMMAND_FLUSH, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
+    MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
+    MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER,
     MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES,
     MFT_REGISTER_TYPE_INFO, MF_EVENT_FLAG_NO_WAIT, MF_E_NO_EVENTS_AVAILABLE,
     MF_E_TRANSFORM_NEED_MORE_INPUT, MF_E_TRANSFORM_STREAM_CHANGE, MF_LOW_LATENCY,
@@ -191,6 +192,7 @@ pub(crate) struct MftParams {
     pub height: u32,
     pub fps: u32,
     pub bitrate_bps: u32,
+    pub qp: crate::QpBounds,
 }
 
 /// An activated, configured, streaming encoder MFT.
@@ -387,12 +389,12 @@ impl Mft {
         let max_qp = set_codec(
             &codec,
             &CODECAPI_AVEncVideoMaxQP,
-            u32::from(crate::QUALITY_MAX_QP).into(),
+            u32::from(p.qp.max).into(),
         );
         let min_qp = set_codec(
             &codec,
             &CODECAPI_AVEncVideoMinQP,
-            u32::from(crate::QUALITY_MIN_QP).into(),
+            u32::from(p.qp.min).into(),
         );
         tracing::debug!(
             vendor = ?cand.vendor_id,

@@ -33,6 +33,33 @@ pub use select::{
     new_encoder_with, EncoderOptions, EncoderPreference, FallbackEncoder, ADAPTER_ENV, ENCODER_ENV,
 };
 
+/// Quantiser limits of an encoder (H.264 QP, 0-51; lower is sharper).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QpBounds {
+    /// Finest quantiser rate control may use (bits below this buy nothing visible).
+    pub min: u8,
+    /// Coarsest quantiser rate control may use: the quality floor. A frame that cannot be
+    /// coded this well within the bitrate overshoots it, and the adaptive controller then
+    /// lowers the resolution instead of the quality.
+    pub max: u8,
+}
+
+impl QpBounds {
+    /// The quality floor every session uses.
+    pub const FLOOR: Self = Self {
+        min: QUALITY_MIN_QP,
+        max: QUALITY_MAX_QP,
+    };
+    /// No limits (the benchmark's "before" setting).
+    pub const UNBOUNDED: Self = Self { min: 0, max: 51 };
+}
+
+impl Default for QpBounds {
+    fn default() -> Self {
+        Self::FLOOR
+    }
+}
+
 /// Quality floor: the coarsest quantiser (H.264 QP, 0-51) the encoders may use. About 32 keeps
 /// UI text legible; a stream that cannot afford it is made smaller (lower resolution) by the
 /// host's adaptive controller instead of blurrier.

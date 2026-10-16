@@ -27,12 +27,8 @@ pub struct H264Tuning {
     /// OpenH264's screen-content mode: noticeably smaller output for text/UI, but 2-3x the
     /// CPU per frame and it does not use multiple threads. Off by default (latency first).
     pub screen_content: bool,
-    /// Highest quantiser the rate control may use (the quality floor: lower is sharper).
-    /// Frames that cannot be coded this well within the bitrate overshoot it instead; the
-    /// adaptive controller then lowers the resolution rather than the quality.
-    pub max_qp: u8,
-    /// Lowest quantiser (stops spending bits on invisible detail on static screens).
-    pub min_qp: u8,
+    /// Quantiser limits; [`QpBounds::FLOOR`] by default.
+    pub qp: crate::QpBounds,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,8 +56,7 @@ impl Default for H264Tuning {
             complexity: H264Complexity::Low,
             downscale: Downscale::Auto,
             screen_content: false,
-            max_qp: crate::QUALITY_MAX_QP,
-            min_qp: crate::QUALITY_MIN_QP,
+            qp: crate::QpBounds::FLOOR,
         }
     }
 }
@@ -139,8 +134,7 @@ impl H264Encoder {
             threads,
             complexity: tuning.complexity,
             screen_content: tuning.screen_content,
-            max_qp: tuning.max_qp,
-            min_qp: tuning.min_qp,
+            qp: tuning.qp,
         })?;
         Ok(Self {
             config,
@@ -252,8 +246,7 @@ mod ffi {
         pub threads: u16,
         pub complexity: H264Complexity,
         pub screen_content: bool,
-        pub max_qp: u8,
-        pub min_qp: u8,
+        pub qp: crate::QpBounds,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,9 +379,9 @@ mod ffi {
             params.bEnableLongTermReference = false;
             // Quality floor: rate control never quantises coarser than max_qp (H.264 range
             // 0..=51; OpenH264 itself accepts 0..=51 with min <= max).
-            let max_qp = i32::from(p.max_qp.clamp(1, 51));
+            let max_qp = i32::from(p.qp.max.clamp(1, 51));
             params.iMaxQp = max_qp;
-            params.iMinQp = i32::from(p.min_qp).clamp(0, max_qp);
+            params.iMinQp = i32::from(p.qp.min).clamp(0, max_qp);
             params.iEntropyCodingModeFlag = 0; // CAVLC (constrained baseline)
 
             let layer = &mut params.sSpatialLayers[0];
