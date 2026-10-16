@@ -135,6 +135,8 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
             default_upload_dir: Some(dir.join("received")),
             ..TransferConfig::default()
         },
+        // Behave the same whether or not the real TLP-Desk service is installed here.
+        mirror_service: false,
         ..RealConfig::default()
     }
 }

@@ -103,6 +103,10 @@ pub struct RealConfig {
     pub clipboard: Option<Arc<dyn tlp_desk_files::ClipboardBackend>>,
     /// File transfer settings (conflict policy, where uploads from viewers land).
     pub transfer: TransferConfig,
+    /// When the port is taken by the installed Windows service, mirror that service instead of
+    /// reporting `PortInUse`. Tests turn this off so they behave the same whether or not a real
+    /// service is installed on the machine.
+    pub mirror_service: bool,
 }
 
 impl Default for RealConfig {
@@ -129,6 +133,7 @@ impl Default for RealConfig {
             connection_log: None,
             clipboard: None,
             transfer: TransferConfig::default(),
+            mirror_service: true,
         }
     }
 }
@@ -611,7 +616,8 @@ impl RealBackend {
         // TLP-service: the port is taken by the installed service, which hosts this device;
         // mirror it instead of reporting a problem.
         #[cfg(windows)]
-        if matches!(problem, Some(HostProblem::PortInUse(_)))
+        if cfg.mirror_service
+            && matches!(problem, Some(HostProblem::PortInUse(_)))
             && tlp_desk_host::service::windows::service_running()
         {
             problem = None;
