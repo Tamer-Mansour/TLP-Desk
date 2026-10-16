@@ -207,6 +207,10 @@ impl VideoEncoder for H264Encoder {
     fn config(&self) -> EncoderConfig {
         self.config
     }
+
+    fn backend_label(&self) -> String {
+        "software: OpenH264".into()
+    }
 }
 
 /// Minimal safe wrapper over OpenH264's `ISVCEncoder` C interface.

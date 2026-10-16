@@ -4183,6 +4183,7 @@ dependencies = [
  "openh264-sys2",
  "thiserror 2.0.21",
  "tlp-desk-capture",
+ "tracing",
  "windows 0.62.2",
 ]
 

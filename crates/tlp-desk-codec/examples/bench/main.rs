@@ -5,8 +5,16 @@
 //!     [--monitor 0] [--backend auto|wgc|dxgi] [--static] [--threads 0]
 //!     [--complexity low|medium|high] [--kbps N] [--crop WxH] [--downscale auto|never|half]
 //!     [--screen] [--scale WxH] [--pipelined] [--animate] [--conv]
+//!     [--encoder sw|hw|auto] [--adapter auto|intel|nvidia|amd] [--synthetic WxH] [--noise]
 //! ```
 //!
+//! * `--encoder` picks OpenH264 (`sw`, default), the Media Foundation hardware encoder (`hw`,
+//!   on the GPU chosen by `--adapter`), or `auto` (what the host uses: hardware with fallback).
+//!   `--threads`, `--complexity`, `--downscale` and `--screen` only apply to `sw`.
+//! * `--synthetic 1920x1080` skips screen capture entirely and encodes generated desktop-like
+//!   frames (gradient, scrolling text block, moving box; `--noise` adds a scrolling noise block
+//!   that saturates the bitrate). It reports encode time, the CPU used during encode calls,
+//!   bitrate and PSNR of the decoded frames against the source. Nothing on screen is touched.
 //! * `--scale 1920x1200` opens the capturer with `CaptureOptions::max_size`, so frames are
 //!   downscaled on the GPU before readback; the encoder is created for the scaled size.
 //! * `--crop 1920x1080` encodes only the top-left 1920x1080 of each (possibly scaled) frame.
@@ -37,11 +45,39 @@ use tlp_desk_capture::{
 };
 use tlp_desk_codec::convert::{bgra_to_i420, bgra_to_i420_half, even_up, I420Buffer};
 use tlp_desk_codec::{
-    Downscale, EncodedFrame, EncoderConfig, H264Complexity, H264Decoder, H264Encoder, H264Tuning,
-    VideoDecoder, VideoEncoder,
+    new_encoder_with, Downscale, EncodedFrame, EncoderConfig, EncoderOptions, EncoderPreference,
+    H264Complexity, H264Decoder, H264Encoder, H264Tuning, VideoDecoder, VideoEncoder,
 };
 
+mod synthetic;
+
+/// NVIDIA Optimus laptops only let a process open the NVIDIA encoder MFT when the process runs
+/// on the dGPU. NVIDIA's documented opt-in is an exported `NvOptimusEnablement` DWORD = 1; the
+/// `.drectve` linker directive exports it from this benchmark binary only.
+#[cfg(windows)]
+#[allow(non_upper_case_globals)]
+mod optimus {
+    #[no_mangle]
+    #[used]
+    pub static NvOptimusEnablement: u32 = 1;
+    #[link_section = ".drectve"]
+    #[used]
+    static EXPORT_DIRECTIVE: [u8; 34] = *b" /EXPORT:NvOptimusEnablement,DATA ";
+}
+
+/// Which encoder implementation to benchmark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EncoderChoice {
+    Software,
+    Hardware,
+    Auto,
+}
+
 struct Args {
+    encoder: EncoderChoice,
+    adapter: String,
+    synthetic: Option<(u32, u32)>,
+    noise: bool,
     seconds: u64,
     fps: u32,
     monitor: u32,
@@ -66,6 +102,10 @@ fn parse_size(v: &str, flag: &str) -> (u32, u32) {
 
 fn parse_args() -> Args {
     let mut a = Args {
+        encoder: EncoderChoice::Software,
+        adapter: "auto".into(),
+        synthetic: None,
+        noise: false,
         seconds: 10,
         fps: 60,
         monitor: 0,
@@ -83,6 +123,17 @@ fn parse_args() -> Args {
     while let Some(flag) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| panic!("{flag} needs a value"));
         match flag.as_str() {
+            "--encoder" => {
+                a.encoder = match val().as_str() {
+                    "sw" | "software" => EncoderChoice::Software,
+                    "hw" | "hardware" => EncoderChoice::Hardware,
+                    "auto" => EncoderChoice::Auto,
+                    other => panic!("unknown encoder {other}"),
+                }
+            }
+            "--adapter" => a.adapter = val(),
+            "--synthetic" => a.synthetic = Some(parse_size(&val(), "--synthetic")),
+            "--noise" => a.noise = true,
             "--seconds" => a.seconds = val().parse().expect("--seconds"),
             "--fps" => a.fps = val().parse().expect("--fps"),
             "--monitor" => a.monitor = val().parse().expect("--monitor"),
@@ -330,10 +381,48 @@ struct Report {
     s_total: Stage,
 }
 
+/// Creates the encoder `args` asks for; returns it with its encoded size and a label.
+fn make_encoder(args: &Args, config: EncoderConfig) -> (Box<dyn VideoEncoder>, (u32, u32)) {
+    match args.encoder {
+        EncoderChoice::Software => {
+            let enc = H264Encoder::with_tuning(config, args.tuning).expect("software encoder");
+            let size = enc.encoded_size();
+            (Box::new(enc), size)
+        }
+        #[cfg(windows)]
+        EncoderChoice::Hardware => {
+            let adapter = tlp_desk_codec::HwAdapter::parse(&args.adapter).expect("--adapter");
+            let enc = tlp_desk_codec::MfEncoder::new(config, adapter).expect("hardware encoder");
+            println!("hardware encoder: {:?}", enc.info());
+            let size = enc.encoded_size();
+            (Box::new(enc), size)
+        }
+        #[cfg(not(windows))]
+        EncoderChoice::Hardware => panic!("hardware encoding needs Windows"),
+        EncoderChoice::Auto => {
+            if args.adapter != "auto" {
+                std::env::set_var(tlp_desk_codec::ADAPTER_ENV, &args.adapter);
+            }
+            let options = EncoderOptions {
+                preference: EncoderPreference::Auto,
+                ..EncoderOptions::from_env()
+            };
+            let enc = new_encoder_with(config, &options).expect("encoder");
+            // Hardware and software share the size policy, so the software size is the answer.
+            let size = H264Encoder::new(config).expect("size probe").encoded_size();
+            (enc, size)
+        }
+    }
+}
+
 fn main() {
     let args = parse_args();
     #[cfg(windows)]
     make_dpi_aware();
+    if let Some(size) = args.synthetic {
+        synthetic::run(&args, size);
+        return;
+    }
     let mon = list_monitors()
         .expect("list monitors")
         .into_iter()
@@ -358,17 +447,16 @@ fn main() {
     if let Some(kbps) = args.kbps {
         config.bitrate_kbps = kbps;
     }
-    let mut enc = H264Encoder::with_tuning(config, args.tuning).expect("encoder");
+    let (mut enc, (ew, eh)) = make_encoder(&args, config);
     let mut dec = H264Decoder::new().expect("decoder");
-    let (ew, eh) = enc.encoded_size();
     let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
 
     println!(
         "monitor {} '{}' {}x{} primary={} | backend {:?} | capture frames {}x{} (scale {:?})
-source {}x{} -> encoded {}x{} | target {} fps, {} kbps | {:?} | {} logical CPUs | motion overlay: {} | {} | animate: {}",
+source {}x{} -> encoded {}x{} | target {} fps, {} kbps | {} {:?} | {} logical CPUs | motion overlay: {} | {} | animate: {}",
         mon.index, mon.name, mon.width, mon.height, mon.primary, cap.backend(), fw, fh, args.scale,
-        w, h, ew, eh, config.fps, config.bitrate_kbps, args.tuning, cpus, args.motion,
-        if args.pipelined { "PIPELINED" } else { "serial" }, args.animate
+        w, h, ew, eh, config.fps, config.bitrate_kbps, enc.backend_label(), args.tuning, cpus,
+        args.motion, if args.pipelined { "PIPELINED" } else { "serial" }, args.animate
     );
 
     let crop = move |mut f: BgraFrame| {
@@ -392,7 +480,7 @@ source {}x{} -> encoded {}x{} | target {} fps, {} kbps | {:?} | {} logical CPUs 
     let mut r = if args.pipelined {
         run_pipelined(&args, cap, enc, dec, last, crop)
     } else {
-        run_serial(&args, cap, enc, dec, last, crop)
+        run_serial(&args, cap, (enc, (ew, eh)), dec, last, crop)
     };
     let cpu = (process_cpu_time() - cpu_start).as_secs_f64();
     #[cfg(windows)]
@@ -445,13 +533,12 @@ fn pace(start: Instant, next_tick: &mut Instant, interval: Duration, seconds: u6
 fn run_serial(
     args: &Args,
     mut cap: Box<dyn ScreenCapturer>,
-    mut enc: H264Encoder,
+    (mut enc, encoded_size): (Box<dyn VideoEncoder>, (u32, u32)),
     mut dec: H264Decoder,
     mut last: BgraFrame,
     crop: impl Fn(BgraFrame) -> BgraFrame,
 ) -> Report {
     let mut r = Report::new();
-    let encoded_size = enc.encoded_size();
     let mut yuv = I420Buffer::default();
     let interval = Duration::from_secs_f64(1.0 / args.fps.max(1) as f64);
     let start = Instant::now();
@@ -505,7 +592,7 @@ struct Mailbox {
 fn run_pipelined(
     args: &Args,
     mut cap: Box<dyn ScreenCapturer>,
-    mut enc: H264Encoder,
+    mut enc: Box<dyn VideoEncoder>,
     mut dec: H264Decoder,
     mut last: BgraFrame,
     crop: impl Fn(BgraFrame) -> BgraFrame + Send + 'static,
