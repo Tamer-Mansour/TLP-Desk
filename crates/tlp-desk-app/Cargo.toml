@@ -21,7 +21,7 @@ tlp-desk-files.workspace = true
 tlp-desk-input.workspace = true
 tlp-desk-capture.workspace = true
 tlp-desk-audio.workspace = true
-if-addrs = "0.13"
+if-addrs = "0.15"
 raw-window-handle = "0.6"
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
