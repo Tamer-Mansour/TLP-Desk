@@ -465,9 +465,10 @@ viewer                                   host
 
 - **mDNS** (`mdns-sd`): service type `_tlpdesk._udp.local.`, instance name = device ID, host name
   `tlpdesk-<id>.local.`, SRV port = QUIC port. TXT records: `id` (9 digits), `name` (at most 64
-  chars), `port`, `pv` (protocol version).
-- **Broadcast fallback** on UDP **47401**: packet = `b"TLPD" || postcard(BroadcastPacket)`, at most
-  512 bytes:
+  chars), `port`, `pv` (protocol version), `ver` (app version, e.g. `1.0.0-rc.4`; added in
+  1.0.0-rc.4, absent from older builds).
+- **Broadcast fallback** on UDP **47401**: packet =
+  `b"TLPD" || postcard(BroadcastPacket) [|| postcard(app_version: String)]`, at most 512 bytes:
 
   ```
   BroadcastPacket { kind: Announce | Query, protocol_version: u32, device_id: u32,
@@ -478,6 +479,14 @@ viewer                                   host
   `255.255.255.255`. Browsers send `Query` on start/refresh (`device_id = 0` when not
   advertising); hosts reply with a unicast `Announce`. Broadcast-only entries expire after 16 s of
   silence.
+
+  The app-version trailer (added in 1.0.0-rc.4) is optional and comes *after* the struct, because
+  postcard is not self-describing: older builds decode the struct and ignore the trailing bytes,
+  newer builds read the trailer when present. No `PROTOCOL_VERSION` bump: the packet stays
+  compatible both ways.
+- **App version** (`ver` / trailer) is display-only: receivers accept it only if it is at most 32
+  ASCII bytes of `[0-9A-Za-z.+-]` and drop it otherwise. The app uses it for the "a newer version is
+  running on <device>" notice; nothing is ever transferred or installed because of it.
 - Both sources are merged by device ID; peers outside the allow-list are ignored. Manual IP
   connect is always possible.
 - **Wake-on-LAN**: standard magic packet (6 x `0xFF` + MAC x 16) to UDP port 9 on the subnet

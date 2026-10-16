@@ -29,6 +29,7 @@ pub mod transfers;
 pub mod tunnels;
 pub mod typing;
 pub mod unattended;
+pub mod update;
 pub mod view_scale;
 pub mod viewer_input;
 pub mod whiteboard;

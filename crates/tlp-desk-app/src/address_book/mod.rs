@@ -307,6 +307,7 @@ mod tests {
             name: name.into(),
             address: ip.parse().unwrap(),
             online: true,
+            app_version: None,
         }
     }
 

@@ -62,6 +62,31 @@ pub struct Settings {
     pub type_with_my_layout: bool,
     /// The stand-alone Accept window (TLP-accept-popup).
     pub accept_popup: AcceptPopupSettings,
+    /// Opt-in update check against GitHub Releases (TLP-updater).
+    pub updates: UpdateSettings,
+}
+
+/// Update check options. Nothing contacts the internet unless the user presses "Check for
+/// updates now" or turns on `check_daily` (CLAUDE.md hard rule 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateSettings {
+    /// Check GitHub once a day while the app runs. Default **off**.
+    pub check_daily: bool,
+    /// Offer pre-releases (`-rc.N`). Default on while TLP-Desk ships release candidates.
+    pub include_prereleases: bool,
+    /// Unix time (seconds) of the last automatic daily check; 0 = never.
+    pub last_check_unix: u64,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            check_daily: false,
+            include_prereleases: true,
+            last_check_unix: 0,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -78,6 +103,7 @@ impl Default for Settings {
             mute_remote_audio: false,
             type_with_my_layout: false,
             accept_popup: AcceptPopupSettings::default(),
+            updates: UpdateSettings::default(),
         }
     }
 }

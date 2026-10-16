@@ -776,6 +776,34 @@ strings! {
     PopupAuthPassword => "Password", "كلمة المرور";
     PopupEnabled => "Show connection requests in their own window, even when TLP-Desk is hidden", "عرض طلبات الاتصال في نافذة مستقلة حتى عندما يكون TLP-Desk مخفيًا";
     PopupSound => "Play a sound when a request arrives", "تشغيل صوت عند وصول طلب";
+    // --- updates (TLP-updater) ---
+    UpdSection => "Updates", "التحديثات";
+    UpdInstalled => "Installed version: {ver}", "الإصدار المثبت: {ver}";
+    UpdCheckNow => "Check for updates now", "التحقق من وجود تحديثات الآن";
+    UpdCheckDaily => "Check daily", "التحقق يوميًا";
+    UpdIncludePre => "Include test versions (release candidates)", "تضمين الإصدارات التجريبية (المرشحة للإصدار)";
+    UpdNote => "Checking for updates contacts github.com over the internet. TLP-Desk never does this on its own: only when you press the button or turn on the daily check. A download is installed only after its signature and checksum are verified.", "يتصل التحقق من التحديثات بموقع github.com عبر الإنترنت. لا يفعل TLP-Desk ذلك من تلقاء نفسه أبدًا، بل فقط عند ضغط الزر أو تفعيل التحقق اليومي. ولا يُثبَّت أي تنزيل إلا بعد التحقق من توقيعه ومجموعه الاختباري.";
+    UpdChecking => "Checking for updates…", "جارٍ التحقق من التحديثات…";
+    UpdUpToDate => "You have the latest version.", "لديك أحدث إصدار.";
+    UpdAvailableTitle => "Update available", "يتوفر تحديث";
+    UpdAvailable => "Version {ver} is available (you have {cur}).", "الإصدار {ver} متوفر (لديك {cur}).";
+    UpdNotes => "What's new", "ما الجديد";
+    UpdInstall => "Download & install", "تنزيل وتثبيت";
+    UpdLater => "Later", "لاحقًا";
+    UpdOpenPage => "Open the release page", "فتح صفحة الإصدار";
+    UpdDownloading => "Downloading… {pct}", "جارٍ التنزيل… {pct}";
+    UpdCancel => "Cancel", "إلغاء";
+    UpdVerified => "Downloaded and verified. Windows will ask for administrator rights; then TLP-Desk closes, updates and starts again.", "تم التنزيل والتحقق. سيطلب ويندوز صلاحيات المسؤول، ثم يُغلَق TLP-Desk ويُحدَّث ويعمل من جديد.";
+    UpdInstallNow => "Install now", "التثبيت الآن";
+    UpdFailed => "The update did not complete: {detail}", "لم يكتمل التحديث: {detail}";
+    UpdErrNetwork => "GitHub could not be reached. Check the internet connection and try again.", "تعذّر الوصول إلى GitHub. تحقّق من الاتصال بالإنترنت وحاول مجددًا.";
+    UpdErrVerify => "the download failed verification (signature or checksum), so it was deleted and nothing was installed.", "فشل التحقق من التنزيل (التوقيع أو المجموع الاختباري)، لذا حُذف ولم يُثبَّت أي شيء.";
+    UpdErrNoInstaller => "this release has no installer to download here. Open the release page instead.", "لا يحتوي هذا الإصدار على مثبّت يمكن تنزيله هنا. افتح صفحة الإصدار بدلًا من ذلك.";
+    UpdErrLaunch => "the installer could not be started (were administrator rights refused?).", "تعذّر تشغيل المثبّت (هل رُفضت صلاحيات المسؤول؟).";
+    UpdErrOther => "GitHub sent an unexpected answer. Try again later.", "أرسل GitHub ردًا غير متوقع. حاول لاحقًا.";
+    UpdLanNotice => "A newer version ({ver}) is running on {device}", "إصدار أحدث ({ver}) يعمل على {device}";
+    UpdDownload => "Download", "تنزيل";
+    UpdDismiss => "Hide", "إخفاء";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.

@@ -7,6 +7,7 @@ TLP-Desk ships two artifacts for Windows x64, plus a checksum file:
 | `TLP-Desk-<version>-setup.exe` | `installer\build-setup.ps1` (Inno Setup) | Installs to `C:\Program Files\TLP-Desk`, Start-menu shortcut, firewall rules, uninstaller |
 | `TLP-Desk-<version>-win-x64-portable.zip` | `installer\portable.ps1` | `TLP-Desk.exe`, `TLP-Desk-cli.exe`, `README.txt`, `licenses\` — runs without installing (attended mode) |
 | `SHA256SUMS.txt` | both scripts | `<sha256>  <file name>` per artifact, sorted, LF line endings |
+| `SHA256SUMS.txt.minisig` | `scripts\sign-release.ps1` | ed25519 signature of `SHA256SUMS.txt` (minisign format) for the in-app updater |
 
 All three are written to `dist\` (git-ignored).
 
@@ -51,6 +52,10 @@ executables' VERSIONINFO, and the setup's file name uses it. The wire protocol h
    (`netsh advfirewall firewall show rule name="TLP-Desk (QUIC)"`), uninstall, check they are gone.
    Silent mode: `TLP-Desk-<version>-setup.exe /VERYSILENT /SUPPRESSMSGBOXES` (standard Inno Setup
    switches; firewall rules are added in silent mode too, the app is not launched).
+   **Sign the manifest** (after both scripts, whenever `SHA256SUMS.txt` changes):
+   `$env:TLP_RELEASE_SIGNING_KEY = '<path to release.key>'; scripts\sign-release.ps1`. Without
+   `SHA256SUMS.txt.minisig` the in-app updater refuses to install the release (it still offers
+   the release page). See [below](#signing-the-release-manifest-in-app-updater).
 7. **Commit** the version bump and changelog: `TLP-release: x.y.z`.
 8. **Tag** the commit on `TLP-Desk`: `git tag -a vx.y.z -m "TLP-Desk x.y.z"` and push the tag.
 9. **Publish.** The release workflow creates a draft GitHub Release for the tag with the setup,
@@ -94,6 +99,32 @@ so releases are **not code-signed** and SmartScreen warns on first run; the user
 "More info → Run anyway" and the winget route. What to buy and how to set it up:
 [Code signing, SmartScreen and winget](code-signing.md). See also
 [ADR 0008](../adr/0008-inno-setup-instead-of-msi.md).
+
+## Signing the release manifest (in-app updater)
+
+The in-app updater (`crates/tlp-desk-app/src/update/`) installs a release only when
+`SHA256SUMS.txt.minisig` verifies against the public key embedded in
+`crates/tlp-desk-app/src/update/pubkey.rs` **and** the setup's SHA-256 matches the signed
+`SHA256SUMS.txt`. The signature is minisign-compatible (prehashed ed25519, `ED`), so
+`minisign -Vm SHA256SUMS.txt -P <public key>` verifies it too.
+
+- **Key generation (once):** `scripts\gen-release-key.ps1 -OutDir <folder outside the repo>`
+  writes `release.key` (secret) and `release.pub`, and prints the public key line for
+  `pubkey.rs`. The script refuses to write inside the repository.
+- **Where the secret lives:** the GitHub Actions secret **`RELEASE_SIGNING_KEY`** (contents of
+  `release.key`, or just its base64 line) plus an offline backup with the maintainer. It is never
+  committed. `release.yml` runs `scripts/sign-release.ps1` with it after building the artifacts
+  and attaches `SHA256SUMS.txt.minisig`; the step is skipped when the secret is absent.
+- **Signing locally:** set `TLP_RELEASE_SIGNING_KEY` to the key file path (or base64) and run
+  `scripts\sign-release.ps1 [-Sums dist\SHA256SUMS.txt]`. It signs with the trusted comment
+  `TLP-Desk <version> SHA256SUMS.txt` and then verifies the result against the key embedded in
+  the app, so a wrong key fails here instead of on users' PCs.
+- **Rotating the key:** ship a release whose `pubkey.rs` holds the new key (signed with the old
+  key), then sign later releases with the new key. Installs older than that release can only
+  update by hand.
+
+The tool behind both scripts is `crates/tlp-desk-app/examples/release_sign.rs`
+(`keygen`, `sign`, `verify`).
 
 ## Verifying a download
 

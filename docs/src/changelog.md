@@ -8,6 +8,23 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Added
+
+- **In-app updates.** Settings → Updates has **Check for updates now**, **Check daily** (off by
+  default) and **Include test versions**. The check asks GitHub Releases for a newer version and
+  shows its release notes; **Download & install** downloads the setup, verifies the ed25519
+  (minisign) signature of `SHA256SUMS.txt` with the key built into the app and the setup's SHA-256,
+  and only then runs it elevated and silently. Anything unverified is deleted and never run. This
+  is the one, opt-in exception to "no internet" (CLAUDE.md hard rule 2 was relaxed by the
+  maintainer). See [Updating](user-guide/en/updating.md).
+- **Newer version on the LAN.** Devices announce their app version in discovery (mDNS TXT `ver`
+  and an optional trailer on the broadcast packet, compatible with older builds both ways; no
+  `PROTOCOL_VERSION` change). The home screen says "A newer version (x) is running on <device>"
+  with a link to the releases page.
+- Release signing: `scripts/gen-release-key.ps1`, `scripts/sign-release.ps1` and a
+  `release.yml` step (secret `RELEASE_SIGNING_KEY`) publish `SHA256SUMS.txt.minisig`. See
+  [Release process](dev/release.md#signing-the-release-manifest-in-app-updater).
+
 ## [1.0.0-rc.3] - 2026-10-16
 
 Multi-viewer sessions, on-screen Accept window, Windows-service feature parity, Explorer drag-and-drop, security hardening (audit F1-F5), visual design refresh, code-signing pipeline and winget manifests, dependency updates.

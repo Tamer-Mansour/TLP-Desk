@@ -166,6 +166,7 @@ fn device(id: u32, name: &str, ip: [u8; 4], online: bool) -> DiscoveredDevice {
         name: name.into(),
         address: IpAddr::V4(Ipv4Addr::from(ip)),
         online,
+        app_version: None,
     }
 }
 

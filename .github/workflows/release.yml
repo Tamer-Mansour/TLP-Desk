@@ -1,5 +1,6 @@
 # Builds the Windows release artifacts for a version tag and attaches them to a GitHub Release:
 #   TLP-Desk-<version>-setup.exe, TLP-Desk-<version>-win-x64-portable.zip, SHA256SUMS.txt
+#   and, when the RELEASE_SIGNING_KEY secret is set, SHA256SUMS.txt.minisig (in-app updater)
 # Trigger: push a tag like v0.2.0 (the version itself comes from Cargo.toml).
 #
 # Code signing is optional and switches itself on when the repository is configured for it
@@ -35,6 +36,8 @@ jobs:
       # `secrets` cannot be used in step `if:` conditions; expose only whether they exist.
       SIGN_WITH_ATS: ${{ secrets.AZURE_CLIENT_ID != '' && vars.ATS_ENDPOINT != '' }}
       SIGN_WITH_PFX: ${{ secrets.SIGN_PFX_BASE64 != '' }}
+      # In-app updater: SHA256SUMS.txt.minisig is made only when the release key secret exists.
+      SIGN_RELEASE_MANIFEST: ${{ secrets.RELEASE_SIGNING_KEY != '' }}
       # Version of the Artifact Signing dlib for signtool (nuget.org Microsoft.ArtifactSigning.Client).
       ATS_CLIENT_VERSION: "1.0.146"
     steps:
@@ -110,6 +113,15 @@ jobs:
           TLP_SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
         run: ./installer/portable.ps1
 
+      # The in-app updater installs a release only if SHA256SUMS.txt verifies against the
+      # public key embedded in the app (crates/tlp-desk-app/src/update/pubkey.rs).
+      - name: Sign SHA256SUMS.txt for the in-app updater
+        if: env.SIGN_RELEASE_MANIFEST == 'true'
+        shell: pwsh
+        env:
+          TLP_RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: ./scripts/sign-release.ps1
+
       - name: Signature summary
         shell: pwsh
         run: |
@@ -133,3 +145,4 @@ jobs:
             dist/*-setup.exe
             dist/*-portable.zip
             dist/SHA256SUMS.txt
+            dist/SHA256SUMS.txt.minisig

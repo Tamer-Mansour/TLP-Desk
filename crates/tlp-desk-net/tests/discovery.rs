@@ -49,7 +49,7 @@ async fn broadcast_fallback_discovers_peer_and_expires_it() {
     let (pa, pb) = (free_udp_port(), free_udp_port());
     let target = |p: u16| Some(vec![SocketAddr::from(([127, 0, 0, 1], p))]);
     let a = Discovery::start(DiscoveryConfig {
-        advertise: Some(ad(111_111_111, "PC-A")),
+        advertise: Some(ad(111_111_111, "مكتب PC-A")),
         enable_mdns: false,
         broadcast_port: pa,
         broadcast_targets: target(pb),
@@ -72,8 +72,10 @@ async fn broadcast_fallback_discovers_peer_and_expires_it() {
     .await
     .unwrap();
     let dev = wait_for(&b, 111_111_111).await;
-    assert_eq!(dev.name, "PC-A");
+    assert_eq!(dev.name, "مكتب PC-A");
     assert!(dev.via_broadcast);
+    // The app version rides along (broadcast trailer) without disturbing the Arabic name.
+    assert_eq!(dev.app_version.as_deref(), Some(tlp_desk_net::APP_VERSION));
     assert_eq!(dev.addrs, vec![SocketAddr::from(([127, 0, 0, 1], 47400))]);
     assert_eq!(dev.protocol_version, tlp_desk_proto::PROTOCOL_VERSION);
     // A never lists itself
@@ -99,7 +101,7 @@ async fn broadcast_fallback_discovers_peer_and_expires_it() {
 #[ignore = "needs a multicast-capable network adapter; run with --ignored"]
 async fn mdns_advertise_and_browse() {
     let a = Discovery::start(DiscoveryConfig {
-        advertise: Some(ad(222_222_222, "PC-mDNS")),
+        advertise: Some(ad(222_222_222, "حاسوب mDNS")),
         enable_broadcast: false,
         ..DiscoveryConfig::default()
     })
@@ -112,8 +114,10 @@ async fn mdns_advertise_and_browse() {
     .await
     .unwrap();
     let dev = wait_for(&b, 222_222_222).await;
-    assert_eq!(dev.name, "PC-mDNS");
+    assert_eq!(dev.name, "حاسوب mDNS");
     assert!(dev.via_mdns);
+    // `ver` TXT key round trip.
+    assert_eq!(dev.app_version.as_deref(), Some(tlp_desk_net::APP_VERSION));
     assert!(dev.addrs.iter().all(|a| a.port() == 47400));
     drop(a);
 }

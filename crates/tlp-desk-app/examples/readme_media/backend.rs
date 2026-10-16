@@ -85,6 +85,7 @@ pub fn devices(lang: Lang) -> Vec<DiscoveredDevice> {
         name,
         address: ip(a),
         online,
+        app_version: None,
     };
     vec![
         dev(

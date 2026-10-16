@@ -112,6 +112,7 @@ impl App {
             )
             .show(ui, |ui| {
                 self.permissions.card(ui, tx);
+                self.lan_update_notice(ui);
                 self.address_book.offer_ui(ui, tx, self.backend.as_ref());
                 ui.spacing_mut().item_spacing.x = theme::space::L;
                 ui.columns(2, |cols| {
@@ -469,6 +470,7 @@ mod tests {
             name: "حاسوب-المكتبة-الرئيسية-في-الطابق-الثاني".into(),
             address: "fe80::1c2b:3d4e:5f60:7a8b".parse().unwrap(),
             online: true,
+            app_version: None,
         };
         for lang in [Lang::En, Lang::Ar] {
             for dark in [false, true] {
