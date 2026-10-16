@@ -1451,3 +1451,98 @@ async fn still_screen_gets_one_refine_picture() {
     session.disconnect();
     within("end", session.ended()).await;
 }
+
+/// Moves for 30 frames, then stands still, while the pointer keeps moving (polled every few
+/// milliseconds, faster than the encoder's frame interval): someone moving the mouse over text
+/// that just stopped scrolling.
+struct SettledScreenMovingPointer {
+    inner: FakeCapturer,
+    polls: i32,
+}
+
+impl ScreenCapturer for SettledScreenMovingPointer {
+    fn next_frame(&mut self, timeout: Duration) -> Result<Option<BgraFrame>, CaptureError> {
+        if self.inner.n >= 30 {
+            // The screen content no longer changes; the capture loop keeps polling the pointer.
+            std::thread::sleep(timeout.min(Duration::from_millis(4)));
+            return Ok(None);
+        }
+        self.inner.next_frame(timeout)
+    }
+    fn cursor(&mut self) -> Result<CursorState, CaptureError> {
+        self.polls += 1;
+        let shape = (self.polls == 1).then(|| tlp_desk_capture::CursorShape {
+            width: 4,
+            height: 4,
+            hotspot_x: 0,
+            hotspot_y: 0,
+            rgba: vec![255; 64],
+        });
+        Ok(CursorState {
+            x: 20 + self.polls % 200,
+            y: 40,
+            visible: true,
+            shape,
+        })
+    }
+    fn monitor(&self) -> &MonitorInfo {
+        self.inner.monitor()
+    }
+}
+
+/// Regression (rc.2 system test): a pointer that keeps moving must not hold back the refresh
+/// picture. Pointer-only changes are drawn into the refresh itself; before the fix every
+/// pointer update left an encode pending, and the refresh waited until the mouse stopped.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moving_pointer_does_not_hold_back_the_refine_picture() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let encodes = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let refines = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let (e2, r2) = (encodes.clone(), refines.clone());
+    let mut h = harness(false, move |c| {
+        // 30 fps: an encode interval (33 ms) much longer than the pointer poll (4 ms).
+        c.fps = 30;
+        c.capturer_factory = Arc::new(|_, _| {
+            Ok(Box::new(SettledScreenMovingPointer {
+                inner: FakeCapturer::new(),
+                polls: 0,
+            }) as Box<dyn ScreenCapturer>)
+        });
+        c.encoder_factory = Arc::new(move |cfg| {
+            Ok(Box::new(CountingEncoder {
+                inner: tlp_desk_codec::new_encoder(cfg)?,
+                encodes: e2.clone(),
+                refines: r2.clone(),
+            }) as Box<dyn tlp_desk_codec::VideoEncoder>)
+        });
+    })
+    .await;
+    let conn = spawn_connect(&h, AuthMethod::AcceptPrompt);
+    let req = incoming(&mut h.events).await;
+    h.host.accept(req, None);
+    let (session, _ev) = conn.await.unwrap().expect("connect");
+    first_frame(&session).await;
+    // 30 moving frames take ~0.5 s; the refresh is due 300 ms after the last one.
+    let refined = tokio::time::timeout(Duration::from_secs(4), async {
+        while refines.load(SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(
+        refined.is_ok(),
+        "no refresh picture while the pointer moved ({} encodes)",
+        encodes.load(SeqCst)
+    );
+    // The pointer keeps moving: its updates are still encoded after the refresh.
+    let after = encodes.load(SeqCst);
+    within("pointer updates after the refresh", async {
+        while encodes.load(SeqCst) <= after {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert_eq!(refines.load(SeqCst), 1, "one refresh for one still screen");
+    session.disconnect();
+    within("end", session.ended()).await;
+}

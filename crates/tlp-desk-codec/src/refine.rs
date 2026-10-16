@@ -24,7 +24,14 @@ pub(crate) fn boosted_refine<E: VideoEncoder + ?Sized>(
 ) -> Result<Option<EncodedFrame>, CodecError> {
     let base = enc.config().bitrate_kbps.max(1);
     let boosted = base.saturating_mul(BOOST_FACTOR).min(200_000);
-    let raised = enc.set_bitrate(boosted).is_ok();
+    let raised = match enc.set_bitrate(boosted) {
+        Ok(()) => true,
+        Err(e) => {
+            // Still worth a keyframe at the normal bitrate; say why it is not boosted.
+            tracing::debug!(%e, kbps = boosted, "refresh bitrate boost refused");
+            false
+        }
+    };
     enc.request_keyframe();
     let out = enc.encode(frame);
     if raised {

@@ -227,8 +227,14 @@ fn handle(state: &Arc<SessionState>, msg: Message) {
             tokio::spawn(async move { on_offer(st, offer).await });
         }
         Message::TransferAccept { id, resume } => {
-            if let Some(Side::Send(s)) = state.get(id).as_ref().map(|t| &t.side) {
-                s.accepted(Ok(resume));
+            if let Some(t) = state.get(id) {
+                match &t.side {
+                    Side::Send(s) => s.accepted(Ok(resume)),
+                    // A download the host accepted: if every file was skipped, identical or
+                    // already complete here, no data will come, so it is done now (the host's
+                    // sender finishes when it sees the final progress).
+                    Side::Recv(rx) => receiver::check_complete(state, &t, rx),
+                }
             }
         }
         Message::TransferReject { id, error } => {
