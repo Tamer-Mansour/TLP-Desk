@@ -19,6 +19,7 @@ pub mod convert;
 mod h264;
 #[cfg(windows)]
 mod mf;
+mod refine;
 mod select;
 
 pub use h264::{Downscale, H264Complexity, H264Decoder, H264Encoder, H264Tuning};
@@ -27,6 +28,7 @@ pub use mf::{
     list_adapters, list_hw_encoders, GpuAdapter, HwAdapter, HwEncoderInfo, MfEncoder, VENDOR_AMD,
     VENDOR_INTEL, VENDOR_NVIDIA,
 };
+pub use refine::REFINE_QP;
 pub use select::{
     new_encoder_with, EncoderOptions, EncoderPreference, FallbackEncoder, ADAPTER_ENV, ENCODER_ENV,
 };
@@ -98,6 +100,16 @@ pub trait VideoEncoder: Send {
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError>;
 
     fn config(&self) -> EncoderConfig;
+
+    /// Encodes `frame` as a high-quality *refresh* picture (a keyframe at a very low
+    /// quantiser, see [`REFINE_QP`]) so text turns crisp once the screen stops changing.
+    ///
+    /// The default impl forces a keyframe and temporarily multiplies the bitrate, which works
+    /// for any rate-controlled backend; encoders with direct quantiser control override it.
+    /// Normal frames after the call are unaffected.
+    fn encode_refine(&mut self, frame: &BgraFrame) -> Result<Option<EncodedFrame>, CodecError> {
+        refine::boosted_refine(self, frame)
+    }
 
     /// Short human-readable name of the implementation in use (logs, stats overlay).
     fn backend_label(&self) -> String {
