@@ -478,17 +478,8 @@ impl ViewerSession {
     /// Notice shown while the host user has input priority.
     fn priority_banner(&self, ui: &mut egui::Ui, tx: Tx) {
         let dark = ui.visuals().dark_mode;
-        let (fill, text) = if dark {
-            (
-                Color32::from_rgb(0x4A, 0x37, 0x0B),
-                Color32::from_rgb(0xFF, 0xE3, 0xA3),
-            )
-        } else {
-            (
-                Color32::from_rgb(0xFF, 0xF1, 0xC7),
-                Color32::from_rgb(0x5C, 0x40, 0x00),
-            )
-        };
+        let (text, fill) = theme::Tone::Warning.colors(dark);
+
         egui::Panel::top("host-priority-banner")
             .frame(
                 egui::Frame::new()
@@ -527,7 +518,20 @@ impl ViewerSession {
         };
         let rect = Rect::from_min_size(min, egui::vec2(w, h));
         let painter = ui.painter();
-        painter.rect_filled(rect, 10.0, Color32::from_black_alpha(185));
+        // Compact translucent card: soft shadow, hairline edge, rounded like toasts.
+        let radius = egui::CornerRadius::same(theme::radius::LG);
+        painter.add(theme::float_shadow(true).as_shape(rect, radius));
+        painter.rect_filled(
+            rect,
+            radius,
+            Color32::from_rgba_unmultiplied(14, 17, 21, 200),
+        );
+        painter.rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(1.0, Color32::from_white_alpha(28)),
+            egui::StrokeKind::Inside,
+        );
         let mut y = rect.min.y + pad;
         for g in galleys {
             let x = if tx.rtl() {
