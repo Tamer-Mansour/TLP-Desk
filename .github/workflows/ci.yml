@@ -56,6 +56,44 @@ jobs:
       - name: Release build
         run: cargo build --release --workspace
 
+  linux:
+    name: Linux (clippy, test, X11 under Xvfb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # alsa: cpal audio; cmake: bundled libopus; nasm: openh264 assembly. The X11 backends use
+      # the pure-Rust x11rb and the GUI loads Vulkan/GL/X11 at run time, so nothing else is
+      # needed to build. xvfb + xauth run the X11 tests below.
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             libasound2-dev pkg-config cmake nasm xvfb xauth x11-utils
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # Real X11 capture, XTest injection and keyboard-grab connection against a virtual
+      # display. Nothing touches a real screen; `--ignored` selects only the X11 tests.
+      - name: X11 tests (Xvfb)
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24 +extension XTEST +extension RANDR"             cargo test -p tlp-desk-capture -p tlp-desk-input -- --ignored x11 connects_and_releases
+
+      - name: Release build
+        run: cargo build --release --workspace
+
   hygiene:
     name: Spelling and dependency policy
     runs-on: ubuntu-latest
