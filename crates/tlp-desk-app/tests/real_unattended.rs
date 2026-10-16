@@ -94,7 +94,7 @@ fn config(dir: &std::path::Path, port: u16, power: Arc<RecordingPower>) -> RealC
         known_hosts: KnownHostsStore::File(dir.join("known_hosts")),
         host: HostConfig {
             advertise: false,
-            capturer_factory: Arc::new(|_| {
+            capturer_factory: Arc::new(|_, _| {
                 Ok(Box::new(FakeCapturer(monitor())) as Box<dyn ScreenCapturer>)
             }),
             injector_factory: Arc::new(|_r: MonitorRect| {
@@ -108,6 +108,9 @@ fn config(dir: &std::path::Path, port: u16, power: Arc<RecordingPower>) -> RealC
         fallback_discovery: false,
         power,
         system_permissions: true,
+        // Never record or play real sound in tests.
+        audio: tlp_desk_app::backend::audio::AudioDevices::fake(),
+        ..RealConfig::default()
     }
 }
 

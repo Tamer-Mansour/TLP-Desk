@@ -36,8 +36,8 @@ input language (for example with Alt+Shift or Win+Space while connected) — you
 matter.
 
 Tab, the arrow keys and Escape go to the remote PC. Ctrl+C, Ctrl+V and Ctrl+X are pressed on the
-remote PC too (they copy and paste *there*; clipboard sharing between the two PCs is
-[coming soon](coming-soon/clipboard.md)).
+remote PC too (they copy and paste *there*; [clipboard sharing](clipboard.md) between the two PCs
+is separate).
 
 ### System keys: Windows key, Alt+Tab
 
@@ -70,7 +70,17 @@ the movement is yours (you do not see this marker).
 - Windows that run **as administrator** on the remote PC, **UAC prompts**, the **lock screen** and
   the **sign-in screen** cannot be controlled (and UAC prompts or the lock screen may not be visible)
   — this needs the [unattended access service](coming-soon/unattended-access.md).
-- Clipboard, file transfer, chat and sound are [coming soon](coming-soon/index.md).
+- Session recordings do not contain [sound](audio.md) yet.
+
+## Sending files
+
+Drag files or folders onto the session window, or click the **File transfer** button in the toolbar
+and choose **Send files…** or **Send folder…**. The list shows speed and time left; you can cancel a
+transfer and **retry** it later, and it continues where it stopped. Files are checked on arrival,
+never overwrite existing ones (a copy is named `name (2).ext`), and land in the host's Desktop
+folder. The host must allow files for the session. From a script:
+`TLP-Desk-cli send-file <target> <paths…> --to <host folder>` and
+`TLP-Desk-cli get-file <target> <host paths…> --to <folder>`.
 
 ## Ending the session
 

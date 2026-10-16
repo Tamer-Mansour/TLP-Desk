@@ -71,6 +71,35 @@ BGRA → I420 is integer BT.709 code written for auto-vectorisation and split in
 128 rows across up to 8 threads. `bgra_to_i420_half` downsizes 2× and converts in one pass when
 the encoder has to halve an oversized source.
 
+## Hardware encoding
+
+`new_encoder` tries a Media Foundation hardware H.264 encoder first (Intel Quick Sync, NVIDIA,
+AMD; module `crates/tlp-desk-codec/src/mf/`) and falls back to OpenH264 if creation fails, or if
+an encode or a bitrate change fails mid-stream (the replacement starts with a keyframe). The
+stream is constrained baseline, no B-frames, infinite GOP with forced IDR, so the OpenH264
+decoder in the viewer reads it unchanged. Input is NV12 packed on the CPU.
+
+Override with `TLP_DESK_ENCODER=software|hardware|auto` (default `auto`) and
+`TLP_DESK_HW_ADAPTER=auto|intel|nvidia|amd` (see `EncoderOptions`). On NVIDIA Optimus laptops
+the NVIDIA MFT only opens in a process that runs on the dGPU, so it needs the driver's
+high-performance setting for the exe; the bench example opts in by itself.
+
+Synthetic 1080p60 desktop-like frames (`bench --synthetic 1920x1080 --encoder ...`, no screen
+capture), 8 s each, 12 Mbps target, measured on a laptop with Intel UHD and an NVIDIA RTX A3000:
+
+| Encoder | Encode ms (avg / p95) | CPU of the encode calls | Bitrate | PSNR avg / min |
+|---|---|---|---|---|
+| OpenH264 (software) | 3.6 / 4.1 | 68% of a core (2.8% of the machine) | 6.7 Mbps | 46.3 / 39.7 dB |
+| Intel Quick Sync | 8.8 / 11.0 | 31% of a core (1.3%) | 4.9 Mbps | 46.4 / 42.7 dB |
+| NVIDIA RTX A3000 | 5.6 / 6.9 | 32% of a core (1.3%) | 10.8 Mbps | 47.0 / 39.9 dB |
+
+OpenH264 is faster per frame on this machine because the test content is easy and it runs on many
+cores; the hardware encoders use about half the CPU (most of what remains is the BGRA to NV12
+conversion and the copy), which matters on weaker hosts. Per-frame latency of the Intel path is
+higher, so `auto` is a policy choice, not a speed claim: set `TLP_DESK_ENCODER=software` if
+hardware latency is worse for your content. A GPU video processor for the colour conversion is
+not implemented yet.
+
 ## Cursor
 
 The pointer is not part of the captured image; the host composites it into the frame and saves

@@ -6,9 +6,9 @@
 | | |
 |---|---|
 | Path | `crates/tlp-desk-cli` (binary `TLP-Desk-cli`) |
-| Depends on | `proto`, `crypto`, `net`, `host`, `viewer`, `clap` 4 (derive), `png`, `tokio`, `tracing-subscriber`, `anyhow` |
+| Depends on | `proto`, `crypto`, `net`, `host`, `viewer`, `clap` 4 (derive, env), `serde_json`, `png`, `tokio`, `tracing-subscriber`, `anyhow` |
 | Unsafe | `#![forbid(unsafe_code)]` |
-| Strings | every user-facing string lives in `src/text.rs` (English only for now; `--lang` is on the roadmap) |
+| Strings | every user-facing string lives in `src/text.rs`, in English and Arabic (`--lang`) |
 
 ## Global options
 
@@ -16,6 +16,54 @@
 |---|---|
 | `--data-dir <PATH>` | Identity and known-hosts directory (default: the same as the GUI) |
 | `-v`, `-vv` | Log level: warn (default), info, debug — to **stderr**. `RUST_LOG` overrides |
+| `--json` | Machine-readable output: stdout carries only JSON Lines (one object per line, each with a `"type"`); progress lines move to stderr |
+| `-q`, `--quiet` | No progress lines; results and errors only |
+| `--lang en\|ar` | Language of human-readable output (env `TLP_DESK_LANG`). JSON is never translated. IDs, codes, addresses and numbers stay ASCII in both languages |
+
+Passwords are never accepted on the command line (other local users could read them from the
+process list): `--password` is a flag that reads `TLP_DESK_PASSWORD`.
+
+Arabic on the console: Rust's standard library writes to a Windows console with `WriteConsoleW`, so
+Arabic arrives intact whatever the console code page (no `chcp 65001` needed); piped output is UTF-8.
+Windows Terminal joins and orders Arabic letters correctly; the legacy console window shows them
+unjoined.
+
+## Exit codes
+
+Stable: scripts may branch on them. Also printed at the end of `--help`.
+
+| Code | Name (`kind` in JSON) | Meaning |
+|---|---|---|
+| 0 | `ok` | the command did what was asked |
+| 1 | `failure` | any other error (I/O, bad file, internal, session ended early) |
+| 2 | `usage` | bad command line (from clap) |
+| 3 | `not_found` | device ID / name / WoL alias not found |
+| 4 | `unreachable` | host unreachable, or outside the LAN allow-list |
+| 5 | `auth_rejected` | rejected, wrong code/password, or locked out |
+| 6 | `key_mismatch` | host key does not match the dialed ID / remembered key (possible MITM) |
+| 7 | `permission_denied` | the session lacks the permission the command needs |
+| 8 | `timeout` | no answer in time |
+| 9 | `version_mismatch` | the peer speaks another protocol version |
+| 130 | `interrupted` | Ctrl+C |
+
+With `--json` a failure also prints `{"type":"error","code":8,"kind":"timeout","message":"..."}`
+on stdout.
+
+## JSON output
+
+Every object has a `"type"`. Device IDs are 9 ASCII digits without spaces.
+
+| Command | Objects |
+|---|---|
+| `id` | `identity {device_id, fingerprint, data_dir}` |
+| `list` | `devices {devices: [{device_id, name, addrs, protocol_version, via}]}` |
+| `connect` | `connected {peer, permissions}`, `monitors {active, monitors}`, `stats {t_s, fps, bitrate_kbps, rtt_ms, latency_ms, decode_ms, width, height, frames_decoded, frames_received}` (every second), `permissions`, `host_input_priority {local_active}`, `ended {reason}`, `summary {frames_decoded, seconds, avg_fps}`, `snapshot {written, path?, width?, height?}` |
+| `serve` | `listening {device_id, fingerprint, name, addr}`, `code {code}`, `incoming {peer, auth, auto_accept}`, `session_started {session, peer, auth, permissions}`, `session_ended`, `auth_failed`, `request_cancelled`, `device_info_served {session}` |
+| `info` | `device_info {os, version, cpu, cores, ram_bytes, disks: [{mount, label, total_bytes, free_bytes}], uptime_s, hostname, peer}` |
+| `wol` | `wol_sent {mac, to}` |
+
+`peer` is `{device_id, name, addr}`; `permissions` is a list of `view`, `mouse`, `keyboard`,
+`clipboard`, `files`, `audio`, `restart`, `privacy`, `chat`, `tunnel`, `whiteboard`, `system`.
 
 ## Subcommands
 
@@ -70,6 +118,46 @@ summary at the end. If the host key changed it prints a loud warning and tells y
 > Neither `serve` nor the GUI configures a password yet, so `--password` is currently refused with
 > "not allowed". It exists for the unattended-access work in M3.
 
+### `info <TARGET>`
+
+Connects like `connect` (same `--code`, `--password`, `--port`, `--forget-key`), asks the host for
+its device info and prints OS, version, CPU and threads, RAM, uptime and each disk's free/total
+space, then disconnects. Needs the `VIEW` permission on the host (exit 7 without it).
+`--timeout N` (default 10 s) bounds the wait for the answer (exit 8).
+
+### `wol <MAC|ALIAS>` (alias `exec-wol`)
+
+Sends a Wake-on-LAN magic packet to every IPv4 subnet broadcast (port 9), or with
+`--to <IP[:port]>` to one LAN address (addresses outside the LAN allow-list are refused). An alias is
+looked up in `wol-aliases.txt` in the data directory: one `name = MAC` per line, UTF-8 (Arabic names
+work), `#` starts a comment. Unknown alias: exit 3.
+
+### Commands from other lanes
+
+| Command | Needs | Notes |
+|---|---|---|
+| `chat <TARGET> <MESSAGE> [--wait N]` | `CHAT` | sends one message, prints replies for N seconds |
+| `clip-send <TARGET> [TEXT] [--file F]` | `CLIPBOARD` | text to the host clipboard; `serve --clipboard` is the receiving side |
+| `ls`, `mkdir`, `rm [-r]`, `mv` | `FILES` | remote file system; `serve --allow-files` |
+| `send-file`, `get-file` | `FILES` | transfers with progress lines; `--to` is the destination |
+| `forward <TARGET> <LOCAL:HOST:REMOTE>...` | `TUNNEL` | runs until Ctrl+C; `serve --allow-tunnels` |
+
+`--help` is bilingual: with `--lang ar` (or `TLP_DESK_LANG=ar`) the command summaries and the
+exit-code table are Arabic. The Arabic summaries live in `commands/help.rs` (`ARABIC`); a test
+fails when a subcommand has no row, so every new command must add one. On Windows the console
+is switched to UTF-8 at start (`console.rs`).
+
+## Adding a command (other lanes)
+
+One file per subcommand in `src/commands/<name>.rs` with a clap `Args` struct and
+`run(ctx, args)`; then one line at each `FEATURE HOOK` in `src/commands/mod.rs` (`mod`, the `Cmd`
+variant, the `run` arm). Shared helpers live in `src/commands/common.rs`: `DialArgs`/`AuthArgs`
+(flatten them for the standard target/auth flags), `dial(ctx, &args, features)`, `peer_json`,
+`id_str`. Print through `ctx.out` (`progress`, `event`, `result`) so `--json` and `--quiet` work, put
+strings in `text.rs` with an Arabic translation, and return `CliError` variants for failures that
+have their own exit code. Host-side features for `serve` are registered in
+`serve::host_features()`.
+
 ## Examples
 
 ```powershell
@@ -79,14 +167,22 @@ TLP-Desk-cli serve --code
 # Viewer on another PC: connect by ID with the code, save a screenshot
 TLP-Desk-cli connect "123 456 789" --code 042917 --seconds 5 --snapshot shot.png
 
-# What is on the network?
-TLP-Desk-cli list --seconds 3
+# What is on the network? (JSON for scripts)
+TLP-Desk-cli list --seconds 3 --json
+
+# Remote device info, in Arabic
+TLP-Desk-cli --lang ar info 123456789 --code 042917
+
+# Wake a PC by alias, then wait for it
+TLP-Desk-cli wol "مكتب المحاسبة"
 ```
 
 Snapshots are for local testing; never commit them (see `.gitignore`).
 
 ## Roadmap
 
-M4 lists `list`, `connect`, `send-file` and `exec-wol` for scripts and agents; `send-file` and
-`exec-wol` are not implemented yet. The CLI has no tests of its own; its building blocks are
-tested in `host`, `viewer` and `net`.
+M4 lists `list`, `connect`, `send-file` and `exec-wol` for scripts and agents; `wol`/`exec-wol` and
+`info` are implemented, `send-file`, `get-file`, `ls`, `forward` and `chat` come from their lanes.
+Tests: `cargo test -p tlp-desk-cli` (argument parsing with `try_parse_from`, JSON schemas, exit
+codes, Arabic text); device info end to end is `tlp-desk-host` e2e
+`device_info_request_is_answered_and_cached`.

@@ -30,23 +30,34 @@
 //!   core does not handle go to the feature that claims them, after the permission check
 //!   `Message::required_permissions`. Features report to the UI with [`HostEvent::Feature`].
 //! * **Monitors**: the viewer gets `Message::MonitorList` (after accept, on hot-plug and on
-//!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`.
+//!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`,
+//!   or stream the whole virtual desktop as one picture with `Message::SelectAllMonitors`
+//!   (`MonitorList::active` is then `ALL_MONITORS`; input maps across the bounding box).
+//! * **Performance**: `SetQuality` presets apply live, `ViewerFeedback` and send-side QUIC
+//!   signals drive the adaptive bitrate / frame rate / resolution controller (see
+//!   [`Controller`]), frames identical to the previous one are not encoded, and
+//!   `LatencyProbe` is answered on the session clock of `VideoFrame::timestamp_us`.
 //!
 //! All methods except [`Host::start`] are non-blocking and may be called from any thread.
 #![forbid(unsafe_code)]
 
+mod adapt;
 mod cursor;
+mod device_info;
 mod input;
+mod live;
 mod pipeline;
 mod priority;
+mod tunnel;
 mod unattended;
+mod whiteboard;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use tlp_desk_capture::{CaptureError, MonitorInfo, ScreenCapturer};
+use tlp_desk_capture::{CaptureError, CaptureOptions, MonitorInfo, ScreenCapturer};
 use tlp_desk_codec::{CodecError, EncoderConfig, VideoEncoder};
 use tlp_desk_crypto::{
     DeviceId, Fingerprint, OneTimeCode, PasswordVerifier, RateLimitConfig, RateLimiter, TicketStore,
@@ -62,16 +73,29 @@ use tlp_desk_proto::{ByeReason, Message, MonitorDesc, Permissions, RejectReason}
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 
+pub use adapt::{
+    capture_cap, AdaptDecision, BitrateMode, Congestion, Controller, ControllerConfig,
+    QualityTarget, Signals, ViewerReport,
+};
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
+pub use device_info::{
+    limit as limit_device_info, DeviceInfoFeature, DeviceInfoServed, DeviceInfoSource,
+    SystemInfoSource, DEVICE_INFO_FEATURE,
+};
+pub use live::LiveOptions;
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 pub use unattended::{SystemPower, UnattendedEvent, UnattendedFeature, WindowsPower};
 
 /// [`Feature::name`] of [`UnattendedFeature`] (to match its [`HostEvent::Feature`] events).
 pub const UNATTENDED_FEATURE: &str = unattended::FEATURE_NAME;
+pub use tunnel::{HostTunnelEvent, HostTunnelInfo, HostTunnels, TunnelHostConfig, TUNNEL_FEATURE};
 
+pub use whiteboard::{OverlayFactory, WhiteboardHost, WhiteboardHostEvent};
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
+/// `CaptureOptions::max_size` carries the size cap of the current quality preset (and the
+/// adaptive resolution step); fakes may ignore it, the encoder follows the frames.
 pub type CapturerFactory =
-    Arc<dyn Fn(u32) -> Result<Box<dyn ScreenCapturer>, CaptureError> + Send + Sync>;
+    Arc<dyn Fn(u32, CaptureOptions) -> Result<Box<dyn ScreenCapturer>, CaptureError> + Send + Sync>;
 /// Creates the video encoder (default: [`tlp_desk_codec::new_encoder`]).
 pub type EncoderFactory =
     Arc<dyn Fn(EncoderConfig) -> Result<Box<dyn VideoEncoder>, CodecError> + Send + Sync>;
@@ -87,20 +111,29 @@ pub type LocalActivityFactory =
 /// [`tlp_desk_input::start_pointer_marker`]).
 pub type PointerMarkerFactory =
     Arc<dyn Fn(&str) -> Result<Box<dyn PointerMarker>, InputError> + Send + Sync>;
+/// The streamed rectangle of a session, by `FeatureCtx::session_key` (see
+/// [`Host::streamed_monitor_fn`]).
+pub type StreamedMonitorFn = Arc<dyn Fn(u64) -> Option<MonitorRect> + Send + Sync>;
 /// Lists the host's monitors (default: [`tlp_desk_capture::list_monitors`]).
 pub type MonitorLister = Arc<dyn Fn() -> Result<Vec<MonitorInfo>, CaptureError> + Send + Sync>;
 
-/// Largest video frame the default capturer delivers. Bigger monitors are downscaled on the GPU
-/// before readback (3840x2400 -> 1920x1200), which keeps capture + encode well above 60 fps.
+/// Default capture size cap ([`HostConfig::max_capture_size`]). Bigger monitors are downscaled
+/// on the GPU before readback (3840x2400 -> 1920x1200), which keeps capture + encode well above
+/// 60 fps.
 pub const MAX_CAPTURE_SIZE: (u32, u32) = (1920, 1200);
 
 /// The default [`CapturerFactory`]: Windows.Graphics.Capture (DXGI fallback) with frames capped
-/// at [`MAX_CAPTURE_SIZE`]. [`ScreenCapturer::monitor`] still reports the real monitor size.
-pub fn open_default_capturer(monitor: u32) -> Result<Box<dyn ScreenCapturer>, CaptureError> {
-    tlp_desk_capture::open_capturer_opts(
-        monitor,
-        tlp_desk_capture::CaptureOptions::max_size(MAX_CAPTURE_SIZE.0, MAX_CAPTURE_SIZE.1),
-    )
+/// at `options.max_size` ([`MAX_CAPTURE_SIZE`] when `None`). [`ScreenCapturer::monitor`] still
+/// reports the real monitor size.
+pub fn open_default_capturer(
+    monitor: u32,
+    options: CaptureOptions,
+) -> Result<Box<dyn ScreenCapturer>, CaptureError> {
+    let options = CaptureOptions {
+        max_size: Some(options.max_size.unwrap_or(MAX_CAPTURE_SIZE)),
+        ..options
+    };
+    tlp_desk_capture::open_capturer_opts(monitor, options)
 }
 
 /// How often the monitor list is re-read for hot-plug.
@@ -117,6 +150,9 @@ pub struct HostConfig {
     pub monitor: u32,
     /// Target frame rate (default 60).
     pub fps: u32,
+    /// Capture size cap before any `SetQuality` (the `Balanced` preset); frames of bigger
+    /// monitors are scaled down to fit. Default [`MAX_CAPTURE_SIZE`] (1920x1200).
+    pub max_capture_size: (u32, u32),
     /// Permissions for sessions authorized by code/password, and for [`Host::accept`] with
     /// `None`.
     pub default_permissions: Permissions,
@@ -163,6 +199,7 @@ impl Default for HostConfig {
         Self {
             monitor: 0,
             fps: 60,
+            max_capture_size: MAX_CAPTURE_SIZE,
             default_permissions: DEFAULT_PERMISSIONS,
             accept_timeout: Duration::from_secs(60),
             prompt_rate_limit: RateLimitConfig::default(),
@@ -192,6 +229,7 @@ impl std::fmt::Debug for HostConfig {
         f.debug_struct("HostConfig")
             .field("monitor", &self.monitor)
             .field("fps", &self.fps)
+            .field("max_capture_size", &self.max_capture_size)
             .field("default_permissions", &self.default_permissions)
             .field("accept_timeout", &self.accept_timeout)
             .field("allow_one_time_code", &self.allow_one_time_code)
@@ -288,6 +326,10 @@ pub enum HostEvent {
         peer: PeerInfo,
         reason: EndReason,
     },
+    /// The OS refused to inject this viewer's input, typically because an elevated (admin)
+    /// window or the secure desktop is in front. Rate limited; show a notice at the host.
+    /// Running the host as the TLP-Desk service lifts the limit.
+    InputBlocked { id: SessionId },
     /// Something a session feature reports (see [`FeatureEvent::payload`]).
     Feature { id: SessionId, event: FeatureEvent },
 }
@@ -316,6 +358,8 @@ struct PendingEntry {
 
 struct SessionCtl {
     info: Mutex<ConnectedViewer>,
+    /// The streamed monitor's rectangle, published by the capture pipeline.
+    rect: watch::Receiver<Option<MonitorRect>>,
     perms: AtomicU16,
     stop: Notify,
     perms_changed: Notify,
@@ -324,6 +368,8 @@ struct SessionCtl {
 struct Inner {
     endpoint: Arc<Endpoint>,
     cfg: HostConfig,
+    /// Options the app may change at runtime ([`Host::set_live_options`]).
+    live: Mutex<LiveOptions>,
     password: Mutex<Option<PasswordVerifier>>,
     events: mpsc::UnboundedSender<HostEvent>,
     next_id: AtomicU64,
@@ -340,6 +386,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 impl Inner {
     fn emit(&self, ev: HostEvent) {
         let _ = self.events.send(ev);
+    }
+
+    fn live(&self) -> LiveOptions {
+        *lock(&self.live)
     }
 
     fn next(&self) -> u64 {
@@ -394,6 +444,7 @@ impl Host {
         let inner = Arc::new(Inner {
             endpoint,
             password: Mutex::new(cfg.password.clone()),
+            live: Mutex::new(LiveOptions::from_config(&cfg)),
             prompt_limiter: Mutex::new(RateLimiter::new(cfg.prompt_rate_limit)),
             cfg,
             events: tx,
@@ -448,6 +499,19 @@ impl Host {
         *lock(&self.inner.password) = verifier;
     }
 
+    /// Replaces the runtime-changeable options (default permissions, accept timeout, one-time
+    /// code on/off, local-input grace, pointer marker). They apply to the next prompt,
+    /// authentication or session; running sessions are not changed.
+    pub fn set_live_options(&self, options: LiveOptions) {
+        tracing::info!(?options, "host options changed");
+        *lock(&self.inner.live) = options;
+    }
+
+    /// The options currently in effect (see [`Host::set_live_options`]).
+    pub fn live_options(&self) -> LiveOptions {
+        self.inner.live()
+    }
+
     /// The running discovery (advertising this host and browsing the LAN), so the viewer side
     /// can list devices without starting a second instance.
     pub fn discovery(&self) -> Option<Arc<Discovery>> {
@@ -467,7 +531,7 @@ impl Host {
     /// The user clicked **Accept**. `None` grants [`HostConfig::default_permissions`].
     /// Returns `false` if the request no longer exists.
     pub fn accept(&self, id: RequestId, permissions: Option<Permissions>) -> bool {
-        let perms = permissions.unwrap_or(self.inner.cfg.default_permissions);
+        let perms = permissions.unwrap_or(self.inner.live().default_permissions);
         match lock(&self.inner.pending).remove(&id) {
             Some(p) => p.decide.send(Decision::Accept(perms)).is_ok(),
             None => false,
@@ -501,6 +565,22 @@ impl Host {
         lock(&ctl.info).permissions = permissions;
         ctl.perms_changed.notify_one();
         true
+    }
+
+    /// The rectangle (physical virtual-desktop pixels) a session currently streams and maps
+    /// input to; `None` before capture started or for an unknown session.
+    pub fn streamed_monitor(&self, id: SessionId) -> Option<MonitorRect> {
+        streamed_rect(&self.inner, id)
+    }
+
+    /// [`Host::streamed_monitor`] as a callback keyed by `FeatureCtx::session_key`, for
+    /// features that draw on the host screen (e.g. the whiteboard). Holds the host weakly.
+    pub fn streamed_monitor_fn(&self) -> StreamedMonitorFn {
+        let inner = Arc::downgrade(&self.inner);
+        Arc::new(move |key| {
+            let inner = inner.upgrade()?;
+            streamed_rect(&inner, SessionId(key))
+        })
     }
 
     /// Ends a session (the viewer receives `Bye`). [`HostEvent::SessionEnded`] follows.
@@ -545,6 +625,12 @@ impl Drop for Host {
     }
 }
 
+fn streamed_rect(inner: &Inner, id: SessionId) -> Option<MonitorRect> {
+    let ctl = lock(&inner.sessions).get(&id).cloned()?;
+    let rect = *ctl.rect.borrow();
+    rect
+}
+
 async fn accept_loop(inner: Arc<Inner>) {
     while let Some(pending) = inner.endpoint.accept().await {
         if inner.shutting_down.load(Ordering::Acquire) {
@@ -562,14 +648,14 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
     match kind {
         AuthKind::AcceptPrompt => handle_prompt(inner, p).await,
         AuthKind::OneTimeCode => {
-            if !inner.cfg.allow_one_time_code {
+            if !inner.live().allow_one_time_code {
                 tracing::info!(peer = %peer.addr, device_id = %peer.device_id, "one-time code access disabled; rejecting");
                 refuse(&inner, p, RejectReason::NotAllowed).await;
                 return;
             }
             let code = inner.cfg.one_time_code.clone();
             let generation = code.generation();
-            let res = p.verify_code(&code, inner.cfg.default_permissions).await;
+            let res = p.verify_code(&code, inner.live().default_permissions).await;
             if code.generation() != generation {
                 inner.emit(HostEvent::CodeChanged);
             }
@@ -583,7 +669,7 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
                 return;
             };
             let res = p
-                .verify_password(&verifier, inner.cfg.default_permissions)
+                .verify_password(&verifier, inner.live().default_permissions)
                 .await;
             finish_auth(inner, peer, kind, res).await;
         }
@@ -640,7 +726,7 @@ async fn handle_prompt(inner: Arc<Inner>, p: PendingSession) {
         return;
     }
     let id = RequestId(inner.next());
-    let deadline = Instant::now() + inner.cfg.accept_timeout;
+    let deadline = Instant::now() + inner.live().accept_timeout;
     let info = IncomingRequest {
         id,
         peer: peer.clone(),
@@ -744,8 +830,10 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         permissions: perms,
         since: SystemTime::now(),
     };
+    let (rect_tx, rect_rx) = watch::channel(None);
     let ctl = Arc::new(SessionCtl {
         info: Mutex::new(info.clone()),
+        rect: rect_rx.clone(),
         perms: AtomicU16::new(perms.0),
         stop: Notify::new(),
         perms_changed: Notify::new(),
@@ -767,17 +855,17 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         FeatureDispatch::start(&inner.cfg.features, session.clone(), id.0, perms, sink)
     };
 
-    let (rect_tx, rect_rx) = watch::channel(None);
     let (input_tx, input_rx) = std::sync::mpsc::channel::<InputEvent>();
     let (prio_tx, mut prio_rx) = mpsc::unbounded_channel::<bool>();
+    let live = inner.live();
+    let (blocked_tx, mut blocked_rx) = mpsc::unbounded_channel::<()>();
     let input_ctx = input::InputCtx {
         factory: inner.cfg.injector_factory.clone(),
         rect: rect_rx,
         events: input_rx,
-        grace: inner.cfg.local_input_grace,
+        grace: live.local_input_grace,
         activity_factory: Some(inner.cfg.local_activity_factory.clone()),
-        marker_factory: inner
-            .cfg
+        marker_factory: live
             .remote_pointer_marker
             .then(|| inner.cfg.pointer_marker_factory.clone()),
         label: if peer.name.trim().is_empty() {
@@ -786,6 +874,7 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
             peer.name.clone()
         },
         priority: prio_tx,
+        blocked: blocked_tx,
     };
     let input_thread = std::thread::Builder::new()
         .name(format!("tlp-host-input-{}", id.0))
@@ -799,13 +888,20 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
     let (select_tx, select_rx) = watch::channel(inner.cfg.monitor);
     let (active_tx, mut active_rx) = watch::channel(inner.cfg.monitor);
+    // Quality presets, viewer feedback and latency probes (see `adapt`).
+    let (perf, quality_rx) = adapt::PerfControl::new(adapt::QualityTarget::host_default(
+        inner.cfg.max_capture_size,
+        inner.cfg.fps,
+    ));
     let ctx = pipeline::PipelineCtx {
         capturer_factory: inner.cfg.capturer_factory.clone(),
         encoder_factory: inner.cfg.encoder_factory.clone(),
+        monitor_lister: inner.cfg.monitor_lister.clone(),
         monitor: inner.cfg.monitor,
         select: select_rx,
         active: active_tx,
-        fps: inner.cfg.fps,
+        quality: quality_rx,
+        adapt: perf.shared.clone(),
         session: session.clone(),
         keyframe: keyframe.clone(),
         stop: stop.clone(),
@@ -866,6 +962,9 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 }
                 None => priority_open = false,
             },
+            Some(()) = blocked_rx.recv() => {
+                inner.emit(HostEvent::InputBlocked { id });
+            }
             _ = ctl.stop.notified() => {
                 session.close(ByeReason::UserClosed).await;
                 break EndReason::Local;
@@ -916,8 +1015,22 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                         tracing::warn!(session = id.0, index, "viewer selected an unknown monitor; ignoring");
                     }
                 }
+                Ok(Message::SelectAllMonitors) => {
+                    // The whole virtual desktop in one picture; `MonitorList::active` becomes
+                    // `ALL_MONITORS` once the pipeline switched.
+                    if monitors.as_ref().is_some_and(|l| !l.is_empty()) {
+                        tracing::info!(session = id.0, "viewer selected all monitors");
+                        select_tx.send_replace(tlp_desk_capture::ALL_MONITORS);
+                    } else {
+                        tracing::warn!(session = id.0, "all monitors asked for, but the monitor list is unknown; ignoring");
+                    }
+                }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
-                Ok(other) => route_to_feature(&features, current, id, other),
+                Ok(other) => match perf.handle(&session, current, other).await {
+                    Ok(None) => {}
+                    Ok(Some(other)) => route_to_feature(&features, current, id, other),
+                    Err(e) => break EndReason::ConnectionLost(e.to_string()),
+                },
                 Err(NetError::Closed) => break EndReason::ConnectionLost("control stream closed".into()),
                 Err(e) => break EndReason::ConnectionLost(e.to_string()),
             }

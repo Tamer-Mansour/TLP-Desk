@@ -129,7 +129,7 @@ fn base_host_config() -> HostConfig {
     HostConfig {
         advertise: false,
         remote_pointer_marker: false,
-        capturer_factory: Arc::new(|_| {
+        capturer_factory: Arc::new(|_, _| {
             Ok(Box::new(FakeCapturer {
                 mon: fake_monitor(),
                 next_at: Instant::now(),
@@ -145,6 +145,14 @@ fn base_host_config() -> HostConfig {
 }
 
 fn host_endpoint(identity: Arc<Identity>, bind: SocketAddr, rate: RateLimitConfig) -> Endpoint {
+    try_host_endpoint(identity, bind, rate).unwrap()
+}
+
+fn try_host_endpoint(
+    identity: Arc<Identity>,
+    bind: SocketAddr,
+    rate: RateLimitConfig,
+) -> Result<Endpoint, tlp_desk_net::NetError> {
     Endpoint::bind(
         identity,
         EndpointConfig {
@@ -155,7 +163,21 @@ fn host_endpoint(identity: Arc<Identity>, bind: SocketAddr, rate: RateLimitConfi
             ..EndpointConfig::default()
         },
     )
-    .unwrap()
+}
+
+/// Binds the host port, waiting for a previous endpoint on it to let go (a "reboot" reuses it).
+async fn host_endpoint_when_free(
+    identity: Arc<Identity>,
+    bind: SocketAddr,
+    rate: RateLimitConfig,
+) -> Endpoint {
+    for _ in 0..100 {
+        match try_host_endpoint(identity.clone(), bind, rate) {
+            Ok(ep) => return ep,
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    host_endpoint(identity, bind, rate)
 }
 
 /// A host with the unattended feature, a persistent ticket store and a fake power source.
@@ -166,7 +188,7 @@ async fn start_host(
     power: Arc<FakePower>,
     tweak: impl FnOnce(&mut HostConfig),
 ) -> (Host, HostEvents) {
-    let ep = Arc::new(host_endpoint(identity, bind, RateLimitConfig::default()));
+    let ep = Arc::new(host_endpoint_when_free(identity, bind, RateLimitConfig::default()).await);
     let feature = Arc::new(UnattendedFeature::new(Some(tickets.clone()), power));
     let mut cfg = HostConfig {
         reconnect_tickets: Some(tickets),

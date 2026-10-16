@@ -25,9 +25,13 @@ use std::time::Duration;
 use tlp_desk_crypto::{
     Fingerprint, HostKey, Identity, PasswordStore, TicketStore, DEFAULT_TICKET_TTL, TICKETS_FILE,
 };
+use tlp_desk_files::clipfiles::ClipFilesConfig;
+use tlp_desk_files::fs::FsConfig;
+use tlp_desk_files::{FileTransfer, FilesError, TransferConfig, TransferSnapshot, TransferState};
 use tlp_desk_host::{
-    EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, RequestId as HostRequestId,
-    SessionId as HostSessionId, SystemPower, UnattendedFeature, WindowsPower,
+    CancelReason, EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, HostTunnels,
+    RequestId as HostRequestId, SessionId as HostSessionId, SystemPower, TunnelHostConfig,
+    UnattendedFeature, WhiteboardHost, WindowsPower, DEFAULT_PERMISSIONS, TUNNEL_FEATURE,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
@@ -35,18 +39,29 @@ use tlp_desk_net::{
 };
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 use tlp_desk_viewer::{
-    AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, KnownHostsStore,
-    PixelFormat, ReconnectTickets, Viewer, ViewerConfig, ViewerError, ViewerEvent, ViewerEvents,
-    ViewerSession,
+    AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, ForwardSpec,
+    KnownHostsStore, PixelFormat, ReconnectTickets, TunnelId, TunnelViewerConfig, Viewer,
+    ViewerConfig, ViewerError, ViewerEvent, ViewerEvents, ViewerSession, ViewerTunnels,
 };
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
-use super::{
-    AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, DiscoveredDevice,
-    EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo, PeerInfo, RepaintFn,
-    RequestId, SessionId, SessionStats, VideoImage,
+use super::audio::{AudioBridge, AudioDevices};
+use super::chat::{self, ChatBridge, ChatLine, ChatSendError};
+use super::files::{
+    FsOp, FsRequestId, FsSide, TransferDir, TransferId, TransferRequest, TransferStartError,
+    TransferStatus, TransferView,
 };
+use super::files_bridge::{EngineStarter, FilesBridge};
+use super::{
+    tunnels, whiteboard, AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId,
+    DiscoveredDevice, EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo,
+    PeerInfo, RepaintFn, RequestId, SessionId, SessionStats, VideoImage, WhiteboardOp,
+};
+// TLP-settings-tray: host settings + connection log.
+use super::settings_tray;
+use crate::connection_log::{log_auth, Direction, LogAuth, LogEnd, LogPeer, LogStore, Recorder};
+use crate::settings::HostSettings;
 
 /// How often host sessions are reconciled with [`Host::sessions`] and LAN addresses re-read.
 const RECONCILE_EVERY: Duration = Duration::from_secs(2);
@@ -73,6 +88,18 @@ pub struct RealConfig {
     /// Grant `RESTART` and `SYSTEM` (restart, lock, Ctrl+Alt+Del) to new sessions in addition
     /// to `host.default_permissions`, so unattended access can restart and lock (TLP-unattended).
     pub system_permissions: bool,
+    // --- audio (TLP-audio) ---
+    /// Sound devices (tests use [`AudioDevices::fake`]).
+    pub audio: AudioDevices,
+    /// User settings for incoming connections (`None` = the `host` template as is).
+    pub host_settings: Option<HostSettings>,
+    /// Folder of the connection log (`None` = do not log; tests never write the real one).
+    pub connection_log: Option<PathBuf>,
+    /// Clipboard to sync in sessions (the app passes the system clipboard). `None` = a private
+    /// in-memory clipboard, so tests never touch the user's real clipboard.
+    pub clipboard: Option<Arc<dyn tlp_desk_files::ClipboardBackend>>,
+    /// File transfer settings (conflict policy, where uploads from viewers land).
+    pub transfer: TransferConfig,
 }
 
 impl Default for RealConfig {
@@ -82,10 +109,23 @@ impl Default for RealConfig {
             bind: SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), DEFAULT_PORT),
             device_name: None,
             known_hosts: KnownHostsStore::Default,
-            host: HostConfig::default(),
+            host: HostConfig {
+                // Moving files, chatting and pointing things out on screen are core uses:
+                // accepted sessions may do all three. The host user can revoke any live.
+                default_permissions: DEFAULT_PERMISSIONS
+                    .union(Permissions::FILES)
+                    .union(Permissions::CHAT)
+                    .union(Permissions::WHITEBOARD),
+                ..HostConfig::default()
+            },
             fallback_discovery: true,
             power: Arc::new(WindowsPower),
             system_permissions: true,
+            audio: AudioDevices::default(),
+            host_settings: None,
+            connection_log: None,
+            clipboard: None,
+            transfer: TransferConfig::default(),
         }
     }
 }
@@ -117,11 +157,25 @@ struct Inner {
     discovery: Option<Arc<Discovery>>,
     own_id: DeviceId,
     bridges: Bridges,
+    chat: ChatBridge,
+    /// File transfer engine shared by host and viewer sessions (lane files-transfer).
+    files: Arc<FileTransfer>,
     state: Mutex<State>,
     /// Reconnect tickets received from hosts we asked to restart (TLP-unattended).
     keeper: ReconnectTickets,
     /// Where the permanent password's verifier lives (`None` without an identity).
     password_store: Option<PasswordStore>,
+    audio: AudioBridge,
+    /// Connection log (TLP-settings-tray).
+    log: Recorder,
+    /// Port forwarding (TLP-tunnel): viewer rules and tunnels into this device.
+    tunnels: Arc<ViewerTunnels>,
+    host_tunnels: Arc<HostTunnels>,
+    /// Running session recordings (TLP-recording).
+    recorders: super::recording::Recorders,
+    clipboard: Arc<tlp_desk_files::ClipboardFeature>,
+    /// Files lane: remote file system + clipboard files features (TLP-files).
+    fsb: FilesBridge,
 }
 
 #[derive(Default)]
@@ -138,10 +192,41 @@ struct State {
     password: super::unattended::PasswordState,
     /// Viewer sessions waiting for their restarted host (TLP-unattended).
     reconnects: HashMap<SessionId, AbortHandle>,
+    /// Who is behind each open accept prompt (to log declines and timeouts).
+    request_peers: HashMap<HostRequestId, tlp_desk_net::PeerInfo>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The UI's view of an engine snapshot.
+fn transfer_view(s: &TransferSnapshot) -> TransferView {
+    let status = match &s.state {
+        TransferState::Preparing => TransferStatus::Preparing,
+        TransferState::Running => TransferStatus::Running,
+        TransferState::Paused => TransferStatus::Paused,
+        TransferState::Completed => TransferStatus::Completed,
+        TransferState::Cancelled => TransferStatus::Cancelled,
+        TransferState::Failed(e) => TransferStatus::Failed(e.clone()),
+        TransferState::Disconnected => TransferStatus::Disconnected,
+    };
+    TransferView {
+        id: TransferId(s.info.id.0),
+        dir: match s.info.direction {
+            tlp_desk_proto::TransferDirection::Upload => TransferDir::Send,
+            _ => TransferDir::Receive,
+        },
+        label: s.info.label.clone(),
+        status,
+        bytes_done: s.bytes_done,
+        total_bytes: s.info.total_bytes,
+        files_done: s.files_done,
+        total_files: s.info.total_files,
+        failed_files: s.failed_items,
+        bytes_per_sec: s.bytes_per_sec,
+        local_dest: s.local_dest.clone(),
+    }
 }
 
 fn app_id(id: tlp_desk_crypto::DeviceId) -> DeviceId {
@@ -265,6 +350,11 @@ impl RealBackend {
         self.inner.endpoint.as_ref()?.local_addr().ok()
     }
 
+    /// Records sessions into `folder` instead of `%USERPROFILE%\Videos\TLP-Desk` (tests).
+    pub fn set_recordings_folder(&self, folder: PathBuf) {
+        self.inner.recorders.set_folder(folder);
+    }
+
     /// Like [`RealBackend::start_with`] but returns the concrete type (tests).
     pub fn start_concrete(
         rt: &Handle,
@@ -298,12 +388,15 @@ impl RealBackend {
         };
         let mut endpoint = None;
         if let Some(identity) = &identity {
-            let listen_cfg = EndpointConfig {
+            let mut listen_cfg = EndpointConfig {
                 bind: cfg.bind,
                 device_name: device_name.clone(),
                 listen: true,
                 ..EndpointConfig::default()
             };
+            if let Some(s) = &cfg.host_settings {
+                listen_cfg.allow_list = s.effective_allow_list();
+            }
             match bind(listen_cfg, identity) {
                 Ok(ep) => endpoint = Some((Arc::new(ep), true)),
                 Err(e) => {
@@ -343,13 +436,36 @@ impl RealBackend {
                 tracing::warn!(%e, "cannot read reconnect tickets; starting empty");
                 TicketStore::in_memory(DEFAULT_TICKET_TTL)
             });
+        let audio = AudioBridge::new(&cfg.audio);
+        let host_tunnels = HostTunnels::new(TunnelHostConfig::default());
+        let tunnels = ViewerTunnels::new(TunnelViewerConfig::default());
+        let chat = ChatBridge::default();
+        let clipboard = super::clipboard::feature(cfg.clipboard.clone());
+        let files = FileTransfer::new(cfg.transfer.clone());
+        let fsb = FilesBridge::new(FsConfig::default(), ClipFilesConfig::default()).with_starter(
+            Arc::new(EngineStarter::new(files.clone(), cfg.transfer.conflict)),
+        );
+        fsb.link_engine(&files);
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
             let mut host_cfg = HostConfig {
                 device_name: device_name.clone(),
+                features: audio.host_features(super::device_info::with_host_feature(
+                    super::clipboard::register(
+                        fsb.register(cfg.host.features.clone().with(files.clone())),
+                        &clipboard,
+                    ),
+                )),
                 ..cfg.host.clone()
             };
+            host_cfg.features.push(host_tunnels.clone());
+            chat.register_host(&mut host_cfg);
+            let whiteboard = Arc::new(WhiteboardHost::new());
+            host_cfg.features.push(whiteboard.clone());
+            if let Some(s) = &cfg.host_settings {
+                host_cfg = settings_tray::host_config(host_cfg, s);
+            }
             if host_cfg.password.is_none() {
                 host_cfg.password = stored_password.clone();
             }
@@ -366,6 +482,7 @@ impl RealBackend {
             }
             match rt.block_on(Host::start(ep.clone(), host_cfg)) {
                 Ok((h, ev)) => {
+                    whiteboard.set_monitor_source(h.streamed_monitor_fn());
                     host = Some(h);
                     host_events = Some(ev);
                 }
@@ -404,14 +521,26 @@ impl RealBackend {
                 }
                 repaint();
             });
-            let vcfg = ViewerConfig {
+            let mut vcfg = ViewerConfig {
                 known_hosts: cfg.known_hosts.clone(),
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
-                features: FeatureSet::new().with(keeper.feature()),
+                features: audio.viewer_features(super::device_info::with_viewer_feature(
+                    super::clipboard::register(
+                        fsb.register(
+                            FeatureSet::new()
+                                .with(files.clone())
+                                .with(whiteboard::viewer_feature()),
+                        ),
+                        &clipboard,
+                    ),
+                )),
                 ..ViewerConfig::default()
             };
+            vcfg.features.push(tunnels.clone());
+            vcfg.features.push(keeper.feature());
+            chat.register_viewer(&mut vcfg);
             match Viewer::new(ep.clone(), vcfg) {
                 Ok(v) => Some(v),
                 Err(e) => {
@@ -435,9 +564,18 @@ impl RealBackend {
             discovery,
             own_id,
             bridges,
+            chat,
+            files,
             state: Mutex::default(),
             keeper,
             password_store: password_store.clone(),
+            audio,
+            log: Recorder::new(cfg.connection_log.clone().map(LogStore::new)),
+            tunnels,
+            host_tunnels,
+            recorders: Default::default(),
+            clipboard,
+            fsb,
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -462,6 +600,7 @@ impl RealBackend {
         tasks.push(rt.spawn(inner.clone().pump_devices()).abort_handle());
         tasks.push(rt.spawn(inner.clone().reconcile_loop()).abort_handle());
         tasks.push(rt.spawn(inner.clone().probe_elevation()).abort_handle());
+        tasks.push(rt.spawn(inner.clone().pump_files()).abort_handle());
         (Arc::new(RealBackend { inner, tasks }), rx)
     }
 }
@@ -471,6 +610,16 @@ impl Inner {
         if self.tx.send(event).is_ok() {
             (self.repaint)();
         }
+    }
+
+    /// [`Inner::emit`] as a callback for other threads (a no-op once the backend is gone).
+    fn emitter(self: &Arc<Self>) -> super::recording::Emit {
+        let me = Arc::downgrade(self);
+        Arc::new(move |event| {
+            if let Some(me) = me.upgrade() {
+                me.emit(event);
+            }
+        })
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -513,6 +662,65 @@ impl Inner {
         }
     }
 
+    // ----- file transfers (lane files-transfer) -----------------------------------------
+
+    /// Forwards the engine's events of viewer sessions to the UI as [`BackendEvent::Transfer`].
+    /// Transfers of host sessions (the other side started them) are not shown here.
+    async fn pump_files(self: Arc<Self>) {
+        let mut rx = self.files.subscribe();
+        loop {
+            let (key, event) = match rx.recv().await {
+                Ok(x) => x,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            };
+            let Some(session) = self.viewer_session_for_key(key) else {
+                continue;
+            };
+            if let Some(snap) = self.files.snapshot(event.id()) {
+                if snap.info.initiated_locally {
+                    self.emit(BackendEvent::Transfer {
+                        session,
+                        view: transfer_view(&snap),
+                    });
+                }
+            }
+        }
+    }
+
+    fn viewer_session_for_key(&self, key: u64) -> Option<SessionId> {
+        self.state()
+            .viewer_sessions
+            .iter()
+            .find(|(_, s)| s.feature_key() == key)
+            .map(|(id, _)| *id)
+    }
+
+    fn feature_key(&self, session: SessionId) -> Option<u64> {
+        self.state()
+            .viewer_sessions
+            .get(&session)
+            .map(|s| s.feature_key())
+    }
+
+    /// Runs `start` (an engine call) and reports a failure to the UI.
+    fn spawn_transfer<F>(self: &Arc<Self>, session: SessionId, start: F)
+    where
+        F: std::future::Future<Output = Result<(), FilesError>> + Send + 'static,
+    {
+        let me = Arc::clone(self);
+        self.rt.spawn(async move {
+            if let Err(e) = start.await {
+                tracing::warn!(%e, "transfer did not start");
+                let error = match e {
+                    FilesError::PermissionDenied => TransferStartError::NoPermission,
+                    other => TransferStartError::Other(other.to_string()),
+                };
+                me.emit(BackendEvent::TransferNotStarted { session, error });
+            }
+        });
+    }
+
     // ----- host side -------------------------------------------------------------------
 
     async fn pump_host(self: Arc<Self>, mut events: HostEvents) {
@@ -520,7 +728,11 @@ impl Inner {
             match ev {
                 HostEvent::IncomingRequest(r) => {
                     let request = RequestId(self.next_id());
-                    self.state().requests.insert(request, r.id);
+                    {
+                        let mut st = self.state();
+                        st.requests.insert(request, r.id);
+                        st.request_peers.insert(r.id, r.peer.clone());
+                    }
                     self.emit(BackendEvent::IncomingRequest {
                         request,
                         peer: app_peer(&r.peer),
@@ -528,6 +740,15 @@ impl Inner {
                 }
                 HostEvent::RequestCancelled { id, reason } => {
                     tracing::info!(?reason, "accept prompt cancelled");
+                    let peer = self.state().request_peers.remove(&id);
+                    if let (Some(peer), CancelReason::TimedOut) = (peer, reason) {
+                        self.log.refused(
+                            Direction::Incoming,
+                            LogPeer::from(&peer),
+                            LogAuth::AcceptPrompt,
+                            LogEnd::TimedOut,
+                        );
+                    }
                     let found = {
                         let mut st = self.state();
                         let key = st.requests.iter().find(|(_, h)| **h == id).map(|(k, _)| *k);
@@ -542,24 +763,98 @@ impl Inner {
                 }
                 HostEvent::AuthFailed { peer, auth, reason } => {
                     tracing::warn!(peer = %peer.addr, device_id = %peer.device_id, ?auth, ?reason, "authentication failed");
+                    self.log.refused(
+                        Direction::Incoming,
+                        LogPeer::from(&peer),
+                        log_auth(auth),
+                        settings_tray::refusal(reason),
+                    );
                 }
                 HostEvent::CodeChanged => {
                     let code = self.current_code();
                     self.update_local(|l| l.one_time_code = code);
                 }
-                HostEvent::SessionStarted(v) => self.host_session_started(v.id, &v.peer),
-                HostEvent::PermissionsChanged { .. } => {}
+                HostEvent::SessionStarted(v) => {
+                    self.log.begin(
+                        Direction::Incoming,
+                        v.id.0,
+                        LogPeer::from(&v.peer),
+                        log_auth(v.auth),
+                        v.permissions,
+                    );
+                    self.host_session_started(v.id, &v.peer);
+                }
+                HostEvent::PermissionsChanged { id, permissions } => {
+                    self.log.permissions(Direction::Incoming, id.0, permissions);
+                    // Port forwarding (TLP-tunnel): the banner shows whether it is allowed.
+                    if let Some(session) = self.app_host_session(id) {
+                        self.emit(BackendEvent::HostTunnels {
+                            session,
+                            allowed: permissions.contains(Permissions::TUNNEL),
+                            tunnels: self
+                                .host_tunnels
+                                .tunnels(id)
+                                .iter()
+                                .map(tunnels::HostTunnelRow::from)
+                                .collect(),
+                        });
+                    }
+                }
+                HostEvent::InputBlocked { id } => {
+                    tracing::warn!(session = id.0, "remote input blocked by the OS");
+                    let session = {
+                        let st = self.state();
+                        st.host_sessions
+                            .iter()
+                            .find(|(_, h)| **h == id)
+                            .map(|(k, _)| *k)
+                    };
+                    if let Some(session) = session {
+                        self.emit(BackendEvent::HostInputBlocked { session });
+                    }
+                }
                 HostEvent::SessionEnded { id, reason, .. } => {
+                    let (end, detail) = settings_tray::host_end(&reason);
+                    self.log.end(Direction::Incoming, id.0, end, detail);
                     self.host_session_ended(id, map_host_end(reason));
                 }
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
+                HostEvent::Feature { id, event } if event.feature == TUNNEL_FEATURE => {
+                    let allowed = self.host_allows(id, Permissions::TUNNEL);
+                    if let Some(session) = self.app_host_session(id) {
+                        if let Some(ev) = tunnels::host_event(session, allowed, &event) {
+                            self.emit(ev);
+                        }
+                    }
+                }
                 HostEvent::Feature { id, event } => {
+                    // chat (TLP-chat)
+                    if let Some(ev) = self
+                        .app_host_session(id)
+                        .and_then(|s| chat::backend_event(s, &event))
+                    {
+                        self.emit(ev);
+                        continue;
+                    }
                     tracing::debug!(session = id.0, feature = event.feature, "feature event");
+                    let session = self.host_session_of(id);
+                    if let Some(ev) = session.and_then(|s| super::clipboard::map(s, &event)) {
+                        self.emit(ev);
+                    }
                 }
             }
         }
         tracing::debug!("host event stream ended");
+    }
+
+    /// The app's id for a host session.
+    fn host_session_of(&self, id: HostSessionId) -> Option<SessionId> {
+        self.state()
+            .host_sessions
+            .iter()
+            .find(|(_, h)| **h == id)
+            .map(|(s, _)| *s)
     }
 
     fn host_session_started(&self, id: HostSessionId, peer: &tlp_desk_net::PeerInfo) {
@@ -576,6 +871,24 @@ impl Inner {
             session,
             peer: app_peer(peer),
         });
+    }
+
+    /// The app's id for a host session.
+    fn app_host_session(&self, id: HostSessionId) -> Option<SessionId> {
+        self.state()
+            .host_sessions
+            .iter()
+            .find(|(_, h)| **h == id)
+            .map(|(k, _)| *k)
+    }
+
+    /// Whether a host-side session currently holds `perm`.
+    fn host_allows(&self, id: HostSessionId, perm: Permissions) -> bool {
+        self.host.as_ref().is_some_and(|h| {
+            h.sessions()
+                .iter()
+                .any(|v| v.id == id && v.permissions.contains(perm))
+        })
     }
 
     fn host_session_ended(&self, id: HostSessionId, reason: EndReason) {
@@ -701,9 +1014,14 @@ impl Inner {
         target: ConnectTarget,
         auth: AuthMethod,
     ) {
+        let log_auth = match &auth {
+            AuthMethod::Password(_) | AuthMethod::ReconnectTicket(_) => LogAuth::Password,
+            AuthMethod::OneTimeCode(_) => LogAuth::OneTimeCode,
+            AuthMethod::AcceptPrompt => LogAuth::AcceptPrompt,
+        };
         let result = self.dial(attempt, target, auth).await;
         match result {
-            Ok((session, events)) => self.session_started(attempt, session, events),
+            Ok((session, events)) => self.session_started(attempt, session, events, log_auth),
             Err(e) => {
                 tracing::info!(attempt = attempt.0, %e, "connect failed");
                 let error = map_viewer_error(&e);
@@ -755,6 +1073,7 @@ impl Inner {
         attempt: AttemptId,
         session: ViewerSession,
         events: ViewerEvents,
+        auth: LogAuth,
     ) {
         let session = Arc::new(session);
         let id = SessionId(self.next_id());
@@ -776,6 +1095,13 @@ impl Inner {
         });
         let peer = app_peer(session.peer());
         tracing::info!(session = id.0, host = %peer.device_id, name = %peer.name, "viewer session started");
+        self.log.begin(
+            Direction::Outgoing,
+            id.0,
+            LogPeer::from(session.peer()),
+            auth,
+            session.permissions(),
+        );
         self.emit(BackendEvent::SessionStarted {
             attempt,
             session: id,
@@ -792,6 +1118,8 @@ impl Inner {
         while let Some(ev) = events.recv().await {
             match ev {
                 ViewerEvent::PermissionsChanged(permissions) => {
+                    self.log
+                        .permissions(Direction::Outgoing, session.0, permissions);
                     self.emit(BackendEvent::PermissionsChanged {
                         session,
                         permissions,
@@ -802,6 +1130,7 @@ impl Inner {
                     stats: SessionStats {
                         fps: s.fps,
                         latency_ms: s.latency_ms,
+                        latency_synced: s.latency_synced,
                         bitrate_kbps: s.bitrate_kbps.max(0.0).round() as u32,
                     },
                 }),
@@ -820,20 +1149,58 @@ impl Inner {
                 }
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
+                ViewerEvent::Feature(event) if event.feature == TUNNEL_FEATURE => {
+                    if let Some(ev) = tunnels::viewer_event(session, &event) {
+                        self.emit(ev);
+                    }
+                }
+                ViewerEvent::Feature(event)
+                    if event.feature == tlp_desk_viewer::DEVICE_INFO_FEATURE =>
+                {
+                    if let Some(ev) = super::device_info::map_viewer_event(session, &event) {
+                        self.emit(ev);
+                    }
+                }
                 ViewerEvent::Feature(event) => {
+                    // --- audio (TLP-audio) ---
+                    if let Some(ev) = super::audio::viewer_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
+                    if let Some(op) = whiteboard::remote_op(&event) {
+                        self.emit(BackendEvent::WhiteboardRemote { session, op });
+                        continue;
+                    }
+                    // chat (TLP-chat)
+                    if let Some(ev) = chat::backend_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
+                    if let Some(ev) = FilesBridge::map_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
                     tracing::debug!(
                         session = session.0,
                         feature = event.feature,
                         "feature event"
                     );
+                    if let Some(ev) = super::clipboard::map(session, &event) {
+                        self.emit(ev);
+                    }
                 }
                 ViewerEvent::Ended(r) => {
                     raw_end = Some(r.clone());
+                    let (end, detail) = settings_tray::viewer_end(&r);
+                    self.log.end(Direction::Outgoing, session.0, end, detail);
                     reason = map_viewer_end(r);
                     break;
                 }
             }
         }
+        // Stream closed without an `Ended` (no-op if it was already logged).
+        self.log
+            .end(Direction::Outgoing, session.0, LogEnd::Error, None);
         let old = self.state().viewer_sessions.remove(&session);
         let dst = {
             let mut bridges = lock(&self.bridges);
@@ -844,6 +1211,7 @@ impl Inner {
             bridges.retain(|b| b.session != session);
             dst
         };
+        self.recorders.stop(session, &self.rt, self.emitter());
         // A host we asked to restart left a ticket: wait for it instead of ending.
         if let (Some(old), Some(raw)) = (&old, &raw_end) {
             if self.try_start_reconnect(session, old, raw, dst) {
@@ -916,6 +1284,15 @@ impl Backend for RealBackend {
         let Some(id) = self.inner.state().requests.remove(&request) else {
             return;
         };
+        let peer = self.inner.state().request_peers.remove(&id);
+        if let (Some(peer), false) = (peer, accept) {
+            self.inner.log.refused(
+                Direction::Incoming,
+                LogPeer::from(&peer),
+                LogAuth::AcceptPrompt,
+                LogEnd::Declined,
+            );
+        }
         if let Some(h) = &self.inner.host {
             if accept {
                 h.accept(id, None);
@@ -975,6 +1352,178 @@ impl Backend for RealBackend {
         }
     }
 
+    fn select_all_monitors(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            s.select_all_monitors();
+        }
+    }
+
+    fn request_device_info(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            tlp_desk_viewer::request_device_info(&s);
+        }
+    }
+
+    // --- power: port forwarding (TLP-tunnel) ---
+
+    fn add_tunnel(&self, session: SessionId, request: tunnels::TunnelRequest) {
+        let Some(s) = self.inner.state().viewer_sessions.get(&session).cloned() else {
+            return;
+        };
+        let mut spec =
+            ForwardSpec::local(request.local_port, request.target_host, request.target_port);
+        if request.lan_bind {
+            // IPv4 wildcard: LAN clients are IPv4 in practice (an IPv6 socket on Windows is
+            // IPv6-only by default).
+            spec.bind = SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                request.local_port,
+            );
+            spec.allow_lan_bind = true;
+        }
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            // Success shows up as a `Tunnels` event from the feature.
+            if let Err(e) = me.tunnels.add(s.feature_key(), spec).await {
+                tracing::info!(session = session.0, %e, "port forwarding not started");
+                me.emit(BackendEvent::TunnelProblem {
+                    session,
+                    problem: tunnels::TunnelProblem::from(&e),
+                });
+            }
+        });
+    }
+
+    fn stop_tunnel(&self, session: SessionId, id: u64) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            let _guard = self.inner.rt.enter();
+            self.inner.tunnels.stop(s.feature_key(), TunnelId(id));
+        }
+    }
+
+    fn allow_tunnels(&self, session: SessionId, allowed: bool) {
+        let Some(id) = self.inner.state().host_sessions.get(&session).copied() else {
+            return;
+        };
+        let Some(host) = &self.inner.host else {
+            return;
+        };
+        let Some(current) = host.sessions().into_iter().find(|v| v.id == id) else {
+            return;
+        };
+        let perms = if allowed {
+            current.permissions | Permissions::TUNNEL
+        } else {
+            current.permissions.difference(Permissions::TUNNEL)
+        };
+        tracing::info!(
+            session = session.0,
+            allowed,
+            "host user changed port forwarding"
+        );
+        host.set_permissions(id, perms); // confirmed by PermissionsChanged -> HostTunnels
+    }
+
+    fn send_whiteboard(&self, session: SessionId, ops: Vec<WhiteboardOp>) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            for msg in whiteboard::messages(&ops) {
+                s.send_message(msg);
+            }
+        }
+    }
+
+    fn send_chat(&self, session: SessionId, text: &str) -> Result<ChatLine, ChatSendError> {
+        let (viewer, host) = {
+            let st = self.inner.state();
+            (
+                st.viewer_sessions.get(&session).map(|s| s.feature_key()),
+                st.host_sessions.get(&session).copied(),
+            )
+        };
+        match (viewer, host) {
+            (Some(key), _) => self.inner.chat.send_viewer(key, text),
+            (None, Some(id)) => self.inner.chat.send_host(id.0, text),
+            (None, None) => Err(ChatSendError::Unavailable),
+        }
+    }
+
+    fn set_chat_allowed(&self, session: SessionId, allowed: bool) {
+        let Some(id) = self.inner.state().host_sessions.get(&session).copied() else {
+            return;
+        };
+        let Some(host) = &self.inner.host else {
+            return;
+        };
+        let Some(current) = host
+            .sessions()
+            .into_iter()
+            .find(|v| v.id == id)
+            .map(|v| v.permissions)
+        else {
+            return;
+        };
+        let chat = tlp_desk_proto::Permissions::CHAT;
+        let new = if allowed {
+            current | chat
+        } else {
+            current.difference(chat)
+        };
+        if new != current {
+            tracing::info!(
+                session = session.0,
+                allowed,
+                "host user changed chat permission"
+            );
+            host.set_permissions(id, new);
+        }
+    }
+
+    fn fs_request(&self, side: FsSide, op: FsOp) -> Option<FsRequestId> {
+        Some(self.files_request(side, op))
+    }
+
+    fn fs_transfer(&self, session: SessionId, request: TransferRequest) {
+        self.files_transfer(session, request);
+    }
+
+    fn send_files(&self, session: SessionId, paths: Vec<PathBuf>) {
+        let Some(key) = self.inner.feature_key(session) else {
+            return;
+        };
+        let ft = self.inner.files.clone();
+        self.inner.spawn_transfer(session, async move {
+            ft.start_upload(key, paths, String::new()).await.map(|_| ())
+        });
+    }
+
+    fn download_files(&self, session: SessionId, remote_paths: Vec<String>, dest: PathBuf) {
+        let Some(key) = self.inner.feature_key(session) else {
+            return;
+        };
+        let ft = self.inner.files.clone();
+        self.inner.spawn_transfer(session, async move {
+            ft.start_download(key, remote_paths, dest).await.map(|_| ())
+        });
+    }
+
+    fn cancel_transfer(&self, _session: SessionId, id: TransferId) {
+        self.inner.files.cancel(tlp_desk_files::TransferId(id.0));
+    }
+
+    fn retry_transfer(&self, session: SessionId, id: TransferId) {
+        let Some(key) = self.inner.feature_key(session) else {
+            return;
+        };
+        let ft = self.inner.files.clone();
+        self.inner.spawn_transfer(session, async move {
+            ft.resume(tlp_desk_files::TransferId(id.0), key).await
+        });
+    }
+
     fn disconnect(&self, session: SessionId) {
         if self.inner.cancel_reconnect(session) {
             return;
@@ -994,11 +1543,154 @@ impl Backend for RealBackend {
             }
         }
     }
+
+    // --- audio (TLP-audio) ---
+    fn set_audio_enabled(&self, session: SessionId, enabled: bool) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .audio
+                .viewer()
+                .set_enabled(s.feature_key(), enabled);
+        }
+    }
+
+    fn set_audio_volume(&self, session: SessionId, volume: f32) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .audio
+                .viewer()
+                .set_volume(s.feature_key(), volume);
+        }
+    }
+
+    fn set_audio_on_connect(&self, enabled: bool) {
+        self.inner.audio.viewer().set_enabled_by_default(enabled);
+    }
+
+    // --- address book + Wake-on-LAN (TLP-addressbook) ---
+    fn neighbor_mac(&self, ip: IpAddr) -> Option<[u8; 6]> {
+        tlp_desk_net::neighbor_mac(ip)
+    }
+
+    fn pinned_fingerprint(&self, id: DeviceId) -> Option<String> {
+        let viewer = self.inner.viewer.as_ref()?;
+        let id = tlp_desk_crypto::DeviceId::new(id.0)?;
+        viewer
+            .known_fingerprint(&HostKey::Id(id))
+            .map(|fp| short_fingerprint(&fp))
+    }
+
+    fn wake_on_lan(&self, mac: [u8; 6], last_ips: &[IpAddr]) -> Result<(), String> {
+        let mac = crate::address_book::MacAddr(mac);
+        let targets =
+            crate::address_book::wol::targets(last_ips, &crate::address_book::wol::local_ifaces());
+        tracing::info!(%mac, ?targets, "sending Wake-on-LAN magic packet");
+        crate::address_book::wol::send(mac, &targets).map_err(|e| e.to_string())
+    }
+
+    // --- settings / ux (TLP-settings-tray) ---
+    fn apply_host_settings(&self, settings: &HostSettings) {
+        settings_tray::apply(
+            self.inner.endpoint.as_deref(),
+            self.inner.host.as_ref(),
+            settings,
+        );
+    }
+
+    fn request_quality(&self, session: SessionId, quality: tlp_desk_proto::QualitySettings) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            if !s.send_message(tlp_desk_proto::Message::SetQuality(quality)) {
+                tracing::debug!(session = session.0, "quality request not sent");
+            }
+        }
+    }
+    // --- power (TLP-power) ---
+    // recording (TLP-recording)
+    fn start_recording(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .recorders
+                .start(session, &s, self.inner.emitter());
+        }
+    }
+
+    fn stop_recording(&self, session: SessionId) {
+        self.inner
+            .recorders
+            .stop(session, &self.inner.rt, self.inner.emitter());
+    }
+
+    // --- clipboard (TLP-clipboard) ---
+    fn set_clipboard_sync(&self, session: SessionId, enabled: bool) {
+        let (viewer, host) = {
+            let st = self.inner.state();
+            (
+                st.viewer_sessions.get(&session).map(|v| v.feature_key()),
+                st.host_sessions.get(&session).map(|h| h.0),
+            )
+        };
+        let clip = &self.inner.clipboard;
+        if let Some(key) = viewer {
+            clip.set_sync_enabled(tlp_desk_proto::Role::Viewer, key, enabled);
+        } else if let Some(key) = host {
+            clip.set_sync_enabled(tlp_desk_proto::Role::Host, key, enabled);
+        }
+    }
+
+    fn set_clipboard_default(&self, enabled: bool) {
+        self.inner.clipboard.set_default_enabled(enabled);
+    }
+}
+
+// --- files (TLP-files) ---
+impl RealBackend {
+    /// Feature key of a viewer session (what the files features are keyed by).
+    fn feature_key(&self, session: SessionId) -> Option<u64> {
+        self.inner
+            .state()
+            .viewer_sessions
+            .get(&session)
+            .map(|s| s.feature_key())
+    }
+
+    fn emitter(&self) -> impl Fn(BackendEvent) + Send + Sync + 'static {
+        let inner = Arc::downgrade(&self.inner);
+        move |ev| {
+            if let Some(inner) = inner.upgrade() {
+                inner.emit(ev);
+            }
+        }
+    }
+
+    fn files_request(&self, side: FsSide, op: FsOp) -> FsRequestId {
+        let request = FsRequestId(self.inner.next_id());
+        let key = match side {
+            FsSide::Local => None,
+            FsSide::Remote(s) => self.feature_key(s),
+        };
+        self.inner
+            .fsb
+            .request(&self.inner.rt, side, key, op, request, self.emitter());
+        request
+    }
+
+    fn files_transfer(&self, session: SessionId, request: TransferRequest) {
+        let key = self.feature_key(session);
+        self.inner
+            .fsb
+            .transfer(&self.inner.rt, session, key, request, self.emitter());
+    }
 }
 
 impl Drop for RealBackend {
     /// App exit: say goodbye to every peer, then close the endpoint so they notice at once.
     fn drop(&mut self) {
+        // Close recording files properly before the sessions go away.
+        self.inner.recorders.stop_all_blocking();
         if let Some(h) = &self.inner.host {
             h.shutdown();
         }
@@ -1023,6 +1715,8 @@ impl Drop for RealBackend {
         for t in &self.tasks {
             t.abort();
         }
+        // Sessions whose end events did not arrive in time are logged as "app closed".
+        self.inner.log.close_all();
     }
 }
 
