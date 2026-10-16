@@ -53,12 +53,12 @@ fn refine_picture_is_much_sharper_than_a_moving_frame() {
     );
     assert!(refined_ssim > moving_ssim);
 
-    // The next ordinary frame is a cheap P-frame again (rate control was restored).
+    // The next ordinary frame restarts the main stream.
     let mut f2 = src.clone();
     f2.timestamp_us = 25 * 33_333;
     let next = enc.encode(&f2).unwrap().expect("frame");
-    assert!(!next.keyframe);
-    assert!(next.data.len() < refined.data.len() / 4);
+    // The viewer holds the refresh picture, not our reference: the stream restarts with a key.
+    assert!(next.keyframe);
     let _ = decode_one(dec.as_mut(), &next.data);
 }
 
@@ -150,4 +150,50 @@ fn report_1080p_default_bitrate() {
         refined.data.len() / 1024
     );
     assert!(psnr(&src, &r) > psnr(&src, &moving) + 3.0);
+}
+
+/// A refresh must leave the main stream exactly where an ordinary keyframe request would: the
+/// configured quantiser bounds stay in force (same frame sizes afterwards).
+#[test]
+fn refine_leaves_the_main_stream_like_a_keyframe_request() {
+    use tlp_desk_codec::{H264Tuning, QpBounds};
+    let (w, h) = (1280, 720);
+    let cfg = EncoderConfig {
+        width: w,
+        height: h,
+        fps: 30,
+        bitrate_kbps: 2_500,
+    };
+    let tuning = H264Tuning {
+        qp: QpBounds { min: 20, max: 34 },
+        threads: 1,
+        ..H264Tuning::default()
+    };
+    let run = |refine: bool| -> usize {
+        let mut enc = H264Encoder::with_tuning(cfg, tuning).unwrap();
+        let mut total = 0;
+        for i in 0..40u32 {
+            let mut f = text_scene(w, h, 2, i * 37);
+            f.timestamp_us = u64::from(i) * 33_333;
+            if i == 10 {
+                if refine {
+                    let r = enc.encode_refine(&f).unwrap().unwrap();
+                    assert!(r.keyframe);
+                    continue;
+                }
+                enc.request_keyframe();
+            }
+            let out = enc.encode(&f).unwrap().unwrap();
+            if refine && i == 11 {
+                assert!(out.keyframe, "the viewer must be resynchronised");
+            }
+            if i > 30 {
+                total += out.data.len();
+            }
+        }
+        total
+    };
+    let (plain, refined) = (run(false), run(true));
+    println!("frames after refine: {refined} B, after a keyframe request: {plain} B");
+    assert!(refined * 10 < plain * 13 && plain * 10 < refined * 13);
 }

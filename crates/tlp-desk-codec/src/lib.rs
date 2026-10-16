@@ -19,8 +19,8 @@ pub mod convert;
 mod h264;
 #[cfg(windows)]
 mod mf;
-mod refine;
 mod qp;
+mod refine;
 mod select;
 
 pub use h264::{Downscale, H264Complexity, H264Decoder, H264Encoder, H264Tuning};
@@ -29,8 +29,8 @@ pub use mf::{
     list_adapters, list_hw_encoders, GpuAdapter, HwAdapter, HwEncoderInfo, MfEncoder, VENDOR_AMD,
     VENDOR_INTEL, VENDOR_NVIDIA,
 };
-pub use refine::REFINE_QP;
 pub use qp::QpProbe;
+pub use refine::REFINE_QP;
 pub use select::{
     new_encoder_with, EncoderOptions, EncoderPreference, FallbackEncoder, ADAPTER_ENV, ENCODER_ENV,
 };

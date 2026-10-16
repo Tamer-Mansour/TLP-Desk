@@ -94,6 +94,11 @@ pub struct H264Encoder {
     raw: ffi::RawEncoder,
     yuv: I420Buffer,
     force_keyframe: bool,
+    /// Second OpenH264 instance for refresh pictures (fixed low quantiser), created on first
+    /// use. A separate instance because OpenH264 does not reliably take quantiser changes on a
+    /// running encoder; the main encoder is told to emit a keyframe after each refresh so the
+    /// viewer's reference stays in sync.
+    refiner: Option<ffi::RawEncoder>,
 }
 
 impl H264Encoder {
@@ -144,6 +149,7 @@ impl H264Encoder {
             raw,
             yuv: I420Buffer::default(),
             force_keyframe: false, // the first frame is always an IDR
+            refiner: None,
         })
     }
 
@@ -202,19 +208,55 @@ impl VideoEncoder for H264Encoder {
     }
 
     fn encode_refine(&mut self, frame: &BgraFrame) -> Result<Option<EncodedFrame>, CodecError> {
-        // Clamp the quantiser to the refine QP for this one picture, then put the rate
-        // controller's range back so normal frames are unaffected.
-        let saved = match self.raw.begin_fixed_qp(crate::refine::REFINE_QP) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::debug!(%e, "OpenH264 quantiser override failed; boosting the bitrate");
-                return crate::refine::boosted_refine(self, frame);
-            }
+        if frame.width != self.config.width || frame.height != self.config.height {
+            return Err(CodecError::SizeMismatch {
+                got_w: frame.width,
+                got_h: frame.height,
+                want_w: self.config.width,
+                want_h: self.config.height,
+            });
+        }
+        if !frame.is_well_formed() {
+            return Err(CodecError::Backend(
+                "BGRA frame buffer too small for its geometry".into(),
+            ));
+        }
+        if self.refiner.is_none() {
+            let q = crate::refine::REFINE_QP as u8;
+            self.refiner = Some(ffi::RawEncoder::new(&ffi::Params {
+                width: self.encoded.0,
+                height: self.encoded.1,
+                // Effectively unlimited: the quantiser, not the rate, decides the size.
+                bitrate_bps: 100_000_000,
+                fps: self.config.fps.max(1),
+                threads: resolve_threads(self.tuning.threads),
+                complexity: H264Complexity::Low,
+                screen_content: false,
+                qp: crate::QpBounds { min: q, max: q + 1 },
+            })?);
+        }
+        if self.half {
+            bgra_to_i420_half(frame, &mut self.yuv);
+        } else {
+            bgra_to_i420(frame, &mut self.yuv);
+        }
+        let Some(refiner) = self.refiner.as_mut() else {
+            return Ok(None);
         };
+        refiner.force_idr()?;
+        let mut data = Vec::new();
+        let kind = refiner.encode(&self.yuv, (frame.timestamp_us / 1000) as i64, &mut data)?;
+        // The viewer now holds this picture, not the main encoder's reference: restart the
+        // main stream with a keyframe on the next change.
         self.force_keyframe = true;
-        let out = self.encode(frame);
-        self.raw.restore_params(saved)?;
-        out
+        if kind == ffi::FrameKind::Skipped || data.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(EncodedFrame {
+            keyframe: true,
+            timestamp_us: frame.timestamp_us,
+            data,
+        }))
     }
 
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError> {
@@ -245,9 +287,9 @@ mod ffi {
         videoFrameTypeSkip, ISVCEncoder, ISVCEncoderVtbl, SBitrateInfo, SEncParamExt, SFrameBSInfo,
         SSourcePicture, CAMERA_VIDEO_REAL_TIME, CONSTANT_ID, DEBLOCKING_IDC_0, ENCODER_OPTION,
         ENCODER_OPTION_BITRATE, ENCODER_OPTION_DATAFORMAT, ENCODER_OPTION_MAX_BITRATE,
-        ENCODER_OPTION_SVC_ENCODE_PARAM_EXT, ENCODER_OPTION_TRACE_LEVEL, HIGH_COMPLEXITY,
-        LOW_COMPLEXITY, MEDIUM_COMPLEXITY, RC_BITRATE_MODE, SCREEN_CONTENT_REAL_TIME,
-        SM_FIXEDSLCNUM_SLICE, SM_SINGLE_SLICE, SPATIAL_LAYER_0, SPATIAL_LAYER_ALL, WELS_LOG_QUIET,
+        ENCODER_OPTION_TRACE_LEVEL, HIGH_COMPLEXITY, LOW_COMPLEXITY, MEDIUM_COMPLEXITY,
+        RC_BITRATE_MODE, SCREEN_CONTENT_REAL_TIME, SM_FIXEDSLCNUM_SLICE, SM_SINGLE_SLICE,
+        SPATIAL_LAYER_0, SPATIAL_LAYER_ALL, WELS_LOG_QUIET,
     };
 
     use super::H264Complexity;
@@ -281,7 +323,6 @@ mod ffi {
     pub(super) struct RawEncoder {
         enc: *mut ISVCEncoder,
         set_option: FnSetOption,
-        get_option: Option<FnSetOption>,
         encode_frame: FnEncode,
         force_intra: FnForceIntra,
         uninitialize: FnUninit,
@@ -429,7 +470,6 @@ mod ffi {
             let raw = Self {
                 enc,
                 set_option,
-                get_option: vtbl.GetOption,
                 encode_frame,
                 force_intra,
                 uninitialize,
@@ -516,57 +556,6 @@ mod ffi {
                 out.extend_from_slice(bytes);
             }
             Ok(kind)
-        }
-
-        fn param_ext(&mut self) -> Result<SEncParamExt, CodecError> {
-            let Some(get) = self.get_option else {
-                return Err(CodecError::Backend("OpenH264 has no GetOption".into()));
-            };
-            let mut p = SEncParamExt::default();
-            // SAFETY: PARAM_EXT takes an `SEncParamExt*` that the encoder fills; `p` is a live
-            // out-struct of that type.
-            let rc = unsafe {
-                get(
-                    self.enc,
-                    ENCODER_OPTION_SVC_ENCODE_PARAM_EXT,
-                    (&mut p as *mut SEncParamExt).cast(),
-                )
-            };
-            check(rc, "GetOption(PARAM_EXT)")?;
-            Ok(p)
-        }
-
-        fn apply_param_ext(&mut self, p: &mut SEncParamExt) -> Result<(), CodecError> {
-            // SAFETY: PARAM_EXT takes an `SEncParamExt*` read by the encoder during the call;
-            // `p` was filled by the encoder itself and only rate-control fields were changed.
-            let rc = unsafe {
-                (self.set_option)(
-                    self.enc,
-                    ENCODER_OPTION_SVC_ENCODE_PARAM_EXT,
-                    (p as *mut SEncParamExt).cast(),
-                )
-            };
-            check(rc, "SetOption(PARAM_EXT)")
-        }
-
-        /// Switches to constant-quantiser coding at `qp` and returns the previous parameters
-        /// for [`Self::restore_params`]. The stream (size, references) is not re-initialised.
-        pub(super) fn begin_fixed_qp(&mut self, qp: i32) -> Result<SEncParamExt, CodecError> {
-            let saved = self.param_ext()?;
-            let mut p = saved;
-            p.iTargetBitrate = 100_000_000;
-            p.iMaxBitrate = 100_000_000;
-            p.sSpatialLayers[0].iSpatialBitrate = 100_000_000;
-            p.sSpatialLayers[0].iMaxSpatialBitrate = 100_000_000;
-            p.iMinQp = qp;
-            p.iMaxQp = qp;
-            p.sSpatialLayers[0].iDLayerQp = qp;
-            self.apply_param_ext(&mut p)?;
-            Ok(saved)
-        }
-
-        pub(super) fn restore_params(&mut self, mut saved: SEncParamExt) -> Result<(), CodecError> {
-            self.apply_param_ext(&mut saved)
         }
 
         pub(super) fn force_idr(&mut self) -> Result<(), CodecError> {

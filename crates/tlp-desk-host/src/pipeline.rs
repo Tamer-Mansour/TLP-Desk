@@ -459,6 +459,8 @@ struct EncodeState {
     pending_since: Option<Instant>,
     /// When to send the high-quality refresh after the screen stops changing.
     refine: RefineGate,
+    /// Resolution step last seen; a change means the capturer is about to be reopened.
+    last_scale: u32,
 }
 
 /// Why the encode thread woke up.
@@ -498,6 +500,7 @@ fn encode_loop(
         patch: CursorPatch::default(),
         pending_since: None,
         refine: RefineGate::default(),
+        last_scale: mailbox.scale.load(Ordering::Acquire),
     };
 
     loop {
@@ -686,6 +689,13 @@ fn wait_for_work(
         let now = Instant::now();
         if now >= adapter.next_tick() {
             return Some(Wake::Tick);
+        }
+        // A resolution-ladder switch is pending: the capturer reopens at another size and the
+        // current frame is about to be replaced, so do not refine it; settle again afterwards.
+        let scale = mailbox.scale.load(Ordering::Acquire);
+        if scale != st.last_scale {
+            st.last_scale = scale;
+            st.refine.note_change(now);
         }
         let mut refine_wait = None;
         if st.pending_since.is_none() && st.last.is_some() && st.enc.is_some() {

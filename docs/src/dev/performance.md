@@ -173,10 +173,14 @@ four places in the pipeline.
 **Static refinement (host).** While the screen moves, rate control spends few bits per picture and
 text softens. When the captured content has been unchanged for 300 ms the encode thread
 (`tlp-desk-host`, `refine::RefineGate`) re-encodes the last frame **once** through
-`VideoEncoder::encode_refine`: a keyframe at QP 14. The OpenH264 encoder does this by lifting its
-bitrate cap and clamping the quantiser for that one picture, then restoring both (the next frame is
-an ordinary cheap P-frame again). Other backends (Media Foundation hardware) use the trait default:
-forced keyframe at 6x the bitrate, then the bitrate is restored. Rules: nothing changed means no
+`VideoEncoder::encode_refine`: a keyframe at QP 14. The OpenH264 encoder does this with a second,
+lazily created OpenH264 instance configured for QP 14 and no practical bitrate cap (OpenH264 does
+not reliably take quantiser changes on a running encoder, so the quality-ladder's `QpBounds` on the
+main encoder are never touched); the main encoder is then told to emit a keyframe on its next
+picture, so the viewer's reference stays in sync (the main stream afterwards behaves exactly as
+after any keyframe request). Other backends (Media Foundation hardware) use the trait default:
+forced keyframe at 6x the bitrate, then the bitrate is restored. A pending resolution-ladder step
+postpones the refresh (the capturer is about to reopen at another size). Rules: nothing changed means no
 refresh (cursor-only moves do not count), at least 1.5 s between refreshes, and a 3 s back-off after
 a dropped packet because a refresh keyframe is big. It is sent at the current encoded size; lifting
 the capture cap for the refresh is not done (the adaptive ladder owns the size).
@@ -206,14 +210,14 @@ All from tests in the repository; run with `--nocapture` to reproduce.
 
 | Measurement | Result | Test |
 |---|---|---|
-| Synthetic dense text, 1280x720, 2.5 Mbps, scrolled 37 px/frame, last moving frame | 22.3 dB PSNR, SSIM 0.946 | `sharpness::refine_picture_is_much_sharper_than_a_moving_frame` |
-| Same scene after one refresh picture | 50.5 dB, SSIM 0.9999 (408 KB once) | same |
-| 1080p60 at the default 12.4 Mbps, same scroll | moving 22.0 dB / SSIM 0.938; refresh 49.5 dB / SSIM 0.9999 (about 1 MB once) | `sharpness::report_1080p_default_bitrate` |
+| Synthetic dense text, 1280x720, 2.5 Mbps, scrolled 37 px/frame, last moving frame | 31.1 dB PSNR, SSIM 0.989 | `sharpness::refine_picture_is_much_sharper_than_a_moving_frame` |
+| Same scene after one refresh picture | 49.3 dB, SSIM 0.9999 (401 KB once) | same |
+| 1080p60 at the default 14.9 Mbps, same scroll | moving 30.9 dB / SSIM 0.988; refresh 48.7 dB / SSIM 0.9999 (about 1 MB once) | `sharpness::report_1080p_default_bitrate` |
 | Text image 1920x1200 to 1600x1000 (GPU, headless D3D11) | edge energy: source 131, box filter 72, Lanczos-2 107; GPU equals CPU reference at 72 dB | `windows_capture::d3d::tests::gpu_lanczos_matches_cpu_reference_and_is_sharper_than_box` |
 | Text image 2560x1440 to 1920x1080 | edge energy: source 131, box 74, Lanczos-2 103 | same |
 
 The synthetic scene is deliberately harsh (1-pixel strokes everywhere, no smooth areas), so real
-screens refresh far smaller than 1 MB and the moving picture is better than 22 dB; the point is the
+screens refresh far smaller than 1 MB and the moving picture is better than 31 dB; the point is the
 size of the *difference*. A refresh keyframe is one extra burst of a few hundred kilobytes about a
 third of a second after the screen settles, which is nothing on a LAN.
 
