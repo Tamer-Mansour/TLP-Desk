@@ -114,6 +114,7 @@
 - [Performance notes](dev/performance.md)
 - [i18n and Arabic](dev/i18n.md)
 - [Release process](dev/release.md)
+  - [Code signing, SmartScreen and winget](dev/code-signing.md)
 - [System test reports (1.0.0-rc.1, rc.2)](dev/system-test-report.md)
 
 # Architecture decisions
