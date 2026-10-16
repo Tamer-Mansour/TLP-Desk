@@ -9,6 +9,9 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif
+#ifndef MyAppNumericVersion
+  #define MyAppNumericVersion MyAppVersion
+#endif
 #ifndef StageDir
   #define StageDir "..\dist\setup-stage"
 #endif
@@ -25,7 +28,7 @@ AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher=TLP
 AppCopyright=MIT OR Apache-2.0
-VersionInfoVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppNumericVersion}
 VersionInfoProductName={#MyAppName}
 VersionInfoCompany=TLP
 VersionInfoDescription={#MyAppName} setup

@@ -8,9 +8,28 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
-The workspace version is `0.1.0`; nothing has been tagged yet.
+## [1.0.0-rc.1] - 2026-10-16
+
+First release candidate: every roadmap feature for Windows is implemented and covered by
+automated tests (`cargo test --workspace`, clippy, fmt, cargo-deny and typos are clean) and a
+one-PC end-to-end [system test](dev/system-test-report.md). Wire protocol v5. What still needs
+two real PCs (privacy overlay, service and lock screen, Ctrl+Alt+Del, restart and reconnect,
+real audio, clipboard and Explorer paste, Wake-on-LAN, Wi-Fi performance) is listed in the
+[manual test checklist](user-guide/en/manual-test.md). Not included yet: Linux, macOS and Android,
+a landing page and an MSI.
 
 ### Added
+
+- **Windows service, secure desktop and Ctrl+Alt+Del.** `TLP-Desk.exe install-service` runs TLP-Desk as a SYSTEM service that starts a session agent in the active console session and follows user switching, so the sign-in screen, lock screen and UAC prompts can be seen and controlled. Ctrl+Alt+Del is sent with `SendSAS` from the service. (PR #9)
+- **Permanent password, restart and reconnect, lock.** An unattended-access password (Argon2id at rest, never on the wire, 5 attempts per minute then a 10-minute lockout), **Restart remote PC** with a one-use reconnect ticket and automatic reconnect, and **Lock remote PC**. (PR #11)
+- **Privacy mode.** Blanks the host's screens and blocks its local input during a session; ends with Ctrl+Alt+Shift+P (3 s) or Ctrl+Alt+Del, on disconnect or when permission is withdrawn. (PR #19)
+- **Hardware H.264 encoding** through Media Foundation (Intel Quick Sync, NVENC and AMF where available) with an automatic software (openh264) fallback; `TLP_DESK_ENCODER=software` forces the fallback. (PR #23)
+- **Adaptive quality, presets, latency overlay and all-monitors view.** Adaptive bitrate and frame dropping, Speed / Balanced / Quality presets, a latency probe in the statistics overlay and a view of all monitors at once. (PR #15)
+- **Address book and Wake-on-LAN.** Saved devices with aliases, groups, last seen and online status; magic packets from the address book and `wol` in the CLI. (PR #17)
+- **Fast file transfer** over parallel side streams with resume and BLAKE3 verification. (PR #22; measured 330-414 MiB/s on loopback)
+- **Typing fix** so remote keystrokes always arrive. (PR #34)
+- **QA hardening.** Hostile-peer tests, a soak test, flaky-test and port-leak fixes. (PR #6)
+- Documentation: full user guide in English and Arabic, README screenshots and demo video generated from the real UI (PR #1, #3), the icon set (PR #2), a two-PC manual test checklist and the system test report.
 
 - **System audio (sound from the remote PC).** The host captures its default output (WASAPI loopback through `cpal`) only while a viewer has sound on, converts it to 48 kHz stereo, codes it with Opus in 10 ms frames and sends nothing while it is silent; packets travel on `StreamKind::Audio` side streams (`u16` length + packet). The viewer plays through a jitter buffer of about 30 ms (never above 60 ms; late packets are dropped, lost ones concealed, drift corrected). Gated by the `Audio` permission (off by default, live-revocable). The session toolbar has a speaker toggle and volume slider; Settings > Sound sets the default for new sessions. Sound is not yet recorded into session recordings. No wire change (v4 `AudioControl`).
 - **Settings, tray, host banner and connection log.** Settings now has sections for incoming connections (default permission checkboxes, Accept timeout, one-time code on/off, local-input grace, remote-pointer marker), an allowed-networks (CIDR) editor with a public-range warning, quality presets (Speed / Balanced / Quality), start with Windows (HKCU Run key behind a trait), start minimised and close-to-tray, and applies host options live (`Host::set_live_options`). `settings.json` is versioned and migrates older files; the settings are the source of truth for the host's default permissions (files, chat, whiteboard and clipboard on, port forwarding off). A notification-area icon (`tray-icon`) has Open, Copy ID, New code, Pause incoming, Settings, Connection log and Quit, an ID tooltip, and brings the window forward for an incoming request. A small topmost banner window shows who is connected while the main window is minimised (not excluded from screen capture, on purpose). A JSON-lines connection log (`%APPDATA%\TLP-Desk\connections.log`, rotated) records every session and refused attempt, with a viewer screen (search, filter, CSV export). No wire change.
@@ -98,4 +117,5 @@ The workspace version is `0.1.0`; nothing has been tagged yet.
   firewall rules). Crate names, the mDNS service type, the ALPN and other wire identifiers are
   unchanged on purpose, so existing device IDs and peers keep working.
 
-[Unreleased]: https://github.com/Tamer-Mansour/TLP-Desk/commits/TLP-Desk
+[Unreleased]: https://github.com/Tamer-Mansour/TLP-Desk/compare/v1.0.0-rc.1...TLP-Desk
+[1.0.0-rc.1]: https://github.com/Tamer-Mansour/TLP-Desk/releases/tag/v1.0.0-rc.1

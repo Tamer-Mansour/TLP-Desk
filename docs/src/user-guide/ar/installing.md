@@ -21,7 +21,7 @@
 <div dir="ltr">
 
 ```powershell
-Get-FileHash .\TLP-Desk-0.1.0-setup.exe -Algorithm SHA256
+Get-FileHash .\TLP-Desk-1.0.0-rc.1-setup.exe -Algorithm SHA256
 ```
 
 </div>

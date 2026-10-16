@@ -24,7 +24,10 @@ $stage = Join-Path $Dist 'setup-stage'
 New-PayloadStage -Stage $stage -ReadmeSource (Join-Path $PSScriptRoot 'README-setup.txt')
 
 Write-Host "==> $iscc" -ForegroundColor Cyan
-& $iscc /Q "/DMyAppVersion=$version" "/DStageDir=$stage" (Join-Path $PSScriptRoot 'TLP-Desk.iss')
+# Inno's VersionInfoVersion must be numeric a.b.c.d: "1.0.0-rc.1" -> "1.0.0.1", "1.0.0" -> "1.0.0.0".
+if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+\.(\d+))?') { throw "unsupported version $version" }
+$numeric = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$(if ($Matches[4]) { $Matches[4] } else { '0' })"
+& $iscc /Q "/DMyAppVersion=$version" "/DMyAppNumericVersion=$numeric" "/DStageDir=$stage" (Join-Path $PSScriptRoot 'TLP-Desk.iss')
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
 Remove-Item -Recurse -Force $stage
 
