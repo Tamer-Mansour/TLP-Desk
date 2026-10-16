@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use tlp_desk_capture::{
     BgraFrame, CaptureBackend, CaptureError, CaptureOptions, CursorShape, CursorState,
-    MonitorInfo, ScreenCapturer,
+    DirtyTracker, MonitorInfo, ScreenCapturer,
 };
 
 use crate::CapturerFactory;
@@ -101,6 +101,9 @@ struct HubState {
     /// Newest frame and its generation (0 = none yet).
     frame: Option<Arc<BgraFrame>>,
     frame_gen: u64,
+    /// Subscribers that have not taken the newest frame yet; the last one takes it without
+    /// a copy.
+    takers_left: usize,
     /// Latest cursor position/visibility.
     cursor: Option<(i32, i32, bool)>,
     /// Latest cursor shape and its generation (0 = none yet).
@@ -110,6 +113,9 @@ struct HubState {
     ended: Option<Ended>,
     /// Buffers handed back by the pipelines, for the real capturer to reuse.
     spare: Vec<BgraFrame>,
+    /// A session joined while no frame was held (the only subscriber had taken it): the
+    /// capturer is reopened so the newcomer gets a first picture of a still screen.
+    reopen: bool,
 }
 
 struct Hub {
@@ -160,7 +166,7 @@ impl Hub {
                     return;
                 }
                 tracing::info!(monitor = index, "shared capturer started");
-                hub.run(cap.as_mut());
+                hub.run(&mut cap, || factory(index, options));
                 tracing::info!(monitor = index, "shared capturer stopped");
             })
             .map_err(|e| CaptureError::Platform(format!("cannot spawn capture thread: {e}")))?;
@@ -168,25 +174,46 @@ impl Hub {
             .unwrap_or_else(|_| Err(CaptureError::Platform("capture thread ended".into())))
     }
 
-    fn run(&self, cap: &mut dyn ScreenCapturer) {
+    fn run(
+        &self,
+        cap: &mut Box<dyn ScreenCapturer>,
+        reopen: impl Fn() -> Result<Box<dyn ScreenCapturer>, CaptureError>,
+    ) {
         let mut errors = 0u32;
+        // Still frames are dropped once here instead of once per session.
+        let mut dirty = DirtyTracker::default();
         loop {
-            let spare = {
+            let (spare, wants_reopen) = {
                 let mut s = lock(&self.state);
                 if s.subscribers == 0 {
                     return;
                 }
-                std::mem::take(&mut s.spare)
+                (std::mem::take(&mut s.spare), std::mem::take(&mut s.reopen))
             };
+            if wants_reopen {
+                match reopen() {
+                    Ok(c) => {
+                        tracing::debug!("shared capturer reopened for a joining session");
+                        *cap = c;
+                        dirty.reset();
+                    }
+                    Err(e) => tracing::warn!(%e, "cannot reopen the shared capturer"),
+                }
+            }
             for f in spare {
                 cap.recycle(f);
             }
             match cap.next_frame(HUB_WAIT) {
+                Ok(Some(frame)) if !dirty.update(&frame).is_changed() => {
+                    errors = 0;
+                    cap.recycle(frame);
+                }
                 Ok(Some(frame)) => {
                     errors = 0;
                     let old = {
                         let mut s = lock(&self.state);
                         s.frame_gen = s.frame_gen.wrapping_add(1);
+                        s.takers_left = s.subscribers;
                         s.frame.replace(Arc::new(frame))
                     };
                     self.cv.notify_all();
@@ -249,7 +276,13 @@ impl SharedCapturer {
 
     /// A further session joining a running hub.
     fn subscribe(hub: Arc<Hub>) -> Self {
-        lock(&hub.state).subscribers += 1;
+        {
+            let mut s = lock(&hub.state);
+            s.subscribers += 1;
+            if s.frame.is_none() && s.frame_gen != 0 {
+                s.reopen = true;
+            }
+        }
         Self::first(hub)
     }
 }
@@ -276,7 +309,8 @@ impl ScreenCapturer for SharedCapturer {
             if s.frame_gen != self.seen_frame {
                 if let Some(frame) = s.frame.clone() {
                     self.seen_frame = s.frame_gen;
-                    if s.subscribers <= 1 {
+                    s.takers_left = s.takers_left.saturating_sub(1);
+                    if s.takers_left == 0 {
                         s.frame = None;
                     }
                     let spare = s.spare.pop();
@@ -364,6 +398,8 @@ mod tests {
         n: u32,
         /// Return `SurfaceLost` from this frame on.
         lose_at: Option<u32>,
+        /// The screen never changes after the first frame.
+        still: bool,
         dropped: Arc<AtomicBool>,
     }
 
@@ -381,7 +417,7 @@ mod tests {
                 return Err(CaptureError::SurfaceLost);
             }
             let mut f = BgraFrame::new_tight(4, 2);
-            f.data[0] = (self.n % 256) as u8;
+            f.data[0] = if self.still { 1 } else { (self.n % 256) as u8 };
             Ok(Some(f))
         }
 
@@ -414,6 +450,10 @@ mod tests {
     }
 
     fn rig(lose_at: Option<u32>) -> Rig {
+        rig_with(lose_at, false)
+    }
+
+    fn rig_with(lose_at: Option<u32>, still: bool) -> Rig {
         let opened = Arc::new(AtomicU32::new(0));
         let dropped = Arc::new(AtomicBool::new(false));
         let (o, d) = (opened.clone(), dropped.clone());
@@ -431,6 +471,7 @@ mod tests {
                 },
                 n: 0,
                 lose_at: if first { lose_at } else { None },
+                still,
                 dropped: d.clone(),
             }) as Box<dyn ScreenCapturer>)
         });
@@ -522,6 +563,21 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         panic!("the real capturer outlived its last handle");
+    }
+
+    #[test]
+    fn a_session_joining_a_still_screen_gets_a_first_picture() {
+        let r = rig_with(None, true);
+        let mut a = (r.factory)(0, CaptureOptions::default()).unwrap();
+        // The only subscriber took the newest frame (no copy kept).
+        next(&mut a);
+        let mut b = (r.factory)(0, CaptureOptions::default()).unwrap();
+        next(&mut b);
+        assert_eq!(r.opened.load(Ordering::SeqCst), 2, "reopened for the newcomer");
+        // The reopened picture reaches the first session too, then the still screen sends
+        // nothing more.
+        next(&mut a);
+        assert!(a.next_frame(Duration::from_millis(50)).unwrap().is_none());
     }
 
     #[test]
