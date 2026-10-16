@@ -1482,6 +1482,7 @@ mod tests {
         };
         let mut session = ViewerSession::new(SessionId(1), peer, Permissions::ALL, frames);
         session.frame_size = [1280, 720];
+        session.set_fixed_elapsed(Some(std::time::Duration::from_secs(267)));
         for digits in [DigitStyle::Western, DigitStyle::ArabicIndic] {
             for lang in [Lang::Ar, Lang::En] {
                 let tx = Tx::new(lang, digits);
@@ -1493,6 +1494,22 @@ mod tests {
                     "\u{661}\u{662}\u{668}\u{660}\u{d7}\u{667}\u{662}\u{660}"
                 };
                 assert!(shown.contains(want), "{lang:?} {digits:?}: {shown:?}");
+                // The clock keeps "m:ss" and the monitor tooltip keeps "W×H" left to right too.
+                let clock = screen_order(&lines[lines.len() - 1]);
+                let want_clock = if digits == DigitStyle::Western {
+                    "4:27"
+                } else {
+                    "\u{664}:\u{662}\u{667}"
+                };
+                assert!(clock.contains(want_clock), "{lang:?} {digits:?}: {clock:?}");
+                let res = tx.digits("1920\u{d7}1080");
+                let tip = screen_order(&tx.f(S::ScreenTooltip, &[("n", "1"), ("res", &res)]));
+                let want_res = if digits == DigitStyle::Western {
+                    "1920\u{d7}1080"
+                } else {
+                    "\u{661}\u{669}\u{662}\u{660}\u{d7}\u{661}\u{660}\u{668}\u{660}"
+                };
+                assert!(tip.contains(want_res), "{lang:?} {digits:?}: {tip:?}");
             }
         }
     }
