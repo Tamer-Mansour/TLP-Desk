@@ -23,6 +23,7 @@ use crate::i18n::{format, ltr_isolate, Tx, S};
 use crate::input_map;
 use crate::keygrab::KeyGrab;
 use crate::settings::QualityChoice;
+use crate::text_route::TextRouter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
@@ -90,6 +91,8 @@ pub struct ViewerSession {
     pub transfers: TransferPanel,
     /// The remote computer's sound (toolbar toggle and volume).
     pub audio: super::audio::AudioControls,
+    /// Scancode / Unicode-text routing of typed characters (`text_route`).
+    pub typing: TextRouter,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -145,6 +148,7 @@ impl ViewerSession {
             files: FileBrowser::new(id),
             transfers: TransferPanel::new(),
             audio: Default::default(),
+            typing: TextRouter::default(),
         }
     }
 
@@ -212,6 +216,7 @@ impl ViewerSession {
         }
         self.pressed.clear();
         self.keys.clear();
+        self.typing.clear();
         self.input_dirty = false;
     }
 
@@ -789,6 +794,7 @@ impl ViewerSession {
         // While grabbed, the hook swallows the keys it forwards, so any key that still reaches
         // the window was not captured and goes through `send_key` (no duplicates possible).
         let keys_ok = self.can_keyboard() && resp.has_focus();
+        self.typing.begin_frame();
         for ev in events {
             match ev {
                 egui::Event::WindowFocused(false) => self.release_all(backend),
@@ -846,10 +852,23 @@ impl ViewerSession {
                     key,
                     physical_key,
                     pressed,
+                    modifiers,
                     ..
                 } if keys_ok => {
-                    if let Some(k) = input_map::key_event(key, physical_key, pressed) {
+                    if let Some(k) = self.typing.key(key, physical_key, modifiers, pressed) {
                         self.send_key(backend, k);
+                    }
+                }
+                // Characters without a key of their own (IME, emoji) or, in "my layout" mode,
+                // every typed character: Unicode text (see `text_route`).
+                egui::Event::Text(ref text) if keys_ok => {
+                    for t in self.typing.text(text) {
+                        self.send(backend, t);
+                    }
+                }
+                egui::Event::Ime(egui::ImeEvent::Commit(ref text)) if keys_ok => {
+                    for t in self.typing.commit(text) {
+                        self.send(backend, t);
                     }
                 }
                 // egui turns Ctrl+C/X/V presses into clipboard events; forward them as the
@@ -875,6 +894,7 @@ mod tests {
     use super::*;
     use crate::backend::{AttemptId, ConnectTarget, DeviceId, LocalInfo, RequestId, VideoImage};
     use crate::i18n::{DigitStyle, Lang};
+    use crate::text_route::TextRoute;
     use eframe::egui::{pos2, vec2};
     use std::sync::Mutex;
 
@@ -1190,6 +1210,99 @@ mod tests {
         ]);
         let sent = rig.take();
         assert!(sent.is_empty(), "{sent:?}");
+    }
+
+    fn key_downs(sent: &[InputEvent]) -> Vec<(u16, bool)> {
+        sent.iter()
+            .filter_map(|e| match e {
+                InputEvent::Key {
+                    scancode,
+                    extended,
+                    down: true,
+                } => Some((*scancode, *extended)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Alt+Shift and Win+Space (Arabic <-> English layout switching on the host) are plain
+    /// scancodes through the window path, so they reach the host's keyboard-layout hotkeys.
+    #[test]
+    fn layout_switch_hotkeys_reach_the_host_as_scancodes() {
+        let mut rig = Rig::new(None);
+        rig.take();
+        rig.frame(vec![
+            egui_key(egui::Key::AltLeft, true),
+            egui_key(egui::Key::ShiftLeft, true),
+            egui_key(egui::Key::ShiftLeft, false),
+            egui_key(egui::Key::AltLeft, false),
+            egui_key(egui::Key::SuperLeft, true),
+            egui_key(egui::Key::Space, true),
+            egui_key(egui::Key::Space, false),
+            egui_key(egui::Key::SuperLeft, false),
+        ]);
+        let sent = rig.take();
+        assert_eq!(
+            key_downs(&sent),
+            vec![(0x38, false), (0x2A, false), (0x5B, true), (0x39, false)]
+        );
+        // The same holds in "my keyboard layout" mode: they are not turned into text.
+        rig.session.typing.set_route(TextRoute::Layout);
+        rig.frame(vec![
+            egui_key(egui::Key::SuperLeft, true),
+            egui_key(egui::Key::Space, true),
+            egui_key(egui::Key::Space, false),
+            egui_key(egui::Key::SuperLeft, false),
+        ]);
+        assert_eq!(key_downs(&rig.take()), vec![(0x5B, true), (0x39, false)]);
+    }
+
+    /// A typed key goes out once: as a scancode by default, as text in "my layout" mode.
+    #[test]
+    fn typed_character_is_never_sent_twice() {
+        let mut rig = Rig::new(None);
+        rig.take();
+        rig.frame(vec![
+            egui_key(egui::Key::A, true),
+            egui::Event::Text("ش".into()),
+            egui_key(egui::Key::A, false),
+        ]);
+        let sent = rig.take();
+        assert!(
+            sent.iter().all(|e| matches!(e, InputEvent::Key { .. })),
+            "{sent:?}"
+        );
+        assert_eq!(key_downs(&sent), vec![(0x1E, false)]);
+
+        rig.session.typing.set_route(TextRoute::Layout);
+        rig.frame(vec![
+            egui_key(egui::Key::A, true),
+            egui::Event::Text("ش".into()),
+            egui_key(egui::Key::A, false),
+        ]);
+        assert_eq!(rig.take(), vec![InputEvent::Text { text: "ش".into() }]);
+    }
+
+    /// IME commits and emoji have no key: they travel as text in both modes.
+    #[test]
+    fn ime_commit_and_emoji_are_sent_as_text() {
+        let mut rig = Rig::new(None);
+        rig.take();
+        rig.frame(vec![
+            egui::Event::Ime(egui::ImeEvent::Commit("مرحبا".into())),
+            egui::Event::Text("😀".into()),
+        ]);
+        assert_eq!(
+            rig.take(),
+            vec![
+                InputEvent::Text {
+                    text: "مرحبا".into()
+                },
+                InputEvent::Text {
+                    text: "😀".into()
+                }
+            ]
+        );
     }
 
     #[test]

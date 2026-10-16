@@ -6,7 +6,7 @@ in the Arabic user guide.
 | Term | العربية | Meaning |
 |---|---|---|
 | **Host** | الجهاز المضيف | The PC being viewed and controlled. |
-| **Viewer** | جهاز العرض | The PC you sit at, which shows the host screen and sends your mouse and keyboard. |
+| **Viewer** | الجهاز العارض | The PC you sit at, which shows the host screen and sends your mouse and keyboard. |
 | **Session** | الجلسة | One connection from a viewer to a host, from authentication until disconnect. |
 | **Device ID** | معرّف الجهاز | A 9-digit number (shown as `123 456 789`) derived from the device's public key. Dialing a host by its ID also checks its identity. |
 | **One-time code** | رمز لمرة واحدة | A 6-digit code shown on the host. Typing it on the viewer authorizes one session; the code then changes. |

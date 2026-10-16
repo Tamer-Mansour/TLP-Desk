@@ -514,7 +514,7 @@ impl AddressBookUi {
     }
 
     fn toolbar_ui(&mut self, ui: &mut Ui, tx: Tx) {
-        let resp = theme::row(ui, tx.rtl(), |ui| {
+        theme::row(ui, tx.rtl(), |ui| {
             let weak = ui.visuals().weak_text_color();
             icons::icon(ui, tx, Icon::Search, 18.0, weak);
             let w = (ui.available_width() - 8.0).max(120.0);
@@ -527,7 +527,6 @@ impl AddressBookUi {
                 w,
             )
         });
-        widgets::edit_preview(ui, tx, &resp, &self.query);
         theme::row(ui, tx.rtl(), |ui| {
             let groups = self.book.groups();
             let label = match &self.filter {
@@ -848,7 +847,7 @@ mod tests {
         ar_has(2 * 3600, "ساعتين");
         ar_has(4 * 3600, "ساعات");
         ar_has(3 * 86_400, "أيام");
-        ar_has(11 * 86_400, "يوماً");
+        ar_has(11 * 86_400, "يومًا");
         ar_has(100 * 86_400, "يوم");
         // The number is an LTR isolate in the user's digit style.
         let indic = Tx::new(Lang::Ar, DigitStyle::ArabicIndic);

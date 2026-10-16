@@ -14,7 +14,7 @@ create-missing = false
 [output.html]
 git-repository-url = "https://github.com/Tamer-Mansour/TLP-Desk"
 edit-url-template = "https://github.com/Tamer-Mansour/TLP-Desk/edit/TLP-Desk/docs/{path}"
-site-url = "/TLP-Desk/"
+site-url = "/TLP-Desk/book/"
 default-theme = "light"
 preferred-dark-theme = "navy"
 no-section-label = false

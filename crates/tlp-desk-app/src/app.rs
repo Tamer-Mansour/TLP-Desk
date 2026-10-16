@@ -17,6 +17,7 @@ use crate::backend::{
 use crate::i18n::{format::to_western_digits, Lang, Tx, S};
 use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
+use crate::text_route::TextRoute;
 use crate::ui::address_book::AddressBookUi;
 use crate::ui::audio::AudioControls;
 use crate::ui::chat::{self as chat_ui, ChatState};
@@ -396,6 +397,9 @@ impl App {
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
                         view.clipboard.sync = !self.settings.clipboard_sync_off;
                         view.quality = self.settings.quality;
+                        view.typing.set_route(TextRoute::from_layout_setting(
+                            self.settings.type_with_my_layout,
+                        ));
                         self.backend
                             .request_quality(session, self.settings.quality.to_proto());
                         view.audio = AudioControls::new(!self.settings.mute_remote_audio);

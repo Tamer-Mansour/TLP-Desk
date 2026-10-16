@@ -14,7 +14,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use windows::core::{w, PCWSTR};
@@ -50,6 +50,7 @@ use crate::InputError;
 
 const CLASS_NAME: PCWSTR = w!("TlpDeskRemotePointerMarker");
 const WM_MARKER_SYNC: u32 = WM_APP + 1;
+const WM_MARKER_LABEL: u32 = WM_APP + 2;
 const TIMER_ID: usize = 1;
 /// ~60 Hz cursor following.
 const TIMER_MS: u32 = 16;
@@ -61,6 +62,8 @@ const MAX_LABEL_HEIGHT: f32 = 24.0;
 
 struct Shared {
     visible: AtomicBool,
+    /// Label requested by [`RemotePointerMarker::set_label`], picked up on `WM_MARKER_LABEL`.
+    label: Mutex<String>,
 }
 
 /// The overlay window. [`set_visible`](Self::set_visible) is cheap and non-blocking (an
@@ -96,10 +99,11 @@ impl RemotePointerMarker {
     /// Like [`start`](Self::start); `exclude_from_capture = false` leaves the marker visible
     /// to screen capture (for screenshots/documentation only; sessions always exclude it).
     pub fn start_with(label: &str, exclude_from_capture: bool) -> Result<Self, InputError> {
+        let label: String = label.trim().chars().take(MAX_LABEL_CHARS).collect();
         let shared = Arc::new(Shared {
             visible: AtomicBool::new(false),
+            label: Mutex::new(label.clone()),
         });
-        let label: String = label.trim().chars().take(MAX_LABEL_CHARS).collect();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let thread = std::thread::Builder::new()
             .name("tlp-desk-pointer-marker".into())
@@ -131,6 +135,19 @@ impl RemotePointerMarker {
         if self.shared.visible.swap(visible, Ordering::AcqRel) != visible {
             self.post(WM_MARKER_SYNC);
         }
+    }
+
+    /// Changes the label under the arrow (cheap; the window redraws on its own thread).
+    pub fn set_label(&self, label: &str) {
+        let label: String = label.trim().chars().take(MAX_LABEL_CHARS).collect();
+        {
+            let mut cur = self.shared.label.lock().unwrap_or_else(|p| p.into_inner());
+            if *cur == label {
+                return;
+            }
+            *cur = label;
+        }
+        self.post(WM_MARKER_LABEL);
     }
 
     pub fn is_visible(&self) -> bool {
@@ -264,6 +281,16 @@ fn window_thread(
     while unsafe { GetMessageW(&mut msg, None, 0, 0) }.0 > 0 {
         match msg.message {
             WM_MARKER_SYNC => state.sync(shared.visible.load(Ordering::Acquire)),
+            WM_MARKER_LABEL => {
+                state.label = shared
+                    .label
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
+                // Force a re-render with the new text at the next cursor update.
+                state.dpi = 0;
+                state.follow();
+            }
             WM_TIMER if msg.hwnd == hwnd => state.follow(),
             _ => {
                 // SAFETY: dispatches a message retrieved by GetMessageW.

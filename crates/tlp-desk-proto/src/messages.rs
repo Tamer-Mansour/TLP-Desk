@@ -504,7 +504,16 @@ pub enum InputEvent {
     },
     /// Release every pressed key and button (e.g. when the viewer loses focus).
     ReleaseAll,
+    /// Unicode text to type on the host regardless of its keyboard layout (IME commits, composed
+    /// text, emoji, or "type using my layout"). At most [`MAX_INPUT_TEXT_CHARS`] characters; the
+    /// host drops longer or control-character text. Needs `KEYBOARD`. Added in protocol v6.
+    Text {
+        text: String,
+    },
 }
+
+/// Longest [`InputEvent::Text`] the host accepts, in `char`s.
+pub const MAX_INPUT_TEXT_CHARS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClipboardData {

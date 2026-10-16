@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 
 use crate::keys::{normalize_scancode, ScanKey};
 use crate::{InputError, InputEvent, InputInjector, MonitorRect, MouseButton};
+use tlp_desk_proto::MAX_INPUT_TEXT_CHARS;
 
 /// One low-level action for the OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,34 @@ pub(crate) enum RawInput {
         key: ScanKey,
         down: bool,
     },
+    /// One UTF-16 code unit typed independent of the keyboard layout (`KEYEVENTF_UNICODE`).
+    /// Characters outside the BMP are two units (a surrogate pair) sent back to back.
+    Unicode {
+        unit: u16,
+        down: bool,
+    },
+}
+
+/// Turns `text` into the key-down/key-up pairs that type it, or `None` if the text must be
+/// dropped (empty, longer than [`MAX_INPUT_TEXT_CHARS`], or containing control characters other
+/// than tab and newline). A newline becomes carriage return, which is what Enter produces.
+pub(crate) fn text_to_raw(text: &str) -> Option<Vec<RawInput>> {
+    if text.is_empty() || text.chars().count() > MAX_INPUT_TEXT_CHARS {
+        return None;
+    }
+    let mut batch = Vec::with_capacity(text.len().saturating_mul(2));
+    let mut units = [0u16; 2];
+    for c in text.chars() {
+        if c.is_control() && !matches!(c, '\t' | '\n') {
+            return None;
+        }
+        let c = if c == '\n' { '\r' } else { c };
+        for &unit in c.encode_utf16(&mut units).iter() {
+            batch.push(RawInput::Unicode { unit, down: true });
+            batch.push(RawInput::Unicode { unit, down: false });
+        }
+    }
+    Some(batch)
 }
 
 /// Delivers a batch of actions to the OS atomically (one `SendInput` call on Windows).
@@ -178,6 +207,11 @@ impl<S: InputSink> InputInjector for TrackingInjector<S> {
                 Ok(())
             }
             InputEvent::ReleaseAll => self.release_everything(),
+            InputEvent::Text { ref text } => match text_to_raw(text) {
+                // One atomic batch so a surrogate pair is never split by other input.
+                Some(batch) => self.sink.send(&batch),
+                None => Ok(()),
+            },
         }
     }
 }
@@ -214,6 +248,84 @@ pub(crate) mod tests {
         fn take(&self) -> Vec<Vec<RawInput>> {
             std::mem::take(&mut *self.batches.lock().unwrap())
         }
+    }
+
+    fn unicode_units(batch: &[RawInput]) -> Vec<(u16, bool)> {
+        batch
+            .iter()
+            .map(|r| match r {
+                RawInput::Unicode { unit, down } => (*unit, *down),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn text_is_one_batch_of_down_up_pairs() {
+        let (mut inj, sink) = injector();
+        inj.inject(&InputEvent::Text { text: "بa".into() }).unwrap();
+        let batches = sink.take();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(
+            unicode_units(&batches[0]),
+            vec![(0x0628, true), (0x0628, false), (0x61, true), (0x61, false)]
+        );
+        // Typing text never leaves anything held.
+        assert_eq!(inj.pressed_keys().count(), 0);
+    }
+
+    #[test]
+    fn text_outside_the_bmp_is_a_surrogate_pair() {
+        let (mut inj, sink) = injector();
+        inj.inject(&InputEvent::Text {
+            text: "😀".into()
+        })
+        .unwrap();
+        let batches = sink.take();
+        assert_eq!(
+            unicode_units(&batches[0]),
+            vec![
+                (0xD83D, true),
+                (0xD83D, false),
+                (0xDE00, true),
+                (0xDE00, false)
+            ]
+        );
+    }
+
+    #[test]
+    fn newline_becomes_carriage_return_and_tab_is_kept() {
+        let raw = text_to_raw("\n\t").unwrap();
+        assert_eq!(
+            unicode_units(&raw),
+            vec![(0x0D, true), (0x0D, false), (0x09, true), (0x09, false)]
+        );
+    }
+
+    #[test]
+    fn hostile_text_is_dropped() {
+        let (mut inj, sink) = injector();
+        for text in [
+            String::new(),
+            "a\u{1b}b".into(),
+            "x\0".into(),
+            "\u{7f}".into(),
+            "ب".repeat(MAX_INPUT_TEXT_CHARS + 1),
+        ] {
+            inj.inject(&InputEvent::Text { text }).unwrap();
+        }
+        assert!(sink.take().is_empty());
+        // The cap itself is allowed.
+        let max = "ب".repeat(MAX_INPUT_TEXT_CHARS);
+        inj.inject(&InputEvent::Text { text: max }).unwrap();
+        assert_eq!(sink.take()[0].len(), MAX_INPUT_TEXT_CHARS * 2);
+    }
+
+    #[test]
+    fn failed_text_send_is_reported() {
+        let (mut inj, sink) = injector();
+        *sink.fail.lock().unwrap() = true;
+        assert!(inj.inject(&InputEvent::Text { text: "a".into() }).is_err());
     }
 
     fn key(scancode: u16, extended: bool, down: bool) -> InputEvent {

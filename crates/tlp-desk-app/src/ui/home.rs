@@ -218,7 +218,7 @@ impl App {
             theme::column(ui, tx.rtl(), |ui| {
                 widgets::icon_heading(ui, tx, Icon::Monitor, tx.t(S::ConnectTitle));
                 ui.add_space(8.0);
-                let resp = theme::row(ui, tx.rtl(), |ui| {
+                theme::row(ui, tx.rtl(), |ui| {
                     let button_w = 130.0;
                     let field_w = (ui.available_width() - button_w - 12.0).max(120.0);
                     // In RTL the row flows right-to-left: field first (rightmost), then button.
@@ -240,7 +240,6 @@ impl App {
                     }
                     resp
                 });
-                widgets::edit_preview(ui, tx, &resp, &self.address);
                 ui.add_space(6.0);
                 // One-time code or permanent password (TLP-unattended).
                 let enter = self.unattended.connect_fields(ui, tx, &mut self.code);

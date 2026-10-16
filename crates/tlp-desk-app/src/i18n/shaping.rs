@@ -45,7 +45,7 @@ fn is_rtl_char(c: char) -> bool {
 }
 
 /// Characters egui resolves to the bundled Arabic font face (no other bundled font has them).
-fn uses_arabic_face(c: char) -> bool {
+pub(super) fn uses_arabic_face(c: char) -> bool {
     matches!(c as u32, 0x0600..=0x06FF | 0x0750..=0x077F | 0x0870..=0x08FF | 0xFB50..=0xFDFF
         | 0xFE70..=0xFEFF)
 }
@@ -59,7 +59,7 @@ pub fn is_arabic_mark(c: char) -> bool {
 
 /// Characters whose Unicode script is Arabic (not Common/Inherited). HarfBuzz guesses the run
 /// direction from the first such character; runs without one are shaped left-to-right.
-fn is_arabic_script(c: char) -> bool {
+pub(super) fn is_arabic_script(c: char) -> bool {
     uses_arabic_face(c)
         && !is_arabic_mark(c)
         && !matches!(c as u32, 0x060C | 0x061B | 0x061F | 0x0640 | 0x06DD)
@@ -67,7 +67,7 @@ fn is_arabic_script(c: char) -> bool {
 
 /// Bidi formatting characters (LRM/RLM, embeddings, isolates). They steer the algorithm but
 /// have no glyph, so they are removed from display output.
-fn is_bidi_control(c: char) -> bool {
+pub(super) fn is_bidi_control(c: char) -> bool {
     matches!(c as u32, 0x200E | 0x200F | 0x202A..=0x202E | 0x2066..=0x2069)
 }
 
@@ -248,7 +248,7 @@ fn push_reversed_clusters(out: &mut String, segment: &str, mirror_brackets: bool
 }
 
 /// Bidi mirroring for the paired punctuation we may show inside RTL runs.
-fn mirror(c: char) -> char {
+pub(super) fn mirror(c: char) -> char {
     match c {
         '(' => ')',
         ')' => '(',

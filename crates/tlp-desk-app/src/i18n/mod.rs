@@ -10,6 +10,7 @@
 //!
 //! Each piece of text must be shaped **exactly once**; never feed a display string back in.
 
+mod bidi_line;
 pub mod format;
 pub mod shaping;
 
@@ -17,6 +18,7 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+pub use bidi_line::{bidi_line, BidiLine};
 pub use format::DigitStyle;
 pub use shaping::{
     has_rtl, ltr_isolate, shape_for_display, shape_for_edit, visual_for_egui, BaseDir,
@@ -104,7 +106,7 @@ strings! {
     ThisDevice => "This device", "هذا الجهاز";
     DeviceId => "Device ID", "معرّف الجهاز";
     Copy => "Copy", "نسخ";
-    Copied => "Copied", "تم النسخ";
+    Copied => "Copied", "نُسخ";
     DeviceName => "Name", "الاسم";
     LocalAddress => "Local address", "العنوان المحلي";
     OneTimeCode => "One-time code", "رمز لمرة واحدة";
@@ -119,9 +121,8 @@ strings! {
     Searching => "Searching for devices…", "جارٍ البحث عن أجهزة…";
     Online => "Available", "متاح";
     Offline => "Unavailable", "غير متاح";
-    InputPreview => "Shown as:", "يظهر هكذا:";
     CodeHint => "One-time code (optional)", "رمز لمرة واحدة (اختياري)";
-    CodeFieldHint => "Leave it empty to ask the other side to accept.", "اتركه فارغاً ليُطلب من الطرف الآخر الموافقة.";
+    CodeFieldHint => "Leave it empty to ask the other side to accept.", "اتركه فارغًا ليُطلب من الطرف الآخر الموافقة.";
 
     // Connection progress / errors
     Connecting => "Connecting to {target}…", "جارٍ الاتصال بـ {target}…";
@@ -131,7 +132,7 @@ strings! {
     ErrNotFound => "Device not found on this network.", "لم يُعثر على الجهاز في هذه الشبكة.";
     ErrDeclined => "The connection was declined.", "رُفض طلب الاتصال.";
     ErrWrongCode => "Wrong code or password.", "الرمز أو كلمة المرور غير صحيحة.";
-    ErrRateLimited => "Too many attempts. Try again later.", "محاولات كثيرة. حاول لاحقاً.";
+    ErrRateLimited => "Too many attempts. Try again later.", "محاولات كثيرة. حاول لاحقًا.";
     ErrNotAllowed => "This device does not accept connections from you.", "هذا الجهاز لا يقبل اتصالات منك.";
     ErrVersion => "The other device runs an incompatible version.", "الجهاز الآخر يعمل بإصدار غير متوافق.";
     ErrUnreachable => "The device cannot be reached.", "تعذّر الوصول إلى الجهاز.";
@@ -141,12 +142,12 @@ strings! {
     ErrNotLan => "Only addresses on the local network can be used.", "لا يمكن استخدام إلا عناوين الشبكة المحلية.";
     ErrBadCode => "The one-time code has 6 digits.", "الرمز لمرة واحدة مكوّن من ٦ أرقام.";
     KeyChangedTitle => "Warning: this device's identity has changed", "تحذير: تغيّرت هوية هذا الجهاز";
-    KeyChangedBody => "{target} presented a different key than in earlier connections. Someone may be intercepting the connection, or the device was reinstalled. Continue only if you are sure it was reinstalled.", "قدّم {target} مفتاحاً مختلفاً عن المفتاح المحفوظ من الاتصالات السابقة. قد يكون هناك من يعترض الاتصال، أو أُعيد تثبيت الجهاز. لا تتابع إلا إذا كنت متأكداً من إعادة تثبيته.";
+    KeyChangedBody => "{target} presented a different key than in earlier connections. Someone may be intercepting the connection, or the device was reinstalled. Continue only if you are sure it was reinstalled.", "قدّم {target} مفتاحًا مختلفًا عن المفتاح المحفوظ من الاتصالات السابقة. قد يكون هناك من يعترض الاتصال، أو أُعيد تثبيت الجهاز. لا تتابع إلا إذا كنت متأكدًا من إعادة تثبيته.";
     KeyPrevious => "Remembered key", "المفتاح المحفوظ";
     KeyPresented => "Presented key", "المفتاح المقدَّم";
     ForgetKeyAndConnect => "Forget old key and connect", "انسَ المفتاح القديم واتصل";
-    ErrInvalidAddress => "Enter a 9-digit ID, a device name or an IP address.", "أدخل معرّفاً من ٩ أرقام أو اسم جهاز أو عنوان IP.";
-    Ok => "OK", "حسناً";
+    ErrInvalidAddress => "Enter a 9-digit ID, a device name or an IP address.", "أدخل معرّفًا من ٩ أرقام أو اسم جهاز أو عنوان IP.";
+    Ok => "OK", "حسنًا";
 
     // Incoming request (host side)
     IncomingTitle => "Incoming connection", "طلب اتصال وارد";
@@ -158,7 +159,7 @@ strings! {
     HostBanner => "{name} is connected to this device", "{name} متصل بهذا الجهاز";
     HostInputBlocked => "Remote typing and clicks are blocked by a window running as administrator (or a secure screen) on this PC. Switch to a normal window, or run TLP-Desk as a service.", "الكتابة والنقر عن بُعد محجوبان بسبب نافذة تعمل بصلاحيات المسؤول (أو شاشة آمنة) على هذا الجهاز. انتقل إلى نافذة عادية أو شغّل TLP-Desk كخدمة.";
     EndSession => "End session", "إنهاء الجلسة";
-    HostPortInUse => "Port {port} is already in use, probably by another running TLP-Desk. This device cannot accept connections, but you can still connect to other devices.", "المنفذ {port} مستخدم بالفعل، وربما يعمل TLP-Desk مسبقاً. لا يستطيع هذا الجهاز استقبال اتصالات، لكن ما زال بإمكانك الاتصال بأجهزة أخرى.";
+    HostPortInUse => "Port {port} is already in use, probably by another running TLP-Desk. This device cannot accept connections, but you can still connect to other devices.", "المنفذ {port} مستخدم بالفعل، ويُرجَّح أن نسخة أخرى من TLP-Desk تعمل. لا يستطيع هذا الجهاز استقبال اتصالات، لكن ما زال بإمكانك الاتصال بأجهزة أخرى.";
     HostUnavailable => "This device cannot accept connections: {detail}", "لا يستطيع هذا الجهاز استقبال اتصالات: {detail}";
     NoNetwork => "Networking is unavailable: {detail}", "الشبكة غير متاحة: {detail}";
 
@@ -186,8 +187,8 @@ strings! {
     UnitGB => "GB", "غ.ب";
     UnitTB => "TB", "ت.ب";
     SessionEnded => "The session has ended.", "انتهت الجلسة.";
-    KeysCaptured => "Keyboard goes to the remote PC", "لوحة المفاتيح موجّهة إلى الجهاز البعيد";
-    KeysCapturedHint => "Win, Alt+Tab and other system keys are sent to the remote PC while this window is focused.", "تُرسل مفاتيح النظام مثل Win وAlt+Tab إلى الجهاز البعيد ما دامت هذه النافذة نشطة.";
+    KeysCaptured => "Keyboard goes to the remote PC", "لوحة المفاتيح موجّهة إلى الحاسوب البعيد";
+    KeysCapturedHint => "Win, Alt+Tab and other system keys are sent to the remote PC while this window is focused.", "تُرسل مفاتيح النظام مثل Win وAlt+Tab إلى الحاسوب البعيد ما دامت هذه النافذة نشطة.";
     PermissionViewOnly => "The host allows viewing only.", "المضيف يسمح بالعرض فقط.";
     HostUsingInput => "The person at the other device is using the mouse or keyboard. Your control resumes when they stop.", "الشخص على الجهاز الآخر يستخدم الفأرة أو لوحة المفاتيح. يُستأنف تحكمك عندما يتوقف.";
     Screens => "Screen", "الشاشة";
@@ -202,7 +203,7 @@ strings! {
     // Digit ranges are LTR-isolated: after Arabic letters UAX #9 would show "0-9" as "9-0".
     DigitsWestern => "Western (0-9)", "غربية (\u{2066}0-9\u{2069})";
     DigitsArabicIndic => "Arabic-Indic (\u{2066}٠-٩\u{2069})", "هندية (\u{2066}٠-٩\u{2069})";
-    DigitsHint => "IDs, codes and addresses are always copied with 0-9 digits.", "تُنسخ المعرّفات والرموز والعناوين دائماً بالأرقام \u{2066}0-9\u{2069}.";
+    DigitsHint => "IDs, codes and addresses are always copied with 0-9 digits.", "تُنسخ المعرّفات والرموز والعناوين دائمًا بالأرقام \u{2066}0-9\u{2069}.";
     DeviceNameHint => "Other devices on the network see this name.", "تظهر هذه التسمية للأجهزة الأخرى على الشبكة.";
     Save => "Save", "حفظ";
     DeviceNameRestart => "Restart TLP-Desk to announce the new name on the network.", "أعد تشغيل TLP-Desk لإعلان الاسم الجديد على الشبكة.";
@@ -219,7 +220,7 @@ strings! {
     FsTitle => "Files", "الملفات";
     FsClose => "Close files", "إغلاق الملفات";
     FsThisPc => "This PC", "هذا الجهاز";
-    FsRemotePc => "Remote PC", "الجهاز البعيد";
+    FsRemotePc => "Remote PC", "الحاسوب البعيد";
     FsDrives => "Drives and folders", "الأقراص والمجلدات";
     FsForward => "Forward", "إلى الأمام";
     FsUp => "Up one folder", "المجلد الأعلى";
@@ -227,7 +228,7 @@ strings! {
     FsNewFolder => "New folder", "مجلد جديد";
     FsRename => "Rename", "إعادة تسمية";
     FsDelete => "Delete", "حذف";
-    FsUpload => "Copy to the remote PC", "نسخ إلى الجهاز البعيد";
+    FsUpload => "Copy to the remote PC", "نسخ إلى الحاسوب البعيد";
     FsDownload => "Copy to this PC", "نسخ إلى هذا الجهاز";
     FsName => "Name", "الاسم";
     FsSize => "Size", "الحجم";
@@ -248,23 +249,23 @@ strings! {
     FsRenameTitle => "Rename “{name}”", "إعادة تسمية «{name}»";
     FsInvalidName => "This name cannot be used for a file or folder.", "لا يمكن استخدام هذا الاسم لملف أو مجلد.";
     FsDeleteTitle => "Delete permanently?", "حذف نهائي؟";
-    FsDeleteBody => "{n} item(s) will be deleted permanently from {where}, including everything inside folders. This cannot be undone.", "سيُحذف {n} من العناصر نهائياً من {where}، مع كل ما في داخل المجلدات. لا يمكن التراجع عن ذلك.";
-    FsDeleteConfirm => "Delete permanently", "احذف نهائياً";
-    FsPickFolder => "Open a folder in both panes first.", "افتح مجلداً في الجهتين أولاً.";
-    FsPasteRemote => "Paste files copied on the remote PC", "الصق الملفات المنسوخة على الجهاز البعيد";
-    FsPasteRemoteHint => "{n} item(s) were copied on the remote PC. They are pasted into the folder open on this PC (or Downloads).", "نُسخ {n} من العناصر على الجهاز البعيد. تُلصق في المجلد المفتوح على هذا الجهاز (أو في التنزيلات).";
+    FsDeleteBody => "{n} item(s) will be deleted permanently from {where}, including everything inside folders. This cannot be undone.", "سيُحذف {n} من العناصر نهائيًا من {where}، مع كل ما في داخل المجلدات. لا يمكن التراجع عن ذلك.";
+    FsDeleteConfirm => "Delete permanently", "احذف نهائيًا";
+    FsPickFolder => "Open a folder in both panes first.", "افتح مجلدًا في الجهتين أولًا.";
+    FsPasteRemote => "Paste files copied on the remote PC", "الصق الملفات المنسوخة على الحاسوب البعيد";
+    FsPasteRemoteHint => "{n} item(s) were copied on the remote PC. They are pasted into the folder open on this PC (or Downloads).", "نُسخ {n} من العناصر على الحاسوب البعيد. تُلصق في المجلد المفتوح على هذا الجهاز (أو في التنزيلات).";
     FsPasteLocal => "Paste files copied on this PC", "الصق الملفات المنسوخة على هذا الجهاز";
     FsTransferStarted => "Copying {n} item(s)…", "جارٍ نسخ {n} من العناصر…";
     FsNothingToPaste => "No files are copied.", "لا توجد ملفات منسوخة.";
-    FsErrNotFound => "It no longer exists.", "لم يعد موجوداً.";
-    FsErrDenied => "Access denied.", "تم رفض الوصول.";
+    FsErrNotFound => "It no longer exists.", "لم يعد موجودًا.";
+    FsErrDenied => "Access denied.", "رُفض الوصول.";
     FsErrExists => "An item with this name already exists.", "يوجد عنصر بهذا الاسم بالفعل.";
-    FsErrNotEmpty => "The folder is not empty.", "المجلد ليس فارغاً.";
+    FsErrNotEmpty => "The folder is not empty.", "المجلد ليس فارغًا.";
     FsErrInvalidPath => "This path cannot be used.", "لا يمكن استخدام هذا المسار.";
     FsErrNoSpace => "The disk is full.", "القرص ممتلئ.";
     FsErrBusy => "The file is in use by another program.", "الملف قيد الاستخدام في برنامج آخر.";
-    FsErrNoPermission => "The remote PC does not allow file access in this session.", "لا يسمح الجهاز البعيد بالوصول إلى الملفات في هذه الجلسة.";
-    FsErrTimeout => "The remote PC did not answer in time.", "لم يستجب الجهاز البعيد في الوقت المحدد.";
+    FsErrNoPermission => "The remote PC does not allow file access in this session.", "لا يسمح الحاسوب البعيد بالوصول إلى الملفات في هذه الجلسة.";
+    FsErrTimeout => "The remote PC did not answer in time.", "لم يستجب الحاسوب البعيد في الوقت المحدد.";
     FsErrTransfers => "Copying files is not available in this version yet.", "نسخ الملفات غير متاح في هذا الإصدار بعد.";
     FsErrOther => "Error: {detail}", "خطأ: {detail}";
     CloseTransfers => "Hide the transfer list", "إخفاء قائمة النقل";
@@ -274,7 +275,7 @@ strings! {
     DropToSend => "Drop to send to {name}", "أفلت الملفات لإرسالها إلى {name}";
     NoTransfers => "No transfers yet. Drag files onto the window or use the buttons.", "لا توجد عمليات نقل بعد. اسحب الملفات إلى النافذة أو استخدم الأزرار.";
     TransferPreparing => "Preparing…", "جارٍ التحضير…";
-    TransferPaused => "Paused", "متوقف مؤقتاً";
+    TransferPaused => "Paused", "متوقف مؤقتًا";
     TransferDone => "Done", "اكتمل";
     TransferDoneFailures => "Done, {n} file(s) failed", "اكتمل، وتعذّر نقل {n} ملف";
     TransferCancelled => "Cancelled", "أُلغي";
@@ -308,32 +309,35 @@ strings! {
     ClipboardSyncHint => "Copied text, formatted text and images move between both devices while the host allows it.", "ينتقل النص المنسوخ والنص المنسّق والصور بين الجهازين ما دام المضيف يسمح بذلك.";
 
     // --- chat ---
-    Chat => "Chat", "الدردشة";
-    ChatWith => "Chat with {name}", "دردشة مع {name}";
+    Chat => "Chat", "المحادثة";
+    ChatWith => "Chat with {name}", "محادثة مع {name}";
     ChatInputHint => "Write a message…", "اكتب رسالة…";
     ChatSend => "Send", "إرسال";
-    ChatSendHint => "Enter sends, Shift+Enter starts a new line.", "يرسل Enter الرسالة، ويبدأ Shift+Enter سطراً جديداً.";
+    ChatSendHint => "Enter sends, Shift+Enter starts a new line.", "يرسل Enter الرسالة، ويبدأ Shift+Enter سطرًا جديدًا.";
     ChatEmpty => "No messages yet. Say hello!", "لا توجد رسائل بعد. ابدأ بالتحية!";
-    ChatOffViewer => "The other side has turned chat off.", "أوقف الطرف الآخر الدردشة.";
-    ChatOffHost => "Chat is turned off for this session.", "الدردشة متوقفة في هذه الجلسة.";
-    ChatTurnOff => "Turn off chat", "إيقاف الدردشة";
-    ChatTurnOn => "Allow chat", "السماح بالدردشة";
+    ChatOffViewer => "The other side has turned chat off.", "أوقف الطرف الآخر المحادثة.";
+    ChatOffHost => "Chat is turned off for this session.", "المحادثة متوقفة في هذه الجلسة.";
+    ChatTurnOff => "Turn off chat", "إيقاف المحادثة";
+    ChatTurnOn => "Allow chat", "السماح بالمحادثة";
     ChatTooLong => "Too long: at most {max} characters.", "الرسالة طويلة: الحد الأقصى {max} حرف.";
     ChatCount => "{count} / {max}", "{count} / {max} حرف";
     ChatRateLimited => "You are sending too fast. Wait a moment.", "ترسل بسرعة كبيرة. انتظر لحظة.";
-    ChatUnavailable => "Chat is not available in this session.", "الدردشة غير متاحة في هذه الجلسة.";
+    ChatUnavailable => "Chat is not available in this session.", "المحادثة غير متاحة في هذه الجلسة.";
     ChatUnread => "{count} unread", "{count} غير مقروءة";
     TimeAm => "AM", "ص";
     TimePm => "PM", "م";
 
     // --- audio ---
-    AudioMute => "Mute the remote sound", "كتم صوت الجهاز البعيد";
-    AudioUnmute => "Play the remote sound", "تشغيل صوت الجهاز البعيد";
+    AudioMute => "Mute the remote sound", "كتم صوت الحاسوب البعيد";
+    AudioUnmute => "Play the remote sound", "تشغيل صوت الحاسوب البعيد";
     AudioNotAllowed => "The other device does not share its sound.", "لا يشارك الجهاز الآخر صوته.";
     AudioVolume => "Volume", "مستوى الصوت";
-    AudioDeviceFailed => "The remote sound cannot be played: no audio output device is available.", "تعذّر تشغيل صوت الجهاز البعيد: لا يتوفر جهاز لإخراج الصوت.";
+    AudioDeviceFailed => "The remote sound cannot be played: no audio output device is available.", "تعذّر تشغيل صوت الحاسوب البعيد: لا يتوفر جهاز لإخراج الصوت.";
+    TypingSettings => "Typing", "الكتابة";
+    TypeWithMyLayout => "Type text using my keyboard layout", "الكتابة بتخطيط لوحة المفاتيح لدي";
+    TypeWithMyLayoutHint => "Letters are sent as text, so Arabic typed here appears as Arabic even if the other PC uses an English layout. Shortcuts and special keys still work as usual.", "تُرسل الحروف نصًا، فيظهر ما تكتبه بالعربية هنا عربيًا حتى لو كان تخطيط الجهاز الآخر إنجليزيًا. وتبقى الاختصارات والمفاتيح الخاصة تعمل كالمعتاد.";
     AudioSettings => "Sound", "الصوت";
-    AudioOnConnect => "Play the remote computer's sound when connecting", "تشغيل صوت الجهاز البعيد عند الاتصال";
+    AudioOnConnect => "Play the remote computer's sound when connecting", "تشغيل صوت الحاسوب البعيد عند الاتصال";
     AudioOnConnectHint => "Sound plays only if the other device allows it. You can mute it at any time from the session toolbar.", "لا يُشغَّل الصوت إلا إذا سمح به الجهاز الآخر، ويمكنك كتمه في أي وقت من شريط أدوات الجلسة.";
 
     // --- service ---
@@ -360,8 +364,8 @@ strings! {
     PrivacyConfirmTitle => "Turn on privacy mode?", "تشغيل وضع الخصوصية؟";
     // Short sentences: RTL labels do not wrap (see theme::apply_lang).
     PrivacyConfirmScreen => "The screen of {name} turns black and its keyboard and mouse stop working.", "ستصبح شاشة {name} سوداء وتتوقف لوحة مفاتيحه وفأرته.";
-    PrivacyConfirmControl => "You keep seeing and controlling it.", "وتبقى أنت قادراً على رؤيته والتحكم به.";
-    PrivacyConfirmExit => "Someone there can end it: hold Ctrl+Alt+Shift+P for 3 s, or press Ctrl+Alt+Del.", "ويمكن لمن عنده إنهاؤه بالضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ، أو Ctrl+Alt+Del.";
+    PrivacyConfirmControl => "You keep seeing and controlling it.", "وتبقى أنت قادرًا على رؤيته والتحكم به.";
+    PrivacyConfirmExit => "Someone there can end it: hold Ctrl+Alt+Shift+P for 3 s, or press Ctrl+Alt+Del.", "ويمكن لمن عنده إنهاؤه بالضغط المستمر على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ، أو Ctrl+Alt+Del.";
     PrivacyTurnOn => "Turn on", "تشغيل";
     PrivacyOnBanner => "Privacy mode is on: the other screen is black, its keyboard and mouse are blocked.", "وضع الخصوصية مفعّل: شاشة الجهاز الآخر سوداء ولوحة مفاتيحه وفأرته معطّلة.";
     PrivacyEnded => "Privacy mode is off: ended on the other device, or not available there.", "وضع الخصوصية متوقف: أُنهي من الجهاز الآخر أو أنه غير متاح هناك.";
@@ -369,7 +373,7 @@ strings! {
     // Shown on the black privacy screen of the host, always in both languages.
     PrivacyScreenTitle => "This PC is being used remotely with TLP-Desk", "هذا الحاسوب قيد الاستخدام عن بُعد عبر TLP-Desk";
     PrivacyScreenViewer => "Connected: {name} ({id})", "متصل: {name} ({id})";
-    PrivacyScreenExit => "To end privacy mode here, hold Ctrl+Alt+Shift+P for 3 seconds or press Ctrl+Alt+Del.", "لإنهاء وضع الخصوصية من هنا، اضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ أو اضغط Ctrl+Alt+Del.";
+    PrivacyScreenExit => "To end privacy mode here, hold Ctrl+Alt+Shift+P for 3 seconds or press Ctrl+Alt+Del.", "لإنهاء وضع الخصوصية من هنا، اضغط باستمرار على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ أو اضغط Ctrl+Alt+Del.";
 
     // --- settings/ux ---
     // Settings sections (TLP-settings-tray)
@@ -378,7 +382,7 @@ strings! {
     SettingsQuality => "Picture quality", "جودة الصورة";
     SettingsStartup => "Start-up and notification area", "بدء التشغيل ومنطقة الإشعارات";
     IncomingEnabled => "Accept incoming connections", "استقبال الاتصالات الواردة";
-    IncomingPaused => "Incoming connections are paused. Other devices cannot connect to this one.", "الاتصالات الواردة متوقفة مؤقتاً. لا تستطيع الأجهزة الأخرى الاتصال بهذا الجهاز.";
+    IncomingPaused => "Incoming connections are paused. Other devices cannot connect to this one.", "الاتصالات الواردة متوقفة مؤقتًا. لا تستطيع الأجهزة الأخرى الاتصال بهذا الجهاز.";
     DefaultPermissions => "What connected devices may do", "ما يُسمح للأجهزة المتصلة بفعله";
     DefaultPermissionsHint => "Applies to the next connection. You can take any of these back during a session.", "يُطبَّق على الاتصال التالي، ويمكنك سحب أي منها أثناء الجلسة.";
     PermView => "See the screen", "رؤية الشاشة";
@@ -396,16 +400,16 @@ strings! {
     AcceptTimeout => "Decline unanswered requests after", "رفض الطلبات التي لم يُرَدّ عليها بعد";
     UnitSeconds => "s", "ث";
     AllowOneTimeCode => "Allow connecting with the one-time code", "السماح بالاتصال بالرمز لمرة واحدة";
-    LocalGrace => "Pause remote control after I use my own mouse or keyboard for", "إيقاف التحكم عن بُعد مؤقتاً بعد استخدامي للفأرة أو لوحة المفاتيح لمدة";
+    LocalGrace => "Pause remote control after I use my own mouse or keyboard for", "إيقاف التحكم عن بُعد مؤقتًا بعد استخدامي للفأرة أو لوحة المفاتيح لمدة";
     PointerMarker => "Show where the remote pointer is on this screen", "إظهار موضع مؤشر الطرف البعيد على هذه الشاشة";
     AllowListHint => "Only devices whose address is inside one of these ranges can connect to this device.", "لا يمكن الاتصال بهذا الجهاز إلا من أجهزة تقع عناوينها ضمن أحد هذه النطاقات.";
     AllowListPlaceholder => "e.g. 192.168.1.0/24", "مثال: \u{2066}192.168.1.0/24\u{2069}";
     AllowListAdd => "Add", "إضافة";
     AllowListRemove => "Remove", "إزالة";
     AllowListReset => "Restore defaults", "استعادة الافتراضي";
-    AllowListInvalid => "Enter an address or a range such as 192.168.1.0/24.", "أدخل عنواناً أو نطاقاً مثل \u{2066}192.168.1.0/24\u{2069}.";
+    AllowListInvalid => "Enter an address or a range such as 192.168.1.0/24.", "أدخل عنوانًا أو نطاقًا مثل \u{2066}192.168.1.0/24\u{2069}.";
     AllowListDuplicate => "This range is already in the list.", "هذا النطاق موجود في القائمة.";
-    AllowListPublic => "{range} includes addresses outside the local network. Add it only if you are sure.", "يتضمن النطاق {range} عناوين خارج الشبكة المحلية. لا تضفه إلا إذا كنت متأكداً.";
+    AllowListPublic => "{range} includes addresses outside the local network. Add it only if you are sure.", "يتضمن النطاق {range} عناوين خارج الشبكة المحلية. لا تضفه إلا إذا كنت متأكدًا.";
     AllowListAddAnyway => "Add anyway", "إضافة رغم ذلك";
     AllowListLast => "At least one range is needed. To refuse everyone, turn off incoming connections.", "يلزم نطاق واحد على الأقل. لرفض الجميع أوقف استقبال الاتصالات الواردة.";
     QualitySpeed => "Speed", "السرعة";
@@ -413,7 +417,7 @@ strings! {
     QualityBest => "Quality", "الجودة";
     QualityHint => "Used when you connect to another device.", "يُستخدم عند اتصالك بجهاز آخر.";
     StartWithWindows => "Start TLP-Desk when I sign in to Windows", "تشغيل TLP-Desk عند تسجيل الدخول إلى Windows";
-    StartMinimized => "Start hidden in the notification area", "البدء مخفياً في منطقة الإشعارات";
+    StartMinimized => "Start hidden in the notification area", "البدء مخفيًا في منطقة الإشعارات";
     CloseToTray => "Keep running in the notification area when I close the window", "الاستمرار في العمل في منطقة الإشعارات عند إغلاق النافذة";
     AutostartFailed => "Could not change the start-up setting: {detail}", "تعذّر تغيير إعداد بدء التشغيل: {detail}";
     // Tray (TLP-settings-tray)
@@ -465,9 +469,9 @@ strings! {
     // --- power ---
 
     // --- unattended ---
-    UnattendedTitle => "Unattended access", "الوصول دون مرافقة";
+    UnattendedTitle => "Unattended access", "الوصول غير المراقَب";
     UnattendedHint => "With a permanent password you can connect to this device when nobody is there to accept.", "بكلمة مرور دائمة يمكنك الاتصال بهذا الجهاز حتى لو لم يكن أحد بجانبه ليوافق.";
-    PasswordIsSet => "A permanent password is set.", "تم تعيين كلمة مرور دائمة.";
+    PasswordIsSet => "A permanent password is set.", "عُيِّنت كلمة مرور دائمة.";
     PasswordNotSet => "No permanent password is set.", "لم تُعيَّن كلمة مرور دائمة.";
     CurrentPassword => "Current password", "كلمة المرور الحالية";
     NewPassword => "New password", "كلمة المرور الجديدة";
@@ -478,7 +482,7 @@ strings! {
     ShowPassword => "Show password", "إظهار كلمة المرور";
     HidePassword => "Hide password", "إخفاء كلمة المرور";
     PasswordStrength => "Strength: {level}", "القوة: {level}";
-    StrengthTooShort => "too short (at least {n} characters)", "قصيرة جداً (\u{2066}{n}\u{2069} أحرف على الأقل)";
+    StrengthTooShort => "too short (at least {n} characters)", "قصيرة جدًا (\u{2066}{n}\u{2069} أحرف على الأقل)";
     StrengthWeak => "weak", "ضعيفة";
     StrengthFair => "fair", "مقبولة";
     StrengthStrong => "strong", "قوية";
@@ -494,31 +498,31 @@ strings! {
     SignInCode => "One-time code", "رمز لمرة واحدة";
     SignInPassword => "Password", "كلمة المرور";
     PasswordFieldHint => "The other device's permanent password", "كلمة المرور الدائمة للجهاز الآخر";
-    PasswordFieldNote => "The password is never sent: both sides only prove they know it.", "لا تُرسل كلمة المرور أبداً: يثبت الطرفان فقط أنهما يعرفانها.";
+    PasswordFieldNote => "The password is never sent: both sides only prove they know it.", "لا تُرسل كلمة المرور أبدًا: يثبت الطرفان فقط أنهما يعرفانها.";
     ErrPasswordEmpty => "Enter the password.", "أدخل كلمة المرور.";
-    ErrLockedOut => "Too many wrong attempts. You are locked out for {minutes} minutes.", "محاولات خاطئة كثيرة. تم إيقافك لمدة \u{2066}{minutes}\u{2069} دقائق.";
+    ErrLockedOut => "Too many wrong attempts. You are locked out for {minutes} minutes.", "محاولات خاطئة كثيرة. أُوقف دخولك لمدة \u{2066}{minutes}\u{2069} دقائق.";
     SystemMenu => "System", "النظام";
-    RestartRemote => "Restart remote PC", "إعادة تشغيل الجهاز البعيد";
-    LockRemote => "Lock remote PC", "قفل الجهاز البعيد";
+    RestartRemote => "Restart remote PC", "إعادة تشغيل الحاسوب البعيد";
+    LockRemote => "Lock remote PC", "قفل الحاسوب البعيد";
     SendCtrlAltDel => "Send Ctrl+Alt+Del", "إرسال Ctrl+Alt+Del";
-    CtrlAltDelHint => "Needs the TLP-Desk service on the remote PC.", "يتطلب خدمة TLP-Desk على الجهاز البعيد.";
+    CtrlAltDelHint => "Needs the TLP-Desk service on the remote PC.", "يتطلب خدمة TLP-Desk على الحاسوب البعيد.";
     SystemNotAllowed => "The other device does not allow this.", "الجهاز الآخر لا يسمح بذلك.";
-    RestartConfirmTitle => "Restart the remote PC?", "إعادة تشغيل الجهاز البعيد؟";
-    RestartConfirmBody => "All programs on {name} will be closed and unsaved work will be lost. TLP-Desk reconnects automatically when the PC is back.", "ستُغلق كل البرامج على {name} وسيضيع العمل غير المحفوظ. يعيد TLP-Desk الاتصال تلقائياً عند عودة الجهاز.";
+    RestartConfirmTitle => "Restart the remote PC?", "إعادة تشغيل الحاسوب البعيد؟";
+    RestartConfirmBody => "All programs on {name} will be closed and unsaved work will be lost. TLP-Desk reconnects automatically when the PC is back.", "ستُغلق كل البرامج على {name} وسيضيع العمل غير المحفوظ. يعيد TLP-Desk الاتصال تلقائيًا عند عودة الجهاز.";
     RestartConfirm => "Restart", "إعادة التشغيل";
-    LockConfirmTitle => "Lock the remote PC?", "قفل الجهاز البعيد؟";
+    LockConfirmTitle => "Lock the remote PC?", "قفل الحاسوب البعيد؟";
     LockConfirmBody => "{name} will be locked. Whoever uses it must sign in again.", "سيُقفل {name}. على من يستخدمه تسجيل الدخول من جديد.";
     LockConfirm => "Lock", "قفل";
-    RestartRequested => "Restart requested. Waiting for the remote PC to go down…", "طُلبت إعادة التشغيل. بانتظار توقف الجهاز البعيد…";
-    Restarting => "Restarting… waiting for the remote PC", "جارٍ إعادة التشغيل… بانتظار الجهاز البعيد";
+    RestartRequested => "Restart requested. Waiting for the remote PC to go down…", "طُلبت إعادة التشغيل. بانتظار توقف الحاسوب البعيد…";
+    Restarting => "Restarting… waiting for the remote PC", "جارٍ إعادة التشغيل… بانتظار الحاسوب البعيد";
     RestartingAttempt => "Reconnect attempt {n}", "محاولة إعادة الاتصال {n}";
-    RestartingNote => "Before anyone signs in, this works only if the TLP-Desk service is installed on the remote PC.", "قبل أن يسجّل أحد الدخول، لا يعمل هذا إلا إذا كانت خدمة TLP-Desk مثبتة على الجهاز البعيد.";
+    RestartingNote => "Before anyone signs in, this works only if the TLP-Desk service is installed on the remote PC.", "قبل أن يسجّل أحد الدخول، لا يعمل هذا إلا إذا كانت خدمة TLP-Desk مثبتة على الحاسوب البعيد.";
     StopWaiting => "Stop waiting", "إيقاف الانتظار";
-    ReconnectFailedText => "The remote PC did not come back: {detail}", "لم يعد الجهاز البعيد: {detail}";
+    ReconnectFailedText => "The remote PC did not come back: {detail}", "لم يعد الحاسوب البعيد: {detail}";
     // --- address book + Wake-on-LAN (TLP-addressbook) ---
     AbTitle => "Address book", "دفتر العناوين";
     AbSearchHint => "Search by name, group, ID or IP", "ابحث بالاسم أو المجموعة أو المعرّف أو IP";
-    AbEmpty => "No saved devices yet. Save one from the devices on this network or after connecting to it.", "لا توجد أجهزة محفوظة بعد. احفظ جهازاً من الأجهزة على هذه الشبكة أو بعد الاتصال به.";
+    AbEmpty => "No saved devices yet. Save one from the devices on this network or after connecting to it.", "لا توجد أجهزة محفوظة بعد. احفظ جهازًا من الأجهزة على هذه الشبكة أو بعد الاتصال به.";
     AbNoMatches => "No saved device matches your search.", "لا يوجد جهاز محفوظ يطابق بحثك.";
     AbAllGroups => "All devices", "كل الأجهزة";
     AbFavorites => "Favorites", "المفضّلة";
@@ -549,16 +553,16 @@ strings! {
     AbNotes => "Notes", "ملاحظات";
     AbMac => "MAC address", "عنوان MAC";
     AbMacHint => "For Wake-on-LAN, like 00:1a:2b:3c:4d:5e", "للإيقاظ عبر الشبكة، مثل \u{2066}00:1a:2b:3c:4d:5e\u{2069}";
-    AbMacLearned => "learned automatically", "عُرف تلقائياً";
+    AbMacLearned => "learned automatically", "عُرف تلقائيًا";
     AbLastAddresses => "Last addresses", "آخر العناوين";
     AbLastConnected => "Last connected", "آخر اتصال";
     AbPinnedKey => "Pinned key", "المفتاح المثبَّت";
-    AbNever => "Never", "لم يحدث";
+    AbNever => "Never", "أبدًا";
     AbErrBadId => "Enter a 9-digit device ID.", "أدخل معرّف جهاز من ٩ أرقام.";
-    AbErrBadMac => "This is not a valid MAC address.", "هذا ليس عنوان MAC صالحاً.";
+    AbErrBadMac => "This is not a valid MAC address.", "هذا ليس عنوان MAC صالحًا.";
     AbErrDuplicate => "This device is already in the address book.", "هذا الجهاز موجود في دفتر العناوين.";
     AbDeleteTitle => "Delete device", "حذف الجهاز";
-    AbDeleteBody => "Remove {name} from the address book? Its pinned key stays trusted.", "هل تريد إزالة {name} من دفتر العناوين؟ سيبقى مفتاحه المثبَّت موثوقاً.";
+    AbDeleteBody => "Remove {name} from the address book? Its pinned key stays trusted.", "هل تريد إزالة {name} من دفتر العناوين؟ سيبقى مفتاحه المثبَّت موثوقًا.";
     AbImport => "Import", "استيراد";
     AbExport => "Export", "تصدير";
     AbImportTitle => "Import an address book", "استيراد دفتر عناوين";
@@ -568,7 +572,7 @@ strings! {
     AbExportDone => "The address book was exported to {path}", "صُدّر دفتر العناوين إلى {path}";
     AbFileError => "File error: {detail}", "خطأ في الملف: {detail}";
     AbSaveError => "Could not save the address book: {detail}", "تعذّر حفظ دفتر العناوين: {detail}";
-    AbRecovered => "The address book file was damaged. It was kept as {path}.", "كان ملف دفتر العناوين تالفاً، وحُفظت نسخة منه باسم {path}.";
+    AbRecovered => "The address book file was damaged. It was kept as {path}.", "كان ملف دفتر العناوين تالفًا، وحُفظت نسخة منه باسم {path}.";
     AbRestoredBackup => "The address book was restored from its backup copy.", "استُعيد دفتر العناوين من نسخته الاحتياطية.";
     AbOfferSave => "Save {name} to the address book?", "هل تريد حفظ {name} في دفتر العناوين؟";
     AbNotNow => "Not now", "ليس الآن";
@@ -584,7 +588,7 @@ strings! {
     AgoDay1 => "1 day ago", "منذ يوم";
     AgoDay2 => "2 days ago", "منذ يومين";
     AgoDaysFew => "{n} days ago", "منذ {n} أيام";
-    AgoDaysMany => "{n} days ago", "منذ {n} يوماً";
+    AgoDaysMany => "{n} days ago", "منذ {n} يومًا";
     AgoDaysOther => "{n} days ago", "منذ {n} يوم";
     // --- device info (TLP-cli-devinfo) ---
     DeviceInfoTitle => "Device info", "معلومات الجهاز";
@@ -604,33 +608,33 @@ strings! {
     UptimeHours => "{h} h {m} min", "{h} س {m} د";
     UptimeMinutes => "{m} min", "{m} د";
     // Port forwarding (TLP-tunnel)
-    PortForwarding => "Port forwarding", "إعادة توجيه المنافذ";
-    TunnelHint => "Open a port on this PC that leads to a service on the remote PC, for example its local web server.", "افتح منفذاً على هذا الجهاز يوصل إلى خدمة على الجهاز البعيد، مثل خادم الويب المحلي فيه.";
+    PortForwarding => "Port forwarding", "تمرير المنافذ";
+    TunnelHint => "Open a port on this PC that leads to a service on the remote PC, for example its local web server.", "افتح منفذًا على هذا الجهاز يوصل إلى خدمة على الحاسوب البعيد، مثل خادم الويب المحلي فيه.";
     TunnelLocalPort => "Port on this PC", "المنفذ على هذا الجهاز";
     TunnelRemoteHost => "Remote address", "العنوان البعيد";
-    TunnelRemoteHostHint => "127.0.0.1 = the remote PC itself", "\u{2066}127.0.0.1\u{2069} تعني الجهاز البعيد نفسه";
+    TunnelRemoteHostHint => "127.0.0.1 = the remote PC itself", "\u{2066}127.0.0.1\u{2069} تعني الحاسوب البعيد نفسه";
     TunnelRemotePort => "Remote port", "المنفذ البعيد";
-    TunnelAdd => "Start forwarding", "بدء التوجيه";
+    TunnelAdd => "Start forwarding", "بدء التمرير";
     TunnelStop => "Stop", "إيقاف";
     TunnelLanBind => "Let other devices on my network use this port", "السماح للأجهزة الأخرى على شبكتي باستخدام هذا المنفذ";
     TunnelLanBindWarning => "Anyone on your network can then reach the remote service through this PC.", "عندها يستطيع أي شخص على شبكتك الوصول إلى الخدمة البعيدة عبر هذا الجهاز.";
-    TunnelNone => "No port is forwarded yet.", "لا يوجد منفذ موجَّه بعد.";
-    TunnelRuleStats => "{open} open, {total} total, sent {sent}, received {received}", "{open} مفتوح، {total} إجمالاً، أُرسل {sent}، استُقبل {received}";
+    TunnelNone => "No port is forwarded yet.", "لا يوجد منفذ ممرَّر بعد.";
+    TunnelRuleStats => "{open} open, {total} total, sent {sent}, received {received}", "{open} مفتوح، {total} إجمالًا، أُرسل {sent}، استُقبل {received}";
     TunnelFailedCount => "{n} failed", "{n} فشل";
-    TunnelBadPort => "Enter a port between 1 and 65535.", "أدخل منفذاً بين ١ و٦٥٥٣٥.";
-    TunnelErrNotAllowed => "The other side has not allowed port forwarding.", "لم يسمح الطرف الآخر بإعادة توجيه المنافذ.";
-    TunnelErrRevoked => "The other side stopped port forwarding.", "أوقف الطرف الآخر إعادة توجيه المنافذ.";
+    TunnelBadPort => "Enter a port between 1 and 65535.", "أدخل منفذًا بين ١ و٦٥٥٣٥.";
+    TunnelErrNotAllowed => "The other side has not allowed port forwarding.", "لم يسمح الطرف الآخر بتمرير المنافذ.";
+    TunnelErrRevoked => "The other side stopped port forwarding.", "أوقف الطرف الآخر تمرير المنافذ.";
     TunnelErrLocalPort => "This port cannot be opened on this PC: {detail}", "تعذّر فتح هذا المنفذ على هذا الجهاز: {detail}";
     TunnelErrTargetNotAllowed => "Only addresses on the remote PC's local network can be reached.", "لا يمكن الوصول إلا إلى عناوين الشبكة المحلية للجهاز البعيد.";
     TunnelErrBadTarget => "Enter the remote address as an IP address, for example 192.168.1.10.", "أدخل العنوان البعيد كعنوان IP، مثل \u{2066}192.168.1.10\u{2069}.";
-    TunnelErrTooMany => "Too many forwarded ports.", "عدد المنافذ الموجَّهة كبير جداً.";
+    TunnelErrTooMany => "Too many forwarded ports.", "عدد المنافذ الممرَّرة كبير جدًا.";
     TunnelErrNoAnswer => "The other side did not answer.", "لم يُجب الطرف الآخر.";
-    TunnelErrOther => "Port forwarding failed: {detail}", "فشلت إعادة توجيه المنافذ: {detail}";
-    HostTunnelsAllow => "Allow port forwarding", "السماح بإعادة توجيه المنافذ";
-    HostTunnelsActive => "{n} forwarded connections open", "{n} اتصالات موجَّهة مفتوحة";
+    TunnelErrOther => "Port forwarding failed: {detail}", "فشلت تمرير المنافذ: {detail}";
+    HostTunnelsAllow => "Allow port forwarding", "السماح بتمرير المنافذ";
+    HostTunnelsActive => "{n} forwarded connections open", "{n} اتصالات ممرَّرة مفتوحة";
     // whiteboard (TLP-whiteboard)
     WbDraw => "Draw on screen", "الرسم على الشاشة";
-    WbDrawHint => "While drawing, the mouse draws on the other device's screen instead of controlling it.", "أثناء الرسم يرسم الفأر على شاشة الجهاز الآخر بدلاً من التحكم به.";
+    WbDrawHint => "While drawing, the mouse draws on the other device's screen instead of controlling it.", "أثناء الرسم ترسم الفأرة على شاشة الجهاز الآخر بدلًا من التحكم به.";
     WbNotAllowed => "The other device does not allow drawing on its screen.", "لا يسمح الجهاز الآخر بالرسم على شاشته.";
     WbPen => "Pen", "قلم";
     WbHighlighter => "Highlighter", "قلم تمييز";
@@ -659,7 +663,7 @@ strings! {
     RecStop => "Stop recording", "إيقاف التسجيل";
     RecActive => "Recording {time}", "جارٍ التسجيل {time}";
     RecStarting => "Starting the recording…", "جارٍ بدء التسجيل…";
-    RecErrDiskFull => "Recording stopped: the disk is almost full.", "توقف التسجيل: القرص ممتلئ تقريباً.";
+    RecErrDiskFull => "Recording stopped: the disk is almost full.", "توقف التسجيل: القرص ممتلئ تقريبًا.";
     RecErrNoFolder => "Recording is not possible: no folder for videos was found.", "التسجيل غير ممكن: لم يُعثر على مجلد للفيديو.";
     RecErrFailed => "Recording failed: {detail}", "فشل التسجيل: {detail}";
     Recordings => "Recordings", "التسجيلات";
@@ -671,7 +675,7 @@ strings! {
     RecPause => "Pause", "إيقاف مؤقت";
     RecDelete => "Delete", "حذف";
     RecDeleteTitle => "Delete this recording?", "حذف هذا التسجيل؟";
-    RecDeleteBody => "{name} will be deleted permanently.", "سيُحذف {name} نهائياً.";
+    RecDeleteBody => "{name} will be deleted permanently.", "سيُحذف {name} نهائيًا.";
     RecIncomplete => "Interrupted", "منقطع";
     RecRepair => "Repair", "إصلاح";
     RecRepairHint => "The recording was interrupted. Repairing finishes the file so every player can open it.", "انقطع التسجيل. الإصلاح يُكمل الملف ليفتحه أي مشغّل.";

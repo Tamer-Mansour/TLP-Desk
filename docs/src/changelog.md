@@ -12,13 +12,18 @@ protocol bump is called out below.
 
 First release candidate: every roadmap feature for Windows is implemented and covered by
 automated tests (`cargo test --workspace`, clippy, fmt, cargo-deny and typos are clean) and a
-one-PC end-to-end [system test](dev/system-test-report.md). Wire protocol v5. What still needs
+one-PC end-to-end [system test](dev/system-test-report.md). Wire protocol v6. What still needs
 two real PCs (privacy overlay, service and lock screen, Ctrl+Alt+Del, restart and reconnect,
 real audio, clipboard and Explorer paste, Wake-on-LAN, Wi-Fi performance) is listed in the
 [manual test checklist](user-guide/en/manual-test.md). Not included yet: Linux, macOS and Android,
-a landing page and an MSI.
+an MSI (not planned, see ADR 0008).
 
 ### Added
+
+- **Arabic text fields behave while you type.** Fields that contain Arabic (address box, device name, search boxes, rename fields, chat, address-book notes) are edited by a new bidi-aware editor: words in the right visual order, a caret and selection that follow the arrow keys on screen, wrapping for multi-line fields. The "Shown as:" preview is gone.
+- **Protocol v6, `InputEvent::Text`.** Unicode text typed on the host with `SendInput` (`KEYEVENTF_UNICODE`, surrogate pairs), gated by the keyboard permission. The viewer sends IME commits, emoji and composed text this way, and a new setting **Type text using my keyboard layout** sends every typed character as text so Arabic typed on the viewer appears as Arabic whatever the host layout is. Alt+Shift and Win+Space still switch the host layout. Linux and macOS hosts do not type Unicode yet.
+- **Shared host hooks.** Several simultaneous viewers now share one local-activity hook set and one remote-pointer marker (labelled with the names of the viewers moving the pointer).
+- **Landing page** in English and Arabic (`docs/site/`), published at the GitHub Pages root with the book under `/book/`.
 
 - **Linux host and viewer (X11).** Screen capture through X11 `GetImage` with RandR monitors, the XFixes cursor and a CPU downscale for the size cap; input through XTest with an evdev key table; an `XGrabKeyboard` viewer keyboard grab; system sound from the PulseAudio/PipeWire monitor source (never the microphone); Wake-on-LAN MAC lookup from `/proc/net/arp`; XDG data and autostart folders; the xdg-desktop-portal file picker; a tarball with `install.sh` and a `.desktop` entry; a Linux CI job. Cross-compiled and linted for `x86_64-unknown-linux-gnu` from Windows, not yet run on real Linux machines. Wayland screen sharing (ScreenCast portal + PipeWire), privacy mode, the pointer marker, the host whiteboard overlay, local-input priority and the tray icon are not available on Linux yet. See [Linux](dev/linux.md). No wire change.
 
@@ -116,6 +121,9 @@ a landing page and an MSI.
 - `connect --type TEXT --then-ctrl S` types US-layout scancodes into the host for testing.
 
 ### Changed
+
+- **Arabic wording review.** One Arabic term per concept across the interface, the user guide and the landing page (terminology table in the contributor docs); a native-speaker review is still recommended.
+- Service notices are documented as localized; the Windows Event Log is not used.
 
 - Product renamed to **TLP-Desk** everywhere users see it (window title, executables, installer,
   firewall rules). Crate names, the mDNS service type, the ALPN and other wire identifiers are

@@ -56,6 +56,10 @@ pub struct Settings {
     /// is requested, and plays only if the host grants the `AUDIO` permission.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mute_remote_audio: bool,
+    /// Viewer typing sends characters as Unicode text (this device's layout) instead of key
+    /// scancodes (the host's layout). See `text_route`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub type_with_my_layout: bool,
 }
 
 impl Default for Settings {
@@ -70,6 +74,7 @@ impl Default for Settings {
             startup: StartupSettings::default(),
             clipboard_sync_off: false,
             mute_remote_audio: false,
+            type_with_my_layout: false,
         }
     }
 }

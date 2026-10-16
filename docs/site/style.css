@@ -1,0 +1,88 @@
+/* TLP-Desk landing page. Static, no external fonts, scripts or CDNs. */
+:root {
+  --bg: #f6f8fb;
+  --surface: #ffffff;
+  --text: #16202c;
+  --muted: #55657a;
+  --accent: #1f6feb;
+  --accent-text: #ffffff;
+  --border: #d9e0ea;
+  --hero: linear-gradient(160deg, #eaf2ff 0%, #f6f8fb 70%);
+  --shadow: 0 10px 30px rgba(20, 40, 80, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e141b;
+    --surface: #151d27;
+    --text: #e8eef6;
+    --muted: #9fb0c3;
+    --accent: #4c9aff;
+    --accent-text: #06101d;
+    --border: #263341;
+    --hero: linear-gradient(160deg, #13253b 0%, #0e141b 70%);
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans Arabic", "Noto Sans", Tahoma, Arial, sans-serif;
+  line-height: 1.65;
+}
+a { color: var(--accent); }
+.wrap { max-width: 1060px; margin: 0 auto; padding: 0 20px; }
+header.top {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 0;
+}
+.brand { font-weight: 700; font-size: 1.25rem; color: var(--text); text-decoration: none; }
+nav.top a { margin-inline-start: 18px; text-decoration: none; color: var(--muted); }
+nav.top a:hover { color: var(--accent); }
+.hero { background: var(--hero); padding: 36px 0 56px; border-bottom: 1px solid var(--border); }
+.hero h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.15; margin: 18px 0 10px; }
+.hero p.lead { font-size: 1.2rem; color: var(--muted); max-width: 46rem; margin: 0 0 22px; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn {
+  display: inline-block; padding: 12px 22px; border-radius: 10px; font-weight: 600;
+  text-decoration: none; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--accent-text);
+}
+.btn.secondary { background: transparent; color: var(--accent); }
+.shot { margin-top: 34px; }
+.shot img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+section { padding: 52px 0; }
+section h2 { font-size: 1.7rem; margin: 0 0 8px; }
+section p.sub { color: var(--muted); margin: 0 0 28px; max-width: 46rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+}
+.card h3 { margin: 0 0 6px; font-size: 1.1rem; }
+.card p { margin: 0; color: var(--muted); }
+.steps { counter-reset: step; display: grid; gap: 14px; padding: 0; list-style: none; }
+.steps li {
+  counter-increment: step; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 18px; padding-inline-start: 60px; position: relative;
+}
+.steps li::before {
+  content: counter(step); position: absolute; inset-inline-start: 16px; top: 12px;
+  width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--accent-text);
+  display: grid; place-items: center; font-weight: 700;
+}
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.two img { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); }
+.two figcaption { color: var(--muted); font-size: 0.92rem; margin-top: 6px; }
+.dl { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+.dl ul { margin: 10px 0 18px; padding-inline-start: 20px; }
+.note { color: var(--muted); font-size: 0.95rem; }
+footer { border-top: 1px solid var(--border); padding: 26px 0 40px; color: var(--muted); font-size: 0.95rem; }
+footer a { color: var(--muted); }
+code { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 0.92em; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) {
+  nav.top a { margin-inline-start: 10px; font-size: 0.92rem; }
+  .hero { padding-bottom: 36px; }
+}

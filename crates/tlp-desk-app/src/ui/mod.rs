@@ -2,6 +2,7 @@
 
 pub mod address_book;
 pub mod audio;
+pub mod bidi_edit;
 pub mod chat;
 pub mod clipboard;
 pub mod connection_log;
@@ -21,6 +22,7 @@ pub mod settings;
 pub mod theme;
 pub mod transfers;
 pub mod tunnels;
+pub mod typing;
 pub mod unattended;
 pub mod whiteboard;
 pub mod widgets;

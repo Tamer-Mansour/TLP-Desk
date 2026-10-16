@@ -1,5 +1,6 @@
-# Builds the documentation book (docs/, mdBook) on every change to it, and publishes it to
-# GitHub Pages from the main branch. Pull requests only build, so broken SUMMARY entries or
+# Builds the documentation book (docs/, mdBook) and the static landing page (docs/site/) on every
+# change to them, and publishes both to GitHub Pages from the main branch: the landing page at the
+# Pages root and the book under /book/. Pull requests only build, so broken SUMMARY entries or
 # includes are caught before merge. Needs Settings -> Pages -> Source: "GitHub Actions".
 name: Docs
 
@@ -41,11 +42,35 @@ jobs:
       - name: Build
         run: mdbook build docs
 
+      # The landing page (docs/site/index.html + ar.html, plain HTML and CSS) must stay
+      # self-contained: the only absolute links allowed are to this repository on GitHub.
+      - name: Check the landing page has no external resources
+        run: |
+          if grep -nE '(src|href)="(https?:)?//' docs/site/*.html | grep -v 'https://github.com/Tamer-Mansour/TLP-Desk'; then
+            echo "docs/site must not load or link external resources" >&2
+            exit 1
+          fi
+          if grep -nE '<script|@import|url\(http' docs/site/*.html docs/site/style.css; then
+            echo "docs/site must not use scripts or imports" >&2
+            exit 1
+          fi
+
+      # Pages root = landing page; the book lives under /book/; screenshots under /media/. The
+      # pages reference ../media/ so they preview from the repository; rewrite for the site.
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/book
+          cp -r target/book/. _site/book/
+          cp docs/site/*.html docs/site/style.css _site/
+          cp -r docs/media _site/media
+          sed -i 's#\.\./media/#media/#g' _site/index.html _site/ar.html
+          test -f _site/index.html && test -f _site/ar.html && test -f _site/book/index.html
+
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: target/book
+          path: _site
 
   deploy:
     name: Publish to GitHub Pages

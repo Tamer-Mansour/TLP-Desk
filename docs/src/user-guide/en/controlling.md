@@ -32,8 +32,24 @@ one.
 
 Type normally. TLP-Desk sends **which keys you press**, not which letters, so the **remote PC's
 keyboard layout** decides what appears. To type Arabic on the remote PC, switch the remote PC's
-input language (for example with Alt+Shift or Win+Space while connected) — your own layout does not
-matter.
+input language — your own layout does not matter.
+
+### Switching between Arabic and English on the remote PC
+
+Press **Alt+Shift** or **Win+Space** while the TLP-Desk window is active, exactly as you would on
+the remote PC. TLP-Desk sends those keys to the remote PC (they do not change *your* layout), and
+Windows there switches its own input language. The language indicator on the remote screen shows
+the change.
+
+### Typing with your own layout
+
+If you would rather type with your own keyboard layout — for example Arabic on your PC while the
+remote PC is set to English — turn on **Settings → Typing → Type text using my keyboard layout**.
+TLP-Desk then sends the **characters** you type instead of the keys, so Arabic typed on your
+keyboard appears as Arabic on the remote PC whatever its layout is. Shortcuts (Ctrl+C, Alt+Tab,
+...), Enter, Backspace, the arrow keys and function keys still work as keys. Text from an
+input method (IME), the emoji panel and other composed characters is always sent as text, even
+with this option off.
 
 Tab, the arrow keys and Escape go to the remote PC. Ctrl+C, Ctrl+V and Ctrl+X are pressed on the
 remote PC too (they copy and paste *there*; [clipboard sharing](clipboard.md) between the two PCs

@@ -100,6 +100,15 @@ impl App {
                             self.backend.as_ref(),
                         );
                         ui.add_space(12.0);
+                        crate::ui::typing::settings_card(ui, tx, &mut self.settings);
+                        if let Some(view) = self.session.as_mut() {
+                            view.typing.set_route(
+                                crate::text_route::TextRoute::from_layout_setting(
+                                    self.settings.type_with_my_layout,
+                                ),
+                            );
+                        }
+                        ui.add_space(12.0);
                         crate::ui::audio::settings_card(
                             ui,
                             tx,
@@ -171,7 +180,7 @@ impl App {
                 widgets::icon_heading(ui, tx, Icon::Laptop, tx.t(S::ThisDeviceSettings));
                 ui.add_space(6.0);
                 ui.label(theme::caption(ui, tx.t(S::DeviceName)));
-                let resp = theme::row(ui, tx.rtl(), |ui| {
+                theme::row(ui, tx.rtl(), |ui| {
                     let w = (ui.available_width() - 100.0).max(160.0);
                     let hint = tx.t(S::DeviceName);
                     let resp =
@@ -191,7 +200,6 @@ impl App {
                     }
                     resp
                 });
-                widgets::edit_preview(ui, tx, &resp, &self.name_edit);
                 ui.label(theme::caption(ui, tx.t(S::DeviceNameHint)));
                 if self.renamed {
                     ui.label(theme::caption(ui, tx.t(S::DeviceNameRestart)));

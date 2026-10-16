@@ -35,7 +35,13 @@ Ship a single **Inno Setup 6** `TLP-Desk-<version>-setup.exe` (`installer/TLP-De
 - One `.exe` that most users already know how to run; the Arabic wizard works out of the box.
 - The installer is **not code-signed**, so SmartScreen shows "Windows protected your PC" until the
   file gains reputation; the user guide explains "More info → Run anyway".
-- Administrators who need an MSI for deployment do not have one yet (tracked in ROADMAP M5).
+- **An MSI is not planned.** Inno Setup covers what TLP-Desk needs (Arabic wizard, firewall rules for
+  private networks only, the service, silent install switches), and a second installer would
+  double the packaging, signing and test work for every release without adding a capability. The
+  audience is home and small-office networks, not managed fleets. Administrators who deploy with
+  Group Policy or Intune can wrap the silent `setup.exe` install (`/VERYSILENT /SUPPRESSMSGBOXES`)
+  as a Win32 app or a startup script, or use the portable zip. If real demand appears, this
+  decision can be revisited with a new ADR; nothing in the installer's layout prevents it.
 - Silent installs use standard Inno Setup switches (`/VERYSILENT`, `/SUPPRESSMSGBOXES`, `/DIR=`,
   `/LANG=`).
 - Unattended access (M3) will add a Windows service; the installer must then register and remove

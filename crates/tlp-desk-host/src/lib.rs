@@ -54,6 +54,7 @@
 mod adapt;
 mod cursor;
 mod device_info;
+mod hooks;
 mod input;
 mod live;
 mod pipeline;
@@ -429,6 +430,8 @@ struct Inner {
     sessions: Mutex<HashMap<SessionId, Arc<SessionCtl>>>,
     prompt_limiter: Mutex<RateLimiter>,
     shutting_down: AtomicBool,
+    /// Local-activity monitor and pointer marker shared by all sessions.
+    hooks: Arc<hooks::SharedHooks>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -493,6 +496,10 @@ impl Host {
         } else {
             None
         };
+        let hooks = hooks::SharedHooks::new(
+            cfg.local_activity_factory.clone(),
+            cfg.pointer_marker_factory.clone(),
+        );
         let inner = Arc::new(Inner {
             endpoint,
             password: Mutex::new(cfg.password.clone()),
@@ -504,6 +511,7 @@ impl Host {
             pending: Mutex::default(),
             sessions: Mutex::default(),
             shutting_down: AtomicBool::new(false),
+            hooks,
         });
         let accept_task = tokio::spawn(accept_loop(inner.clone()));
         tracing::info!(
@@ -863,7 +871,7 @@ fn input_allowed(perms: Permissions, ev: &InputEvent) -> bool {
         InputEvent::MouseMove { .. }
         | InputEvent::MouseButton { .. }
         | InputEvent::MouseWheel { .. } => perms.contains(Permissions::CONTROL),
-        InputEvent::Key { .. } => perms.contains(Permissions::KEYBOARD),
+        InputEvent::Key { .. } | InputEvent::Text { .. } => perms.contains(Permissions::KEYBOARD),
         InputEvent::ReleaseAll => {
             perms.contains(Permissions::CONTROL) || perms.contains(Permissions::KEYBOARD)
         }
@@ -916,10 +924,9 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         rect: rect_rx,
         events: input_rx,
         grace: live.local_input_grace,
-        activity_factory: Some(inner.cfg.local_activity_factory.clone()),
-        marker_factory: live
-            .remote_pointer_marker
-            .then(|| inner.cfg.pointer_marker_factory.clone()),
+        hooks: inner.hooks.clone(),
+        marker_enabled: live.remote_pointer_marker,
+        session: id.0,
         label: if peer.name.trim().is_empty() {
             peer.device_id.to_string()
         } else {
