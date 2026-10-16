@@ -5,24 +5,37 @@
 //! `Read`/`Write` map to `ReadFile`/`WriteFile`. One connection is used by one thread in one
 //! direction at a time (see `ipc`), which is what synchronous pipe handles allow.
 
+use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
+use std::os::windows::ffi::OsStringExt;
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use windows::core::HSTRING;
+use windows::core::{HSTRING, PWSTR};
 use windows::Win32::Foundation::{
-    LocalFree, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, HANDLE, HLOCAL, INVALID_HANDLE_VALUE,
+    CloseHandle, LocalFree, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, HANDLE, HLOCAL,
+    INVALID_HANDLE_VALUE,
 };
 use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
-use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+use windows::Win32::Security::{
+    GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, IsValidSid, RevertToSelf,
+    TokenIntegrityLevel, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_MANDATORY_LABEL,
+    TOKEN_QUERY,
+};
 use windows::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientSessionId, GetNamedPipeServerProcessId,
-    GetNamedPipeServerSessionId, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeClientSessionId,
+    GetNamedPipeServerProcessId, GetNamedPipeServerSessionId, ImpersonateNamedPipeClient,
+    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
+    PIPE_WAIT,
+};
+use windows::Win32::System::Threading::{
+    GetCurrentThread, OpenProcess, OpenThreadToken, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 use super::os_err;
@@ -142,6 +155,106 @@ pub(crate) fn client_session_id(pipe: &File) -> Result<u32, HostError> {
     Ok(id)
 }
 
+/// Process id of the connected client (`GetNamedPipeClientProcessId`).
+pub(crate) fn client_process_id(pipe: &File) -> Result<u32, HostError> {
+    let mut id = 0u32;
+    // SAFETY: valid pipe server handle; `id` is a valid out pointer.
+    unsafe { GetNamedPipeClientProcessId(handle(pipe), &mut id) }
+        .map_err(|e| os_err("GetNamedPipeClientProcessId", &e))?;
+    Ok(id)
+}
+
+/// Full Win32 path of process `pid`'s executable (`QueryFullProcessImageNameW`).
+pub(crate) fn process_image(pid: u32) -> Result<PathBuf, HostError> {
+    // SAFETY: plain call; on success we own the process handle and close it below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
+        .map_err(|e| os_err("OpenProcess", &e))?;
+    // Long-path capable buffer (32 767 UTF-16 units + NUL).
+    let mut buf = vec![0u16; 32_768];
+    let mut len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
+    // SAFETY: `process` is a valid handle with PROCESS_QUERY_LIMITED_INFORMATION; `buf` is
+    // writable for `len` UTF-16 units and `len` is a valid in/out pointer.
+    let queried = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    // SAFETY: we opened `process` above and close it exactly once.
+    let _ = unsafe { CloseHandle(process) };
+    queried.map_err(|e| os_err("QueryFullProcessImageNameW", &e))?;
+    let used = usize::try_from(len).unwrap_or(0);
+    let wide = buf.get(..used).unwrap_or_default();
+    Ok(PathBuf::from(OsString::from_wide(wide)))
+}
+
+/// Integrity RID (`SECURITY_MANDATORY_*_RID`) of the connected client's token: impersonate
+/// the client, open the thread token, revert, then read `TokenIntegrityLevel`. Must be called
+/// after a message was read from the client.
+pub(crate) fn client_integrity_rid(pipe: &File) -> Result<u32, HostError> {
+    // SAFETY: valid pipe server handle that a client is connected to.
+    unsafe { ImpersonateNamedPipeClient(handle(pipe)) }
+        .map_err(|e| os_err("ImpersonateNamedPipeClient", &e))?;
+    let mut token = HANDLE::default();
+    // SAFETY: the current thread pseudo handle; `token` is a valid out pointer. `true` =
+    // check access as the service (the token belongs to the client).
+    let opened = unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &mut token) };
+    // SAFETY: plain call; ends the impersonation started above. It must run whatever
+    // OpenThreadToken did.
+    if let Err(e) = unsafe { RevertToSelf() } {
+        if opened.is_ok() {
+            // SAFETY: the token was opened above and is closed once.
+            let _ = unsafe { CloseHandle(token) };
+        }
+        // The thread may still run as the client: the caller ends this connection's thread.
+        return Err(os_err("RevertToSelf", &e));
+    }
+    opened.map_err(|e| os_err("OpenThreadToken", &e))?;
+    let rid = token_integrity_rid(token);
+    // SAFETY: the token was opened above and is closed once.
+    let _ = unsafe { CloseHandle(token) };
+    rid
+}
+
+fn token_integrity_rid(token: HANDLE) -> Result<u32, HostError> {
+    // u64 elements: TOKEN_MANDATORY_LABEL holds a pointer and needs pointer alignment.
+    let mut buf = vec![0u64; 16];
+    let bytes = u32::try_from(std::mem::size_of_val(buf.as_slice())).unwrap_or(0);
+    let mut needed = 0u32;
+    // SAFETY: `token` has TOKEN_QUERY; `buf` is writable for `bytes` bytes (a label is
+    // a pointer plus a small SID, far below 128 bytes); `needed` is a valid out pointer.
+    unsafe {
+        GetTokenInformation(
+            token,
+            TokenIntegrityLevel,
+            Some(buf.as_mut_ptr().cast()),
+            bytes,
+            &mut needed,
+        )
+    }
+    .map_err(|e| os_err("GetTokenInformation", &e))?;
+    // SAFETY: on success the buffer starts with a TOKEN_MANDATORY_LABEL whose SID points into
+    // the same buffer, which outlives these reads. The SID is validated before it is parsed.
+    unsafe {
+        let label = &*buf.as_ptr().cast::<TOKEN_MANDATORY_LABEL>();
+        let sid = label.Label.Sid;
+        if !IsValidSid(sid).as_bool() {
+            return Err(HostError::Os {
+                call: "IsValidSid",
+                code: 0,
+            });
+        }
+        let count = u32::from(*GetSidSubAuthorityCount(sid));
+        let last = count.checked_sub(1).ok_or(HostError::Os {
+            call: "GetSidSubAuthorityCount",
+            code: 0,
+        })?;
+        Ok(*GetSidSubAuthority(sid, last))
+    }
+}
+
 /// Process id of the pipe's server (anti-squatting check on the client side).
 pub(crate) fn server_process_id(pipe: &File) -> Result<u32, HostError> {
     let mut id = 0u32;
@@ -222,6 +335,44 @@ mod tests {
         // First-instance flag: a second "first" instance of the same name fails (squatting).
         assert!(create_instance(&spec, true).is_err());
         drop(server);
+    }
+
+    /// The facts the GUI pipe admission check (audit F2) reads about a client, against this
+    /// very test process as the client: its pid, its image and its integrity (a normal or
+    /// elevated test run is Medium or High). Local test pipe only.
+    #[test]
+    fn client_facts_identify_the_connected_process() {
+        let spec = PipeSpec {
+            name: unique("facts"),
+            // Test-only: the creator (owner) may connect; remote clients are rejected.
+            sddl: "D:P(A;;GA;;;OW)(A;;GA;;;SY)",
+            ..PipeSpec::gui()
+        };
+        let server = create_instance(&spec, true).unwrap();
+        let name = spec.name.clone();
+        let t = std::thread::spawn(move || {
+            accept(&server).unwrap();
+            let mut s = server;
+            let mut b = [0u8; 1];
+            // Impersonation needs a message from the client first.
+            s.read_exact(&mut b).unwrap();
+            let pid = client_process_id(&s).unwrap();
+            let image = process_image(pid).unwrap();
+            let rid = client_integrity_rid(&s).unwrap();
+            s.write_all(&b).unwrap();
+            (pid, image, rid)
+        });
+        let mut c = connect(&name, None).unwrap();
+        c.write_all(b"x").unwrap();
+        let mut back = [0u8; 1];
+        c.read_exact(&mut back).unwrap();
+        let (pid, image, rid) = t.join().unwrap();
+        assert_eq!(pid, std::process::id());
+        assert!(crate::service::same_image(
+            &image,
+            &std::env::current_exe().unwrap()
+        ));
+        assert!(rid >= crate::service::MEDIUM_INTEGRITY_RID, "{rid:#x}");
     }
 
     /// Interactive users get data access to the GUI pipe, but only with the explicit mask:

@@ -59,8 +59,9 @@ pub use desktop::{
     DesktopWatcher, DEFAULT_DESKTOP, INACCESSIBLE_DESKTOP,
 };
 pub use pipe_security::{
-    agent_pipe_name, is_agent_pipe_name, PipeSpec, AGENT_PIPE_SDDL, GUI_CLIENT_ACCESS,
-    GUI_PIPE_NAME, GUI_PIPE_SDDL,
+    agent_pipe_name, check_gui_client, is_agent_pipe_name, same_image, GuiClientFacts,
+    GuiClientRefusal, PipeSpec, AGENT_PIPE_SDDL, GUI_CLIENT_ACCESS, GUI_PIPE_NAME, GUI_PIPE_SDDL,
+    MEDIUM_INTEGRITY_RID,
 };
 pub use session::{
     console_session, SessionAction, SessionChange, SessionTracker, NO_CONSOLE_SESSION,

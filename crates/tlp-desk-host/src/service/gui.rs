@@ -233,13 +233,16 @@ fn apply(status: &mut ServiceStatus, ev: &GuiEvent) {
     }
 }
 
-/// Serves one GUI connection. `client_in_console` is the service's check that the client
-/// process runs in the active console session; anything else is refused.
+/// Serves one GUI connection. `verify_client` is the service's admission check of the client
+/// process ([`check_gui_client`](super::check_gui_client): console session, integrity at
+/// least Medium, the service's own `TLP-Desk.exe`). It runs after the hello was read (the
+/// client's token can be impersonated only then) and before anything is sent or done; a
+/// refused client gets nothing but `Refused`.
 pub fn serve_gui_connection<C: Read + Write + ?Sized>(
     conn: &mut C,
     hub: &GuiHub,
     commands: &dyn GuiCommands,
-    client_in_console: bool,
+    verify_client: impl FnOnce() -> Result<(), super::GuiClientRefusal>,
 ) -> Result<(), HostError> {
     let hello: GuiHello = ipc::read_msg(conn)?;
     if hello.version != IPC_VERSION {
@@ -258,13 +261,13 @@ pub fn serve_gui_connection<C: Read + Write + ?Sized>(
             got: hello.version,
         });
     }
-    if !client_in_console {
-        tracing::warn!("GUI connection from outside the console session refused");
+    if let Err(why) = verify_client() {
+        tracing::warn!(?why, "GUI pipe client refused");
         return ipc::write_msg(
             conn,
             &GuiWelcome::Refused {
                 version: IPC_VERSION,
-                error: WireError::Other("not the console session".into()),
+                error: WireError::Other("client not allowed".into()),
             },
         );
     }
@@ -330,6 +333,7 @@ mod tests {
     use tlp_desk_crypto::Identity;
 
     use super::super::testutil::duplex;
+    use super::super::GuiClientRefusal;
     use super::*;
     use crate::{AuthKind, ConnectedViewer, IncomingRequest, RequestId, SessionId};
 
@@ -463,7 +467,7 @@ mod tests {
         let fake = Arc::new(Fake::default());
         let (mut a, mut b) = duplex();
         let (h, f) = (hub.clone(), fake.clone());
-        let t = std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, true));
+        let t = std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, || Ok(())));
         ipc::write_msg(
             &mut a,
             &GuiHello {
@@ -537,7 +541,7 @@ mod tests {
             )
             .unwrap();
             ipc::write_msg(&mut a, &cmd).unwrap();
-            serve_gui_connection(&mut b, &hub, &fake, true).unwrap();
+            serve_gui_connection(&mut b, &hub, &fake, || Ok(())).unwrap();
             let _: GuiWelcome = ipc::read_msg(&mut a).unwrap();
             assert_eq!(ipc::read_msg::<_, GuiReply>(&mut a).unwrap(), want);
         }
@@ -567,7 +571,10 @@ mod tests {
         )
         .unwrap();
         ipc::write_msg(&mut a, &GuiCommand::RotateCode).unwrap();
-        serve_gui_connection(&mut b, &hub, &fake, false).unwrap();
+        serve_gui_connection(&mut b, &hub, &fake, || {
+            Err(GuiClientRefusal::IntegrityTooLow)
+        })
+        .unwrap();
         assert!(matches!(
             ipc::read_msg::<_, GuiWelcome>(&mut a).unwrap(),
             GuiWelcome::Refused { .. }

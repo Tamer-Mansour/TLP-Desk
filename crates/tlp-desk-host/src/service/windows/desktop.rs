@@ -2,13 +2,13 @@
 //! `UOI_NAME`, `SetThreadDesktop`, "Desktops").
 
 use windows::Win32::Foundation::HANDLE;
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::System::StationsAndDesktops::{
     CloseDesktop, GetThreadDesktop, GetUserObjectInformationW, OpenInputDesktop, SetThreadDesktop,
     DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS, DESKTOP_CREATEMENU, DESKTOP_CREATEWINDOW,
     DESKTOP_ENUMERATE, DESKTOP_HOOKCONTROL, DESKTOP_JOURNALPLAYBACK, DESKTOP_READOBJECTS,
     DESKTOP_WRITEOBJECTS, HDESK, UOI_NAME,
 };
+use windows::Win32::System::Threading::GetCurrentThreadId;
 
 use super::os_err;
 use crate::service::DesktopSource;
