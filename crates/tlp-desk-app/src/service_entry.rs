@@ -8,8 +8,9 @@
 //! * `install-service` / `uninstall-service` (elevated) register or remove the service.
 //!
 //! These processes have no window and no console (`windows_subsystem = "windows"`), so they log
-//! to `%ProgramData%\TLP-Desk\logs\service.log` (local file only, restarted at 4 MB) and report
-//! success or failure through the exit code.
+//! to `%ProgramData%\TLP-Desk\logs\service.log` (local file only, rotated at 4 MB, five older
+//! files kept) and report success or failure through the exit code; `install-service` and
+//! `uninstall-service` typed in a terminal also print the outcome there.
 
 use std::fs;
 use std::io::Write;
@@ -20,12 +21,17 @@ use tlp_desk_crypto::{PasswordStore, TicketStore, DEFAULT_TICKET_TTL, TICKETS_FI
 use tlp_desk_host::service::windows as win;
 use tlp_desk_host::service::{AGENT_ARG, INSTALL_SUBCOMMAND, SERVICE_ARG, UNINSTALL_SUBCOMMAND};
 use tlp_desk_host::{HostConfig, UnattendedFeature, WindowsPower};
-use tlp_desk_proto::Permissions;
+
+use crate::service_host::agent::AppAgentFeatures;
+use crate::service_host::{spawn_files_pump, AppServiceExtension, ProtectFn};
 
 use crate::i18n::{tr_raw, Lang, S};
 
-/// The log file is restarted when it grows past this.
+/// The log file is rotated when it grows past this.
 const MAX_LOG_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Rotated log files kept (`service.1.log` newest ... `service.5.log` oldest).
+const KEEP_LOGS: u32 = 5;
 
 /// What `main` should do with the command line.
 #[derive(Debug, PartialEq, Eq)]
@@ -91,10 +97,18 @@ pub fn dispatch() -> Option<i32> {
         Entry::Service => finish("service", win::run_dispatcher(service_options)),
         Entry::Agent { pipe, parent } => finish(
             "agent",
-            win::run_agent(&pipe, parent, Arc::new(tlp_desk_host::service::NoFeatures)),
+            win::run_agent(&pipe, parent, Arc::new(AppAgentFeatures::new())),
         ),
-        Entry::Install => install(),
-        Entry::Uninstall => finish("uninstall-service", win::uninstall_service()),
+        Entry::Install => {
+            let code = install();
+            report(code, S::ServiceInstalledOk);
+            code
+        }
+        Entry::Uninstall => {
+            let code = finish("uninstall-service", win::uninstall_service());
+            report(code, S::ServiceUninstalledOk);
+            code
+        }
         Entry::Invalid(why) => {
             tracing::error!(%why, "bad service command line");
             2
@@ -113,6 +127,22 @@ fn finish(what: &str, result: Result<(), tlp_desk_host::HostError>) -> i32 {
             1
         }
     }
+}
+
+/// Tells a person who typed `install-service` / `uninstall-service` in a terminal how it went
+/// (the exit code stays the contract for scripts and the installer).
+fn report(code: i32, ok: S) {
+    let lang = Lang::detect();
+    let text = if code == 0 {
+        tr_raw(lang, ok).to_owned()
+    } else {
+        format!(
+            "{} {}",
+            tr_raw(lang, S::ServiceCommandFailed),
+            log_path().display()
+        )
+    };
+    win::print_to_parent_console(&text);
 }
 
 fn install() -> i32 {
@@ -152,21 +182,23 @@ fn service_options() -> win::ServiceOptions {
         reconnect_tickets: Some(tickets.clone()),
         ..HostConfig::default()
     };
-    // Same defaults as the GUI host: files, chat, whiteboard, restart and system actions.
-    host.default_permissions = host
-        .default_permissions
-        .union(Permissions::FILES)
-        .union(Permissions::CHAT)
-        .union(Permissions::WHITEBOARD)
-        .union(Permissions::RESTART)
-        .union(Permissions::SYSTEM);
     host.features.push(Arc::new(UnattendedFeature::new(
         Some(tickets),
         Arc::new(WindowsPower),
     )));
+    // Files, Explorer paste, clipboard, chat, whiteboard, privacy, audio; the machine-wide
+    // host settings (permissions, allow-list, timeouts...) and the connection log.
+    let protect: ProtectFn = Arc::new(|path: &std::path::Path| {
+        if let Err(e) = win::set_file_dacl(path, win::SETTINGS_FILE_SDDL) {
+            tracing::warn!(%e, path = %path.display(), "cannot set the file's access rights");
+        }
+    });
+    let extension = AppServiceExtension::new(data_dir.clone(), protect);
+    spawn_files_pump(&extension);
     win::ServiceOptions {
         host,
         data_dir,
+        extension: Some(extension),
         ..win::ServiceOptions::default()
     }
 }
@@ -183,9 +215,7 @@ fn init_logging() {
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    if fs::metadata(&path).is_ok_and(|m| m.len() > MAX_LOG_BYTES) {
-        let _ = fs::rename(&path, path.with_extension("old"));
-    }
+    rotate_logs(&path, MAX_LOG_BYTES, KEEP_LOGS);
     let Ok(file) = fs::OpenOptions::new().create(true).append(true).open(&path) else {
         return;
     };
@@ -197,6 +227,29 @@ fn init_logging() {
         .with_ansi(false)
         .with_writer(move || LogWriter(file.clone()))
         .try_init();
+}
+
+/// `service.N.log` next to `path`.
+fn rotated(path: &std::path::Path, n: u32) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!("{stem}.{n}.log"))
+}
+
+/// Size-based rotation at start: when `path` is larger than `max_bytes`, `path` becomes
+/// `.1`, `.1` becomes `.2`, ... and the oldest beyond `keep` is deleted. Errors are ignored
+/// (a log must never stop the service).
+fn rotate_logs(path: &std::path::Path, max_bytes: u64, keep: u32) {
+    if !fs::metadata(path).is_ok_and(|m| m.len() > max_bytes) || keep == 0 {
+        return;
+    }
+    let _ = fs::remove_file(rotated(path, keep));
+    for n in (1..keep).rev() {
+        let _ = fs::rename(rotated(path, n), rotated(path, n + 1));
+    }
+    let _ = fs::rename(path, rotated(path, 1));
 }
 
 struct LogWriter(Arc<Mutex<fs::File>>);
@@ -223,6 +276,28 @@ mod tests {
 
     fn a(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn logs_rotate_by_size_and_keep_n_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("service.log");
+        let write = |p: &std::path::Path, n: usize| fs::write(p, vec![b'x'; n]).unwrap();
+        // Small: untouched.
+        write(&log, 10);
+        rotate_logs(&log, 100, 3);
+        assert!(log.exists() && !rotated(&log, 1).exists());
+        // Four rotations with keep = 3: the oldest falls off.
+        for i in 0..4 {
+            write(&log, 200 + i);
+            rotate_logs(&log, 100, 3);
+        }
+        assert!(!log.exists());
+        assert_eq!(fs::metadata(rotated(&log, 1)).unwrap().len(), 203);
+        assert_eq!(fs::metadata(rotated(&log, 2)).unwrap().len(), 202);
+        assert_eq!(fs::metadata(rotated(&log, 3)).unwrap().len(), 201);
+        assert!(!rotated(&log, 4).exists());
+        assert_eq!(rotated(&log, 2).file_name().unwrap(), "service.2.log");
     }
 
     #[test]
