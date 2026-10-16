@@ -767,24 +767,115 @@ mod tests {
         fn cancel(&self) {}
     }
 
-    /// Replaces the user's clipboard: run by hand only (`cargo test -- --ignored`), and only
-    /// with text on the clipboard you do not mind losing.
+    /// Replaces the user's clipboard with virtual files, reads them back through OLE like
+    /// Explorer does, then restores the clipboard text. Run by hand only
+    /// (`cargo test -p tlp-desk-files -- --ignored real_clipboard`). Skips (passes) when the
+    /// clipboard holds files or images, which could not be restored.
     #[test]
-    #[ignore = "overwrites the real clipboard"]
+    #[ignore = "overwrites the real clipboard (restores text)"]
     fn real_clipboard_round_trip() {
+        use windows::Win32::System::DataExchange::IsClipboardFormatAvailable;
+        use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+        use windows::Win32::System::Ole::OleGetClipboard;
+
+        // CF_BITMAP, CF_TIFF, CF_DIB, CF_ENHMETAFILE, CF_HDROP, CF_DIBV5.
+        // SAFETY: plain format-id queries.
+        let unrestorable = [2u32, 6, 8, 14, 15, 17]
+            .iter()
+            .any(|&f| unsafe { IsClipboardFormatAvailable(f) }.is_ok());
+        if unrestorable {
+            eprintln!("skipped: the clipboard holds files or an image that cannot be restored");
+            return;
+        }
+        let saved = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut c| c.get_text().ok());
+
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("ملف.txt"), b"abc").unwrap();
+        std::fs::write(tmp.path().join("ملف.txt"), "محتوى").unwrap();
         let items = vec![TransferItem {
             rel_path: "ملف.txt".into(),
-            size: 3,
+            size: "محتوى".len() as u64,
             modified_unix_ms: 1_700_000_000_000,
             is_dir: false,
         }];
-        let staged = StagedItems::new(tmp.path().to_path_buf(), items, Arc::new(Done));
+        let staged = StagedItems::new(tmp.path().to_path_buf(), items.clone(), Arc::new(Done));
         let port = WindowsPort::new();
         port.set(staged);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // The reader side: this thread is its own apartment, like Explorer's process.
+        let reader = std::thread::spawn(move || {
+            // SAFETY: balanced with OleUninitialize below; all pointers are locals.
+            unsafe {
+                OleInitialize(None).unwrap();
+                let fmt = Formats::register().unwrap();
+                // The clipboard is set asynchronously by the STA thread: poll for it.
+                let mut obj = None;
+                for _ in 0..50 {
+                    if let Ok(o) = OleGetClipboard() {
+                        if o.QueryGetData(&FORMATETC {
+                            cfFormat: fmt.descriptor,
+                            ptd: std::ptr::null_mut(),
+                            dwAspect: DVASPECT_CONTENT.0,
+                            lindex: -1,
+                            tymed: TYMED_HGLOBAL.0 as u32,
+                        })
+                        .is_ok()
+                        {
+                            obj = Some(o);
+                            break;
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                let obj = obj.expect("virtual files never appeared on the clipboard");
+                let group = build_group_descriptor(&items);
+
+                let mut fe = FORMATETC {
+                    cfFormat: fmt.descriptor,
+                    ptd: std::ptr::null_mut(),
+                    dwAspect: DVASPECT_CONTENT.0,
+                    lindex: -1,
+                    tymed: TYMED_HGLOBAL.0 as u32,
+                };
+                let mut med = obj.GetData(&fe).expect("descriptor");
+                let h = med.u.hGlobal;
+                let p = GlobalLock(h);
+                let got = std::slice::from_raw_parts(p.cast::<u8>(), group.bytes.len()).to_vec();
+                let _ = GlobalUnlock(h);
+                ReleaseStgMedium(&mut med);
+                assert_eq!(got, group.bytes);
+
+                fe.cfFormat = fmt.contents;
+                fe.lindex = 0;
+                fe.tymed = TYMED_ISTREAM.0 as u32;
+                let med = obj.GetData(&fe).expect("contents");
+                let stream = (*med.u.pstm).clone().expect("stream");
+                let mut buf = [0u8; 64];
+                let mut n = 0u32;
+                let hr = stream.Read(buf.as_mut_ptr().cast(), 64, Some(&mut n));
+                assert!(hr.is_ok());
+                assert_eq!(&buf[..n as usize], "محتوى".as_bytes());
+                drop(stream);
+                drop(obj);
+                OleUninitialize();
+            }
+        });
+        let result = reader.join();
+
         port.clear();
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // Restore the user's text (or leave the clipboard empty if there was none).
+        if let Ok(mut c) = arboard::Clipboard::new() {
+            match saved {
+                Some(t) => {
+                    let _ = c.set_text(t);
+                }
+                None => {
+                    let _ = c.clear();
+                }
+            }
+        }
+        result.expect("reader thread");
     }
 }
