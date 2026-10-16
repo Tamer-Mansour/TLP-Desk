@@ -162,7 +162,7 @@ load the way CI does, then run the single test many times at once:
 
 ```powershell
 cargo test -p tlp-desk-files --test transfer --no-run
-$exe = (Get-ChildItem $env:CARGO_TARGET_DIR\debug\deps\ansfer-*.exe | Sort LastWriteTime | Select -Last 1).FullName
+$exe = (Get-ChildItem $env:CARGO_TARGET_DIR\debug\deps\transfer-*.exe | Sort LastWriteTime | Select -Last 1).FullName
 1..48 | % { Start-Job { param($e) & $e many_small_files 2>&1 | Out-String } -ArgumentList $exe } | Receive-Job -Wait
 ```
 
