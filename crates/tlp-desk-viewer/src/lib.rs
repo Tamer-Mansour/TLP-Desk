@@ -16,11 +16,17 @@
 //!   are refused before any packet is sent.
 //! * **Features.** Register feature modules in [`ViewerConfig::features`]; each session starts
 //!   them and routes the host's feature messages to them ([`ViewerEvent::Feature`] for the UI).
+//! * **Performance.** Each session sends `ViewerFeedback` ~4x/s for the host's adaptive
+//!   bitrate and `LatencyProbe` every 500 ms to synchronize clocks for the latency overlay
+//!   ([`ViewerStats::latency_ms`], method in [`LatencyClock`]); the UI picks presets with
+//!   [`ViewerSession::set_quality`] and the "all monitors" view with
+//!   [`ViewerSession::select_all_monitors`].
 //! * **Threads.** Decoding runs on a dedicated std thread; networking on tokio tasks. Cancel a
 //!   pending [`Viewer::connect`] by dropping its future (or aborting its task).
 #![forbid(unsafe_code)]
 
 mod frame;
+mod perf;
 mod session;
 
 use std::net::{IpAddr, SocketAddr};
@@ -34,11 +40,12 @@ use tlp_desk_net::{AllowList, DiscoveredDevice, Discovery, Endpoint, NetError, P
 use tlp_desk_proto::RejectReason;
 
 pub use frame::{DecodedFrame, FrameSlot, PixelFormat};
+pub use perf::LatencyClock;
 pub use session::{EndReason, ViewerEvent, ViewerEvents, ViewerSession, ViewerStats};
 pub use tlp_desk_net::{
     AuthMethod, AwaitingAcceptFn, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo,
 };
-pub use tlp_desk_proto::MonitorDesc;
+pub use tlp_desk_proto::{MonitorDesc, QualityPreset, QualitySettings};
 
 /// Callback invoked (from any thread) when a new frame or event is available, e.g. to wake
 /// the GUI for a repaint.
