@@ -1,0 +1,9 @@
+# winget version manifest. Regenerate with scripts/update-winget-manifest.ps1 -Tag v<version>;
+# submission steps: docs/src/dev/code-signing.md ("winget").
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+
+PackageIdentifier: TLP.TLP-Desk
+PackageVersion: 1.0.0-rc.2
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.12.0
