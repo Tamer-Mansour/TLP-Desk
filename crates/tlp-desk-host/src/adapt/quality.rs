@@ -120,6 +120,14 @@ pub fn capture_cap(monitor: (u32, u32), cap: (u32, u32), scale_permille: u32) ->
         cap
     };
     let s = u64::from(scale_permille.clamp(100, 1000));
+    // A step below full size shrinks the picture actually streamed: a monitor smaller than the
+    // cap (1366x768 under a 1920x1200 cap) is scaled itself, or the ladder would do nothing
+    // until its last rungs.
+    let (w, h) = if s < 1000 {
+        (w.min(monitor.0.max(1)), h.min(monitor.1.max(1)))
+    } else {
+        (w, h)
+    };
     // Rounded to a multiple of 4 so ladder steps give tidy sizes (1920x1200 at 834 -> 1600x1000).
     let scale = |v: u32, min: u32| {
         if s >= 1000 {
@@ -239,6 +247,10 @@ mod tests {
         assert_eq!(capture_cap((3840, 2160), (1920, 1200), 834), (1600, 1000));
         assert_eq!(capture_cap((3840, 2160), (1920, 1200), 667), (1280, 800));
         assert_eq!(capture_cap((3840, 2160), (1920, 1200), 534), (1024, 640));
-        assert_eq!(capture_cap((1920, 1080), (1920, 1200), 834), (1600, 1000));
+        assert_eq!(capture_cap((1920, 1080), (1920, 1200), 834), (1600, 900));
+        // A monitor smaller than the cap is scaled itself.
+        assert_eq!(capture_cap((1366, 768), (1920, 1200), 1000), (1920, 1200));
+        assert_eq!(capture_cap((1366, 768), (1920, 1200), 667), (912, 512));
+        assert_eq!(capture_cap((768, 1366), (1920, 1200), 667), (512, 912));
     }
 }
