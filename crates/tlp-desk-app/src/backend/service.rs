@@ -121,6 +121,11 @@ impl ServiceMirror {
         Some(self.requests.swap_remove(i).1)
     }
 
+    /// Whether `request` is a service prompt (still unanswered).
+    pub fn has_request(&self, request: RequestId) -> bool {
+        self.requests.iter().any(|(r, _)| *r == request)
+    }
+
     /// The service's session id for a UI host session.
     pub fn session(&self, session: SessionId) -> Option<u64> {
         self.sessions
@@ -292,6 +297,11 @@ mod link {
                 accept,
             });
             true
+        }
+
+        /// Whether `request` came from the service (accepting it grants the service defaults).
+        pub fn has_request(&self, request: RequestId) -> bool {
+            lock(&self.mirror).has_request(request)
         }
 
         /// Ends a service-hosted session; `false` if it is not ours.

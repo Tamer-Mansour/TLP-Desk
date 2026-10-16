@@ -40,6 +40,7 @@ impl App {
                 egui::ThemePreference::System => PromptTheme::System,
             },
             sound: self.settings.accept_popup.sound,
+            permissions_locked: false,
         }
     }
 
@@ -53,7 +54,8 @@ impl App {
         if !self.settings.accept_popup.enabled || !self.accept_popups.is_enabled() {
             return false;
         }
-        let prompt = self.prompt_request(ctx, peer);
+        let mut prompt = self.prompt_request(ctx, peer);
+        prompt.permissions_locked = !self.backend.can_choose_permissions(request);
         self.accept_popups.open(request, &prompt)
     }
 
@@ -139,6 +141,7 @@ impl App {
         if self.accept_card.as_ref().is_none_or(|(r, _)| *r != request) {
             let mut prompt = self.prompt_request(ctx, &peer);
             prompt.sound = false;
+            prompt.permissions_locked = !self.backend.can_choose_permissions(request);
             self.accept_card = Some((request, AcceptCard::new(prompt)));
         }
         let tx = self.tx;

@@ -1441,6 +1441,15 @@ impl Backend for RealBackend {
         self.respond_to_request_with(request, accept, None);
     }
 
+    fn can_choose_permissions(&self, request: RequestId) -> bool {
+        #[cfg(windows)]
+        if self.service().is_some_and(|s| s.has_request(request)) {
+            return false;
+        }
+        let _ = request;
+        true
+    }
+
     fn respond_to_request_with(
         &self,
         request: RequestId,

@@ -925,6 +925,13 @@ pub trait Backend: Send + Sync {
         let _ = permissions;
         self.respond_to_request(request, accept);
     }
+
+    /// Whether [`Backend::respond_to_request_with`] can grant other permissions than the
+    /// defaults for `request` (the Accept window locks its chips otherwise).
+    fn can_choose_permissions(&self, request: RequestId) -> bool {
+        let _ = request;
+        true
+    }
 }
 
 #[cfg(test)]

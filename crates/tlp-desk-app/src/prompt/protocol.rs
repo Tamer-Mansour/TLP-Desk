@@ -66,6 +66,8 @@ pub struct PromptRequest {
     pub theme: PromptTheme,
     /// Play the short Windows notification sound when the window appears.
     pub sound: bool,
+    /// The permissions are fixed (shown, but cannot be switched for this request).
+    pub permissions_locked: bool,
 }
 
 impl Default for PromptRequest {
@@ -81,6 +83,7 @@ impl Default for PromptRequest {
             digits: DigitStyle::default(),
             theme: PromptTheme::System,
             sound: true,
+            permissions_locked: false,
         }
     }
 }

@@ -91,9 +91,14 @@ impl AcceptCard {
 
     /// The answer to report for `outcome` with the current choices.
     pub fn decision(&self, outcome: Outcome) -> PromptDecision {
+        let permissions = if self.request.permissions_locked {
+            self.request.permissions.0
+        } else {
+            self.permissions
+        };
         PromptDecision {
             outcome,
-            permissions: PermissionSet(self.permissions.union(Permissions::VIEW)),
+            permissions: PermissionSet(permissions.union(Permissions::VIEW)),
             trust: self.trust && outcome == Outcome::Accept,
         }
     }
@@ -290,7 +295,13 @@ impl AcceptCard {
     fn chips(&mut self, ui: &mut Ui, tx: Tx) {
         let dark = ui.visuals().dark_mode;
         let accent = theme::accent(dark);
-        let offered = CORE_CHIPS.union(self.request.permissions.0);
+        let fixed = self.request.permissions_locked;
+        // Fixed permissions: show only what will be granted.
+        let offered = if fixed {
+            self.request.permissions.0
+        } else {
+            CORE_CHIPS.union(self.request.permissions.0)
+        };
         let layout = if tx.rtl() {
             Layout::right_to_left(Align::Center).with_main_wrap(true)
         } else {
@@ -303,7 +314,7 @@ impl AcceptCard {
                     continue;
                 }
                 let on = self.permissions.contains(bit);
-                let locked = bit == Permissions::VIEW;
+                let locked = bit == Permissions::VIEW || fixed;
                 let (fg, fill, stroke) = if on {
                     (
                         accent,
@@ -319,7 +330,7 @@ impl AcceptCard {
                     )
                 };
                 // Viewing is what a session is: always on, shown with a lock.
-                let icon = match (locked, on) {
+                let icon = match (bit == Permissions::VIEW, on) {
                     (true, _) => Icon::Lock,
                     (false, true) => Icon::Check,
                     (false, false) => Icon::Plus,
@@ -464,6 +475,17 @@ mod tests {
         assert!(d.permissions.0.contains(Permissions::FILES));
         assert!(d.trust);
         assert!(!card.decision(Outcome::Decline).trust);
+    }
+
+    #[test]
+    fn locked_permissions_ignore_changes() {
+        let mut card = AcceptCard::new(PromptRequest {
+            permissions_locked: true,
+            ..PromptRequest::default()
+        });
+        let defaults = card.request.permissions.0;
+        card.permissions = Permissions::VIEW;
+        assert_eq!(card.decision(Outcome::Accept).permissions.0, defaults);
     }
 
     fn request(lang: Lang, name: &str) -> PromptRequest {
