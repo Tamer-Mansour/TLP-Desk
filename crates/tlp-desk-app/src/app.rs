@@ -1104,4 +1104,9 @@ impl eframe::App for App {
             Screen::ConnectionLog => self.connection_log_ui(ui),
         }
     }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // A drag out of the file browser ran the OS drag loop, which took the mouse-up.
+        crate::ui::file_browser::release_pointer_if_requested(ctx, raw_input);
+    }
 }
