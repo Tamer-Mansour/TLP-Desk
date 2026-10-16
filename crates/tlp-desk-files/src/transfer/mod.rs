@@ -350,6 +350,24 @@ impl FileTransfer {
         self.start(session_key, spec, None, None).await
     }
 
+    /// Viewer: lists host files and folders (absolute host paths, all in one folder)
+    /// recursively, like [`FileTransfer::start_download`] does before it starts, without
+    /// transferring anything. Returns the common folder and the items (folders included),
+    /// ready for [`FileTransfer::start_download_items`]. Used by drag-out, which must describe
+    /// every file to the drop target before the bytes move.
+    ///
+    /// # Errors
+    /// See [`FileTransfer::start_download`]; also more than `max_items` entries.
+    pub async fn list_remote_items(
+        &self,
+        session_key: u64,
+        remote_paths: Vec<String>,
+    ) -> Result<(String, Vec<TransferItem>), FilesError> {
+        let s = self.session(session_key)?;
+        check_viewer(&s)?;
+        list_remote(&s, &remote_paths, self.inner.cfg.max_items).await
+    }
+
     /// Viewer: downloads already-listed items (e.g. from a `ClipboardFiles` announcement)
     /// from `source_dir` on the host into `local_dest`, under `wire_id` if given.
     ///
