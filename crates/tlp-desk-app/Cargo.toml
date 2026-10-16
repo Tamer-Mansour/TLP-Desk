@@ -27,6 +27,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 unicode-bidi = "0.3.18"
 serde_json = "1"
 tracing = "0.1"
+# The service and agent processes log to a local file (service_entry).
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
 sys-locale = "0.3"
 # Local UTC offset for the file browser's "modified" column and chat timestamps (Windows: GetTimeZoneInformation).
 time = { version = "0.3", default-features = false, features = ["std", "local-offset"] }

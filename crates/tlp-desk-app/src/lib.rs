@@ -10,6 +10,8 @@ pub mod connection_log;
 pub mod i18n;
 pub mod input_map;
 pub mod keygrab;
+#[cfg(windows)]
+pub mod service_entry;
 pub mod settings;
 pub mod tray;
 pub mod ui;

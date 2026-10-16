@@ -4307,6 +4307,7 @@ dependencies = [
  "tlp-desk-viewer",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "tray-icon",
  "unicode-bidi",
  "windows-registry",

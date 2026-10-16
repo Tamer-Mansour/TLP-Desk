@@ -55,6 +55,11 @@ fn parse_args() -> Args {
 }
 
 fn main() -> anyhow::Result<()> {
+    // The service, its session agent and (un)installation run headless: never open a window.
+    #[cfg(windows)]
+    if let Some(code) = tlp_desk_app::service_entry::dispatch() {
+        std::process::exit(code);
+    }
     let args = parse_args();
     // Before any window exists: per-monitor DPI awareness keeps capture, input mapping and
     // the UI in physical pixels.
