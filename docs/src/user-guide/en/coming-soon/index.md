@@ -9,7 +9,6 @@ until it arrives.
 |---|---|
 | [Address book](address-book.md) | M2 |
 | [Ctrl+Alt+Del and lock](ctrl-alt-del.md) | M3 |
-| [Privacy mode](privacy-mode.md) | M3 |
 | [Wake-on-LAN](wake-on-lan.md) | M4 |
 
 ## Permissions
