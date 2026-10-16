@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn times_become_filetimes() {
+    fn times_become_windows_file_times() {
         // 1970-01-01 00:00:01 UTC.
         assert_eq!(filetime_from_unix_ms(1000), 116_444_736_010_000_000);
         assert_eq!(filetime_from_unix_ms(0), 0);

@@ -12,6 +12,8 @@ extend-exclude = [
 ]
 
 [default.extend-words]
+# FORMATETC.ptd: pointer to the DVTARGETDEVICE (COM data object, shellclip).
+ptd = "ptd"
 # Direct3D sampler fields (MipLODBias, MinLOD, MaxLOD): level of detail.
 LOD = "LOD"
 # schtasks / rc.exe flag ("/fo" = output format / output file).
