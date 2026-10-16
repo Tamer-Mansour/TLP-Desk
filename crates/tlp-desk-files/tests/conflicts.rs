@@ -290,3 +290,39 @@ async fn the_hosts_question_can_be_turned_on_while_running() {
     );
     assert_eq!(read(&dst.path().join("صورة.txt")), "old pic");
 }
+
+/// Regression (rc.2 system test): `get-file --on-conflict skip` of a file that already exists
+/// never finished. With every file skipped nothing has to travel, and the transfer must still
+/// end as completed, leaving the local file alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn download_with_every_file_skipped_still_finishes() {
+    let p = pair_with(
+        TransferConfig::default(),
+        TransferConfig {
+            download_conflict: ConflictPolicy::Skip,
+            ..TransferConfig::default()
+        },
+    )
+    .await;
+    let src = tempfile::tempdir().unwrap();
+    let dst = tempfile::tempdir().unwrap();
+    std::fs::write(src.path().join("تقرير.txt"), "remote copy").unwrap();
+    std::fs::write(dst.path().join("تقرير.txt"), "local copy").unwrap();
+    let mut vev = p.viewer_ft.subscribe();
+    let id = within(
+        "start",
+        p.viewer_ft.start_download(
+            p.viewer_key,
+            vec![src.path().join("تقرير.txt").to_str().unwrap().into()],
+            dst.path().to_path_buf(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        finished(&mut vev, Some(id)).await.1,
+        TransferState::Completed
+    );
+    assert_eq!(read(&dst.path().join("تقرير.txt")), "local copy");
+    assert_eq!(std::fs::read_dir(dst.path()).unwrap().count(), 1);
+}
