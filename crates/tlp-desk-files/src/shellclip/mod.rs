@@ -7,6 +7,7 @@
 //! desktop and the files arrive, with Explorer's own progress dialog.
 //!
 //! * [`descriptor`]: the `FILEGROUPDESCRIPTORW` bytes (pure, tested everywhere).
+//! * [`engine`]: wiring of the announcements, the transfer engine and the clipboard ([`engine::install`]).
 //! * [`staged`]: the bytes of one virtual file, read from a staging folder that the transfer
 //!   engine fills ([`Stager`]); a read waits (pumping messages) until the file is complete.
 //! * `windows` (Windows only, the only `unsafe` code): the `IDataObject`, `IStream` and
@@ -22,6 +23,7 @@
 //! "IDataObjectAsyncCapability", `OleSetClipboard`.
 
 pub mod descriptor;
+pub mod engine;
 pub mod staged;
 #[cfg(windows)]
 #[allow(unsafe_code)]
