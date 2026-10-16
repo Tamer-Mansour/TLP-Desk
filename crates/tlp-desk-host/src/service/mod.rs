@@ -29,7 +29,8 @@
 //! * **User-session features** (IPC v2): the clipboard, Explorer paste, the whiteboard
 //!   overlay, the pointer marker, the local-input hooks, the privacy shield and loopback audio
 //!   must run on the user's desktop, so the agent owns them ([`FeatureHost`] around the app's
-//!   [`AgentFeatures`]) and the service's session features use proxies. Host-side windows (transfers, chat, conflict questions) are shown
+//!   [`AgentFeatures`]) and the service's session features use proxies
+//!   ([`AgentFeatureHub`]). Host-side windows (transfers, chat, conflict questions) are shown
 //!   by the user's GUI through app messages on the GUI pipe.
 //!
 //! The pure logic lives in small, unit-tested modules (IPC framing in [`ipc`]); Windows calls
@@ -39,6 +40,7 @@ mod agent;
 mod agent_features;
 mod client;
 mod desktop;
+mod feature_proxy;
 mod gui;
 pub mod ipc;
 mod pipe_security;
@@ -60,6 +62,10 @@ pub use agent_features::{
     MAX_FEATURE_OBJECTS,
 };
 pub use client::{gui_command_on, gui_subscribe_on, GuiSubscription};
+pub use feature_proxy::{
+    AgentActivity, AgentAudio, AgentFeatureHub, AgentMarker, AgentOverlay, AgentShield,
+    StageHandler, OVERLAY_POINTS_PER_REQUEST,
+};
 pub use gui::{
     route_prompt, serve_gui_connection, GuiCommands, GuiHub, PromptRoute, GUI_HEARTBEAT,
 };

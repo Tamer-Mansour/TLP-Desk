@@ -11,6 +11,7 @@
 //! [`HostConfig`]: crate::HostConfig
 
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 
@@ -54,6 +55,11 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct AgentLink {
     connector: RwLock<Option<Arc<dyn AgentConnector>>>,
     command: Mutex<Option<Box<dyn AgentConn>>>,
+    /// The cached user-session feature connection (IPC v2).
+    feature: Mutex<Option<Box<dyn AgentConn>>>,
+    /// Bumped on every [`AgentLink::set`]: feature proxies re-create their objects in a new
+    /// agent.
+    generation: AtomicU64,
 }
 
 impl std::fmt::Debug for AgentLink {
@@ -73,8 +79,42 @@ impl AgentLink {
     /// Points the link at a new agent (`None`: the agent is gone).
     pub fn set(&self, connector: Option<Arc<dyn AgentConnector>>) {
         *self.connector.write().unwrap_or_else(|p| p.into_inner()) = connector;
-        // The cached command connection belongs to the old agent.
+        // The cached connections belong to the old agent.
         lock(&self.command).take();
+        lock(&self.feature).take();
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Changes whenever the link is pointed at another agent (or at none).
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    /// Runs one request/reply exchange on the (cached) feature connection; reconnects once
+    /// if the cached connection broke. Exchanges are serialized.
+    pub fn feature<T>(
+        &self,
+        mut exchange: impl FnMut(&mut dyn AgentConn) -> Result<T, HostError>,
+    ) -> Result<T, HostError> {
+        let mut cached = lock(&self.feature);
+        for attempt in 0..2 {
+            if cached.is_none() {
+                cached.replace(self.open(AgentChannel::Feature)?.0);
+            }
+            let Some(conn) = cached.as_mut() else {
+                return Err(HostError::NoAgent);
+            };
+            match exchange(conn.as_mut()) {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    cached.take();
+                    if attempt == 1 {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Err(HostError::NoAgent)
     }
 
     /// Whether an agent is set.
