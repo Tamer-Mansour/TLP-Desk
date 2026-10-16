@@ -8,6 +8,16 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Fixed
+
+- The sharp refresh picture after scrolling or typing no longer waits until the mouse stops moving. (Found by the rc.2 [system test](dev/system-test-report.md).)
+- `get-file --on-conflict skip` no longer hangs when every file already exists, and `get-file` prints its destination as `C:\...` instead of `\\?\C:\...`.
+- Hardware encoder: when Media Foundation refuses a frame the encoder waits for its next request instead of giving up, and a fallback to OpenH264 now logs the real cause.
+
+### Added
+
+- CLI `connect` statistics show the quantiser (`Q~`, `"qp"`) and a millisecond timestamp (`"t_ms"`). Hidden, development-only `connect --sim-loss`, `--sim-bandwidth-kbps` and `--sim-seconds` flags simulate a lossy or slow link for testing the adaptive quality on one PC.
+
 ## [1.0.0-rc.2] - 2026-10-16
 
 Streaming quality and AnyDesk-style file transfer.
