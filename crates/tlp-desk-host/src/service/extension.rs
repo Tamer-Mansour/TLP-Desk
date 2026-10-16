@@ -19,6 +19,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tlp_desk_crypto::{PasswordStore, PasswordVerifier, TicketStore};
 use tlp_desk_net::{Endpoint, EndpointConfig};
 use tlp_desk_proto::Permissions;
 
@@ -96,10 +97,62 @@ pub trait ServiceExtension: Send + Sync + 'static {
     }
 }
 
+/// Where the service's credentials live on disk, for [`GuiCommand::ReloadCredentials`]
+/// (audit F5).
+///
+/// [`GuiCommand::ReloadCredentials`]: super::ipc::GuiCommand::ReloadCredentials
+#[derive(Debug, Clone)]
+pub struct CredentialFiles {
+    /// Data directory holding the permanent password file ([`PasswordStore`]).
+    pub data_dir: PathBuf,
+    /// The host's reconnect ticket store (shared with the host), if tickets are enabled.
+    pub tickets: Option<TicketStore>,
+}
+
+/// Something whose permanent password can be replaced at run time (the [`Host`]; faked in
+/// tests).
+pub trait PasswordTarget {
+    /// Replaces the permanent password (`None` = disabled).
+    fn set_password(&self, verifier: Option<PasswordVerifier>);
+}
+
+impl PasswordTarget for Host {
+    fn set_password(&self, verifier: Option<PasswordVerifier>) {
+        Host::set_password(self, verifier);
+    }
+}
+
+/// Re-reads the permanent password and the reconnect tickets (audit F5): before this, a
+/// password set or removed while the service ran took effect only after a service restart.
+/// A password file that cannot be read disables the password (fail closed). Returns whether
+/// everything was read.
+pub fn reload_credentials(target: &dyn PasswordTarget, files: &CredentialFiles) -> bool {
+    let mut ok = true;
+    match PasswordStore::new(&files.data_dir).load() {
+        Ok(verifier) => {
+            tracing::info!(set = verifier.is_some(), "permanent password reloaded");
+            target.set_password(verifier);
+        }
+        Err(e) => {
+            tracing::warn!(%e, "cannot read the permanent password; disabled");
+            target.set_password(None);
+            ok = false;
+        }
+    }
+    if let Some(t) = &files.tickets {
+        if let Err(e) = t.reload() {
+            tracing::warn!(%e, "cannot reload reconnect tickets; keeping the current ones");
+            ok = false;
+        }
+    }
+    ok
+}
+
 /// The GUI commands the service serves: the host's own, plus the extension's app messages.
 pub struct ServiceCommands {
     host: Arc<Host>,
     ext: Option<Arc<dyn ServiceExtension>>,
+    credentials: Option<CredentialFiles>,
 }
 
 impl std::fmt::Debug for ServiceCommands {
@@ -113,7 +166,19 @@ impl std::fmt::Debug for ServiceCommands {
 impl ServiceCommands {
     /// Commands on `host`, with the app messages of `ext`.
     pub fn new(host: Arc<Host>, ext: Option<Arc<dyn ServiceExtension>>) -> Self {
-        Self { host, ext }
+        Self {
+            host,
+            ext,
+            credentials: None,
+        }
+    }
+
+    /// Lets [`GuiCommand::ReloadCredentials`](super::ipc::GuiCommand::ReloadCredentials)
+    /// re-read `files`.
+    #[must_use]
+    pub fn with_credentials(mut self, files: CredentialFiles) -> Self {
+        self.credentials = Some(files);
+        self
     }
 }
 
@@ -138,5 +203,59 @@ impl GuiCommands for ServiceCommands {
             .as_ref()
             .map(|e| e.app_snapshot())
             .unwrap_or_default()
+    }
+    fn reload_credentials(&self) -> bool {
+        self.credentials
+            .as_ref()
+            .is_some_and(|files| reload_credentials(&*self.host, files))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use tlp_desk_crypto::{now_unix_ms, Fingerprint, DEFAULT_TICKET_TTL, TICKETS_FILE};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct FakeHost(Mutex<Vec<Option<PasswordVerifier>>>);
+
+    impl PasswordTarget for FakeHost {
+        fn set_password(&self, verifier: Option<PasswordVerifier>) {
+            self.0.lock().unwrap().push(verifier);
+        }
+    }
+
+    /// Audit F5: a password saved (or removed) on disk while the service runs, and tickets
+    /// revoked on disk, take effect on `ReloadCredentials` without a restart.
+    #[test]
+    fn reload_picks_up_password_and_ticket_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("بيانات");
+        let fp = Fingerprint([5; 32]);
+        let tickets = TicketStore::load(&data.join(TICKETS_FILE), DEFAULT_TICKET_TTL).unwrap();
+        tickets.issue(&fp, 1, now_unix_ms()).unwrap();
+        let files = CredentialFiles {
+            data_dir: data.clone(),
+            tickets: Some(tickets.clone()),
+        };
+        let host = FakeHost::default();
+
+        // Another process (the elevated GUI) saves a password and revokes the tickets.
+        let v = PasswordVerifier::derive("كلمة-سر-طويلة-2026", &fp).unwrap();
+        PasswordStore::new(&data).save(&v).unwrap();
+        TicketStore::load(&data.join(TICKETS_FILE), DEFAULT_TICKET_TTL)
+            .unwrap()
+            .revoke_all();
+        assert!(reload_credentials(&host, &files));
+        assert_eq!(host.0.lock().unwrap().last(), Some(&Some(v)));
+        assert!(tickets.is_empty());
+
+        // Removing the password disables it.
+        PasswordStore::new(&data).clear().unwrap();
+        assert!(reload_credentials(&host, &files));
+        assert_eq!(host.0.lock().unwrap().last(), Some(&None));
     }
 }

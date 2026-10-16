@@ -18,9 +18,10 @@ use super::launch::{active_console_session, launch, user_logged_on, LaunchAs, Wi
 use super::{pipe, sas};
 use crate::service::ipc::{self, AgentChannel, AgentEvent, WireDesktop};
 use crate::service::{
-    agent_pipe_name, route_prompt, serve_gui_connection, AgentConn, AgentConnector,
-    AgentFeatureHub, AgentLink, AgentSupervisor, DesktopStatus, GuiHub, PipeSpec, PromptRoute,
-    RestartPolicy, ServiceCommands, ServiceContext, ServiceExtension, SessionAction, SessionChange,
+    agent_pipe_name, check_gui_client, route_prompt, serve_gui_connection, AgentConn,
+    AgentConnector, AgentFeatureHub, AgentLink, AgentSupervisor, CredentialFiles, DesktopStatus,
+    GuiClientFacts, GuiClientRefusal, GuiHub, PipeSpec, PromptRoute, RestartPolicy,
+    ServiceCommands, ServiceContext, ServiceExtension, SessionAction, SessionChange,
     SessionTracker, SupervisorEvent, SystemActions, SystemControl, NO_CONSOLE_SESSION,
 };
 use crate::{Host, HostConfig, HostError, HostEvent, HostEvents, MAX_CAPTURE_SIZE};
@@ -293,6 +294,10 @@ pub fn run_service(
     let identity = Arc::new(Identity::load_or_generate(&opts.data_dir)?);
     let device_name = opts.host.device_name.clone();
     let extension = opts.extension.clone();
+    let credentials = CredentialFiles {
+        data_dir: opts.data_dir.clone(),
+        tickets: opts.host.reconnect_tickets.clone(),
+    };
     let mut ep_cfg = EndpointConfig {
         bind: opts.bind,
         device_name: device_name.clone(),
@@ -350,7 +355,10 @@ pub fn run_service(
     }
     spawn_gui_server(
         hub.clone(),
-        Arc::new(ServiceCommands::new(host.clone(), extension.clone())),
+        Arc::new(
+            ServiceCommands::new(host.clone(), extension.clone()).with_credentials(credentials),
+        ),
+        opts.exe.clone(),
     );
 
     let service_pid = std::process::id();
@@ -467,8 +475,29 @@ async fn pump_host_events(
     }
 }
 
-/// Accepts GUI connections forever (the thread ends with the process).
-fn spawn_gui_server(hub: Arc<GuiHub>, commands: Arc<ServiceCommands>) {
+/// Reads what the GUI admission check needs about the client of `pipe` (audit F2). Each
+/// failed query leaves its fact `None`, which refuses the client.
+fn gui_client_facts(pipe: &File) -> GuiClientFacts {
+    let image = pipe::client_process_id(pipe)
+        .and_then(pipe::process_image)
+        .map_err(|e| tracing::warn!(%e, "cannot read the GUI client's image"))
+        .ok();
+    let integrity_rid = pipe::client_integrity_rid(pipe)
+        .map_err(|e| tracing::warn!(%e, "cannot read the GUI client's integrity level"))
+        .ok();
+    let facts = GuiClientFacts {
+        session: pipe::client_session_id(pipe).ok(),
+        console_session: active_console_session(),
+        integrity_rid,
+        image,
+    };
+    tracing::debug!(?facts, "GUI pipe client");
+    facts
+}
+
+/// Accepts GUI connections forever (the thread ends with the process). Only clients that
+/// pass [`check_gui_client`] against `exe` (the service's own `TLP-Desk.exe`) are served.
+fn spawn_gui_server(hub: Arc<GuiHub>, commands: Arc<ServiceCommands>, exe: PathBuf) {
     let spawned = std::thread::Builder::new()
         .name("tlp-svc-gui".into())
         .spawn(move || {
@@ -493,15 +522,20 @@ fn spawn_gui_server(hub: Arc<GuiHub>, commands: Arc<ServiceCommands>) {
                     tracing::debug!(%e, "GUI pipe connect failed");
                     continue;
                 }
-                let in_console = pipe::client_session_id(&conn)
-                    .ok()
-                    .is_some_and(|s| Some(s) == active_console_session());
                 let hub = hub.clone();
                 let commands = commands.clone();
+                let exe = exe.clone();
                 let spawned = std::thread::Builder::new()
                     .name("tlp-svc-gui-conn".into())
                     .spawn(move || {
-                        if let Err(e) = serve_gui_connection(&mut conn, &hub, &*commands, in_console)
+                        // A second handle to the same pipe instance for the admission check,
+                        // which runs once the hello has been read.
+                        let probe = conn.try_clone();
+                        let verify = || match &probe {
+                            Ok(p) => check_gui_client(&gui_client_facts(p), &exe),
+                            Err(_) => Err(GuiClientRefusal::NotConsoleSession),
+                        };
+                        if let Err(e) = serve_gui_connection(&mut conn, &hub, &*commands, verify)
                         {
                             tracing::debug!(%e, "GUI connection ended");
                         }

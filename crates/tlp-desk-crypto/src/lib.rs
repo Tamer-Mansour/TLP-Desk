@@ -47,7 +47,7 @@ pub use password_store::{
     PASSWORD_FILE,
 };
 pub use ratelimit::{RateLimitConfig, RateLimited, RateLimiter};
-pub use storage::{default_dir, harden_dir};
+pub use storage::{default_dir, ensure_private_dir, harden_dir, secure_service_dir};
 pub use ticket::{
     now_unix_ms, IssuedTicket, TicketRejected, TicketStore, DEFAULT_TICKET_TTL, TICKETS_FILE,
     TICKET_LEN,

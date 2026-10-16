@@ -68,6 +68,10 @@ pub enum TicketRejected {
     /// Issued by this very process instance: the restart has not happened yet. The ticket is
     /// kept for the next instance.
     NotRestartedYet,
+    /// The ticket was valid but its removal could not be written to disk. Refused (and
+    /// consumed in memory): a success the store cannot remember would let the same ticket
+    /// work again after the next restart.
+    NotPersisted,
 }
 
 #[derive(Clone)]
@@ -152,27 +156,7 @@ impl TicketStore {
     /// # Errors
     /// The file exists but cannot be read.
     pub fn load(path: &Path, ttl: Duration) -> Result<Self, CryptoError> {
-        let text = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(e.into()),
-        };
-        let now = now_unix_ms();
-        let mut entries = Vec::new();
-        for (n, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            match parse_line(line) {
-                Some(e) if e.expires_unix_ms > now => entries.push(e),
-                Some(_) => {}
-                None => tracing::warn!(line = n + 1, "ignoring malformed reconnect ticket line"),
-            }
-            if entries.len() >= MAX_TICKETS {
-                break;
-            }
-        }
+        let entries = read_entries(path)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(State {
                 path: Some(path.to_owned()),
@@ -181,6 +165,28 @@ impl TicketStore {
                 entries,
             })),
         })
+    }
+
+    /// Re-reads a persisted store from its file (audit F5: credentials changed by another
+    /// process while the service runs). Tickets no longer on file are dropped (revocations
+    /// count); tickets this process issued keep their instance, so they still cannot be
+    /// redeemed before the restart. No-op for an in-memory store.
+    ///
+    /// # Errors
+    /// The file exists but cannot be read (the store is left unchanged).
+    pub fn reload(&self) -> Result<(), CryptoError> {
+        let mut s = self.lock();
+        let Some(path) = s.path.clone() else {
+            return Ok(());
+        };
+        let mut fresh = read_entries(&path)?;
+        for e in &mut fresh {
+            if let Some(old) = s.entries.iter().find(|o| ct_eq(&o.hash, &e.hash)) {
+                e.instance = old.instance;
+            }
+        }
+        s.entries = fresh;
+        Ok(())
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -256,7 +262,8 @@ impl TicketStore {
             return Err(TicketRejected::NotRestartedYet);
         }
         s.entries.remove(pos);
-        if let Err(e) = save(&s) {
+        let persisted = save(&s);
+        if let Err(e) = &persisted {
             // Consumed in memory anyway: a ticket must never work twice.
             tracing::warn!(%e, "could not persist the consumed reconnect ticket");
         }
@@ -265,6 +272,11 @@ impl TicketStore {
         }
         if entry.expires_unix_ms <= now_unix_ms {
             return Err(TicketRejected::Expired);
+        }
+        if persisted.is_err() {
+            // Fail closed (audit F4): the file still lists the ticket, so succeeding here
+            // would make it redeemable once more after the next restart.
+            return Err(TicketRejected::NotPersisted);
         }
         Ok(entry.grant)
     }
@@ -333,6 +345,32 @@ impl TicketStore {
     }
 }
 
+/// The unexpired, well-formed entries of the store file (missing file = none).
+fn read_entries(path: &Path) -> Result<Vec<Entry>, CryptoError> {
+    let text = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let now = now_unix_ms();
+    let mut entries = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        match parse_line(line) {
+            Some(e) if e.expires_unix_ms > now => entries.push(e),
+            Some(_) => {}
+            None => tracing::warn!(line = n + 1, "ignoring malformed reconnect ticket line"),
+        }
+        if entries.len() >= MAX_TICKETS {
+            break;
+        }
+    }
+    Ok(entries)
+}
+
 fn parse_line(line: &str) -> Option<Entry> {
     let mut parts = line.split_whitespace();
     let hash = Fingerprint::from_hex(parts.next()?).ok()?.0;
@@ -369,13 +407,11 @@ fn save(s: &State) -> Result<(), CryptoError> {
     write_private(path, text.as_bytes())
 }
 
-/// Atomically writes a small private file, creating (and hardening) its directory if needed.
+/// Atomically writes a small private file, creating its directory if needed and re-applying
+/// the private ACL every time ([`crate::ensure_private_dir`], audit F1).
 pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), CryptoError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    if !dir.as_os_str().is_empty() && !dir.exists() {
-        fs::create_dir_all(dir)?;
-        crate::harden_dir(dir);
-    }
+    crate::ensure_private_dir(dir)?;
     let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
     tmp_name.push(".tmp");
     let tmp = path.with_file_name(tmp_name);
@@ -504,6 +540,57 @@ mod tests {
         // consumption is persisted too
         let again = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
         assert!(again.is_empty());
+    }
+
+    /// Regression test for audit F4: when consuming a valid ticket cannot be written to disk,
+    /// the redemption fails closed instead of succeeding with the ticket still on file
+    /// (where it would work again after the next restart). The failing writer is real: the
+    /// atomic save's temp file name is occupied by a directory.
+    #[test]
+    fn redemption_fails_closed_when_the_consumption_cannot_be_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("تذاكر").join(TICKETS_FILE);
+        let store = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        let now = now_unix_ms();
+        let t = store.issue(&fp(4), 0x21, now).unwrap();
+
+        let rebooted = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        let mut tmp_name = TICKETS_FILE.to_owned();
+        tmp_name.push_str(".tmp");
+        fs::create_dir(path.with_file_name(tmp_name)).unwrap();
+        assert_eq!(
+            rebooted.redeem(&t.token, &fp(4), now + 1),
+            Err(TicketRejected::NotPersisted)
+        );
+        // Consumed in memory all the same: no second try in this process either.
+        assert_eq!(
+            rebooted.redeem(&t.token, &fp(4), now + 2),
+            Err(TicketRejected::Unknown)
+        );
+    }
+
+    /// Audit F5: a reload honours revocations written by another process and keeps the
+    /// "not before the restart" rule for tickets this instance issued.
+    #[test]
+    fn reload_drops_revoked_tickets_and_keeps_own_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(TICKETS_FILE);
+        let store = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        let now = now_unix_ms();
+        let mine = store.issue(&fp(1), 1, now).unwrap();
+        store.issue(&fp(2), 2, now).unwrap();
+        // Another process revokes peer 2 on disk.
+        let other = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        assert_eq!(other.revoke_peer(&fp(2)), 1);
+        store.reload().unwrap();
+        assert_eq!(store.len(), 1);
+        assert!(!store.has_ticket(&fp(2), now));
+        assert_eq!(
+            store.redeem(&mine.token, &fp(1), now + 1),
+            Err(TicketRejected::NotRestartedYet)
+        );
+        // In-memory stores have nothing to reload.
+        TicketStore::in_memory(DEFAULT_TICKET_TTL).reload().unwrap();
     }
 
     #[test]
