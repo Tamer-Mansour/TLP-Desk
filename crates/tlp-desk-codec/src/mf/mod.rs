@@ -121,8 +121,9 @@ pub struct MfEncoder {
     params: ParamSets,
     force_keyframe: bool,
     frames: u64,
-    /// Set after a timeout or a lost worker; every later call fails fast.
-    broken: bool,
+    /// Why the encoder stopped working (a timeout, a lost worker, an MFT error); every later
+    /// call fails fast with this reason, so the fallback's log says what really happened.
+    broken: Option<String>,
 }
 
 impl MfEncoder {
@@ -191,7 +192,7 @@ impl MfEncoder {
             params: ParamSets::default(),
             force_keyframe: false, // the first frame is always an IDR
             frames: 0,
-            broken: false,
+            broken: None,
         })
     }
 
@@ -206,15 +207,22 @@ impl MfEncoder {
     }
 
     fn broken(&mut self, why: &str) -> CodecError {
-        self.broken = true;
+        self.broken = Some(why.to_owned());
         CodecError::Backend(format!("hardware encoder lost: {why}"))
+    }
+
+    /// The error for calls after the encoder broke, `None` while it works.
+    fn unusable(&self) -> Option<CodecError> {
+        self.broken.as_ref().map(|why| {
+            CodecError::Backend(format!("hardware encoder is not usable (it failed: {why})"))
+        })
     }
 }
 
 impl VideoEncoder for MfEncoder {
     fn encode(&mut self, frame: &BgraFrame) -> Result<Option<EncodedFrame>, CodecError> {
-        if self.broken {
-            return Err(CodecError::Backend("hardware encoder is not usable".into()));
+        if let Some(e) = self.unusable() {
+            return Err(e);
         }
         if frame.width != self.config.width || frame.height != self.config.height {
             return Err(CodecError::SizeMismatch {
@@ -258,7 +266,9 @@ impl VideoEncoder for MfEncoder {
         };
         self.spare = Some(yuv);
         self.frames += 1;
-        let Some((mut data, time_hns)) = result.inspect_err(|_| self.broken = true)? else {
+        let Some((mut data, time_hns)) =
+            result.inspect_err(|e| self.broken = Some(e.to_string()))?
+        else {
             return Ok(None);
         };
         let keyframe = self.params.process(&mut data);
@@ -275,8 +285,8 @@ impl VideoEncoder for MfEncoder {
     }
 
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError> {
-        if self.broken {
-            return Err(CodecError::Backend("hardware encoder is not usable".into()));
+        if let Some(e) = self.unusable() {
+            return Err(e);
         }
         let kbps = kbps.max(1);
         if self

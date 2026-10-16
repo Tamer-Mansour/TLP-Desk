@@ -13,6 +13,7 @@ use tlp_desk_proto::{
 use tokio::sync::{mpsc, watch, Notify};
 
 use crate::frame::{convert, DecodedFrame, FrameSlot, PixelFormat};
+use crate::netsim::{LinkSim, NetSim, Verdict};
 use crate::perf::{FeedbackWindow, LatencyClock};
 use crate::RepaintFn;
 
@@ -118,6 +119,8 @@ struct Shared {
     feedback: Mutex<FeedbackWindow>,
     /// Sees every received frame before decoding (session recording).
     tap: Mutex<Option<crate::recording::VideoTap>>,
+    /// Development only: simulated link impairment (see [`crate::netsim`]).
+    net_sim: Mutex<Option<LinkSim>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -217,6 +220,7 @@ impl ViewerSession {
             clock: Mutex::new(LatencyClock::new()),
             feedback: Mutex::new(FeedbackWindow::default()),
             tap: Mutex::new(None),
+            net_sim: Mutex::new(None),
         });
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         // Capacity 1: if decoding falls behind, the network layer's small queue overflows and
@@ -349,6 +353,22 @@ impl ViewerSession {
         *lock(&self.shared.tap) = tap;
     }
 
+    /// **Development only**: simulates a lossy or slow link for the video this session
+    /// receives (`None` or an inactive [`NetSim`] turns it off). The host sees the lost frames
+    /// in `ViewerFeedback` and adapts as on a real congested network. See [`crate::netsim`].
+    pub fn set_net_sim(&self, sim: Option<NetSim>) {
+        let seed = u64::try_from(self.shared.started.elapsed().as_nanos()).unwrap_or(1)
+            ^ self.feature_key.rotate_left(17);
+        *lock(&self.shared.net_sim) = sim
+            .filter(NetSim::is_active)
+            .map(|cfg| LinkSim::new(cfg, seed));
+    }
+
+    /// The link simulation in use, if any (development only).
+    pub fn net_sim(&self) -> Option<NetSim> {
+        lock(&self.shared.net_sim).as_ref().map(LinkSim::config)
+    }
+
     /// Asks the host for a keyframe (non-blocking). Returns `false` once the session has
     /// ended.
     pub fn request_keyframe(&self) -> bool {
@@ -391,8 +411,14 @@ impl Drop for ViewerSession {
     }
 }
 
+/// Minimum gap between two keyframe requests caused by simulated loss.
+const SIM_KEYFRAME_EVERY: Duration = Duration::from_millis(250);
+
 async fn video_task(shared: Arc<Shared>, jobs: mpsc::Sender<Job>) {
     let mut min_offset: Option<i64> = None;
+    // Simulated loss broke the reference chain: skip until the next keyframe.
+    let mut sim_wait_key = false;
+    let mut sim_last_request: Option<Instant> = None;
     loop {
         let frame = match shared.session.recv_video().await {
             Ok(f) => f,
@@ -402,6 +428,23 @@ async fn video_task(shared: Arc<Shared>, jobs: mpsc::Sender<Job>) {
             }
         };
         lock(&shared.feedback).on_received(frame.seq);
+        let verdict = lock(&shared.net_sim)
+            .as_mut()
+            .map(|sim| sim.admit(frame.data.len(), Instant::now()));
+        match verdict {
+            Some(Verdict::Drop) => sim_wait_key = true,
+            _ if frame.keyframe => sim_wait_key = false,
+            _ => {}
+        }
+        if sim_wait_key {
+            lock(&shared.feedback).on_skipped();
+            let now = Instant::now();
+            if sim_last_request.is_none_or(|t| now.duration_since(t) >= SIM_KEYFRAME_EVERY) {
+                sim_last_request = Some(now);
+                let _ = shared.session.send(&Message::RequestKeyframe).await;
+            }
+            continue;
+        }
         let arrival = shared.started.elapsed().as_micros() as i64;
         let offset = arrival - frame.timestamp_us as i64;
         let min = min_offset.map_or(offset, |m| m.min(offset));

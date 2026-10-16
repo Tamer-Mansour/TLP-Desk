@@ -457,6 +457,10 @@ struct EncodeState {
     patch: CursorPatch,
     /// When the oldest not-yet-encoded change happened (None = nothing to send).
     pending_since: Option<Instant>,
+    /// The pending change is more than a pointer move (new screen content, a keyframe request
+    /// or a resync after a drop). A pointer-only change never holds back the refresh picture,
+    /// which draws the pointer itself.
+    pending_content: bool,
     /// When to send the high-quality refresh after the screen stops changing.
     refine: RefineGate,
     /// Resolution step last seen; a change means the capturer is about to be reopened.
@@ -499,6 +503,7 @@ fn encode_loop(
         cursor: CursorOverlay::new(),
         patch: CursorPatch::default(),
         pending_since: None,
+        pending_content: false,
         refine: RefineGate::default(),
         last_scale: mailbox.scale.load(Ordering::Acquire),
     };
@@ -535,6 +540,7 @@ fn encode_loop(
         let Some(since) = st.pending_since.take() else {
             continue;
         };
+        st.pending_content = false;
         let Some((frame, monitor)) = st.last.as_mut() else {
             continue;
         };
@@ -582,6 +588,7 @@ fn encode_loop(
                         st.refine.note_congestion(now);
                         enc.request_keyframe();
                         st.pending_since.get_or_insert(now);
+                        st.pending_content = true;
                     }
                     Err(e) => return Err(format!("cannot send video: {e}")),
                 }
@@ -591,6 +598,7 @@ fn encode_loop(
                 st.enc = Some(new_encoder(ctx, &mut adapter, frame_size.0, frame_size.1)?);
                 st.size = frame_size;
                 st.pending_since.get_or_insert(now);
+                st.pending_content = true;
             }
             Err(e) => return Err(format!("encoder failed: {e}")),
         }
@@ -602,6 +610,11 @@ fn encode_loop(
 fn send_refine(ctx: &PipelineCtx, st: &mut EncodeState, seq: &mut u64) -> Result<(), String> {
     let now = Instant::now();
     st.refine.note_refined(now);
+    // Only a pointer move can be pending here (see `wait_for_work`): the refresh draws the
+    // pointer where it is now, so that update is sent with it.
+    if !st.pending_content {
+        st.pending_since = None;
+    }
     let (Some(enc), Some((frame, monitor))) = (st.enc.as_mut(), st.last.as_mut()) else {
         return Ok(());
     };
@@ -624,13 +637,17 @@ fn send_refine(ctx: &PipelineCtx, st: &mut EncodeState, seq: &mut u64) -> Result
                 data: ef.data,
             };
             *seq += 1;
+            let (sent_seq, bytes) = (vf.seq, vf.data.len());
             match ctx.session.send_video(vf) {
-                Ok(VideoSendStatus::Sent) => {}
+                Ok(VideoSendStatus::Sent) => {
+                    tracing::debug!(seq = sent_seq, bytes, size = ?frame_size, "refresh picture sent");
+                }
                 Ok(VideoSendStatus::Dropped) => {
                     // The viewer never saw this keyframe: resynchronise with the next picture.
                     st.refine.note_congestion(now);
                     enc.request_keyframe();
                     st.pending_since.get_or_insert(now);
+                    st.pending_content = true;
                 }
                 Err(e) => return Err(format!("cannot send video: {e}")),
             }
@@ -660,6 +677,7 @@ fn wait_for_work(
         }
         if let Some(c) = slot.frame.take() {
             st.pending_since.get_or_insert(c.at);
+            st.pending_content = true;
             st.refine.note_change(Instant::now());
             if st.gen != Some(c.gen) {
                 // New capturer: the old frame is stale and the stream must restart with a
@@ -685,6 +703,7 @@ fn wait_for_work(
                 enc.request_keyframe();
             }
             st.pending_since.get_or_insert_with(Instant::now);
+            st.pending_content = true;
         }
         let now = Instant::now();
         if now >= adapter.next_tick() {
@@ -698,7 +717,9 @@ fn wait_for_work(
             st.refine.note_change(now);
         }
         let mut refine_wait = None;
-        if st.pending_since.is_none() && st.last.is_some() && st.enc.is_some() {
+        // A pending pointer move does not hold the refresh back (it is drawn into it); with a
+        // mouse in motion something is pending almost all the time.
+        if !st.pending_content && st.last.is_some() && st.enc.is_some() {
             if st.refine.is_due(now) {
                 return Some(Wake::Refine);
             }
