@@ -5,6 +5,8 @@
 //! * `--connect <id|name|ip[:port]>` — start connecting immediately;
 //! * `--code <6 digits>` — the host's one-time code for `--connect`;
 //! * `--settings` — open on the settings screen;
+//! * `--hidden` — start in the notification area this time (the service uses it so that an
+//!   Accept prompt shows only its own window);
 //! * `--port <udp port>` — listen on another port than 47400 (testing two instances);
 //! * `--fake` — run on the in-process fake backend (no network; development/screenshots);
 //! * `--accept-prompt` — internal: the stand-alone Accept window (see `prompt`).
@@ -47,6 +49,7 @@ fn parse_args() -> Args {
             "--connect" => a.start.connect = args.next(),
             "--code" => a.start.code = args.next(),
             "--settings" => a.start.screen_settings = true,
+            "--hidden" => a.start.start_hidden = true,
             "--fake" => a.fake = true,
             "--port" => a.port = args.next().and_then(|p| p.parse().ok()),
             other => eprintln!("ignoring unknown argument {other:?}"),

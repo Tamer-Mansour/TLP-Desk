@@ -112,7 +112,7 @@ impl App {
             let cmds = self
                 .tray
                 .shell
-                .startup(self.settings.startup.start_minimized);
+                .startup(self.settings.startup.start_minimized || self.start_hidden);
             apply_window_cmds(ctx, &cmds);
         }
         if ctx.input(|i| i.viewport().close_requested()) {

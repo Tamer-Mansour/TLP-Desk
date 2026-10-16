@@ -86,6 +86,9 @@ pub struct StartOptions {
     /// Keep the address book in memory only: nothing is read from or written to
     /// `%APPDATA%` (screenshots, tests).
     pub address_book_in_memory: bool,
+    /// Start hidden in the notification area for this run only (`--hidden`: the service
+    /// starts the GUI this way for an Accept prompt, which then appears as its own window).
+    pub start_hidden: bool,
 }
 
 pub struct App {
@@ -154,6 +157,8 @@ pub struct App {
     pub accept_popups: crate::prompt::AcceptPopups,
     /// The in-app Accept card (popup off or failed) and the request it shows.
     pub accept_card: Option<(RequestId, crate::ui::accept_window::AcceptCard)>,
+    /// [`StartOptions::start_hidden`].
+    pub(crate) start_hidden: bool,
 }
 
 impl App {
@@ -221,6 +226,7 @@ impl App {
             host_transfers: Default::default(),
             accept_popups: Default::default(),
             accept_card: None,
+            start_hidden: opts.start_hidden,
         };
         // The Run key is the truth for "start with Windows" (it can be removed outside the app).
         if let Ok(on) = app.autostart.is_enabled() {
