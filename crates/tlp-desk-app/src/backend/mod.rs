@@ -28,6 +28,7 @@ pub mod files;
 pub mod files_bridge;
 pub mod files_fake;
 pub mod real;
+pub mod service;
 pub mod unattended;
 // TLP-settings-tray: host settings + connection-log glue for the real backend.
 pub mod recording;
@@ -419,6 +420,16 @@ pub enum BackendEvent {
     /// Viewer side: the speakers could not be opened; sound was switched off.
     AudioDeviceFailed { session: SessionId },
     // --- service: unattended access, secure desktop, Ctrl+Alt+Del, restart (TLP-service) ---
+    /// Viewer side: the host's secure-desktop / lock state (`DesktopState`) changed. Only a
+    /// host running the TLP-Desk service sends it, so the first one also tells the viewer
+    /// that Ctrl+Alt+Del works there.
+    RemoteDesktopState {
+        session: SessionId,
+        state: service::RemoteDesktop,
+    },
+    /// The installed TLP-Desk service hosts this device (it owns the port); the home screen
+    /// shows the service's ID and code and Accept prompts arrive through it.
+    ServiceHosting(bool),
 
     // --- privacy mode (TLP-privacy) ---
 

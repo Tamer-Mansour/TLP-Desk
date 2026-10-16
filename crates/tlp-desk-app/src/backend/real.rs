@@ -155,6 +155,9 @@ struct Inner {
     host: Option<Host>,
     viewer: Option<Viewer>,
     discovery: Option<Arc<Discovery>>,
+    /// TLP-service: set when the installed service hosts this device (see `service.rs`).
+    #[cfg(windows)]
+    service: std::sync::OnceLock<Arc<super::service::ServiceLink>>,
     own_id: DeviceId,
     bridges: Bridges,
     chat: ChatBridge,
@@ -540,6 +543,9 @@ impl RealBackend {
             };
             vcfg.features.push(tunnels.clone());
             vcfg.features.push(keeper.feature());
+            // TLP-service: secure-desktop / lock notices from the host.
+            vcfg.features
+                .push(Arc::new(super::service::DesktopStateFeature));
             chat.register_viewer(&mut vcfg);
             match Viewer::new(ep.clone(), vcfg) {
                 Ok(v) => Some(v),
@@ -562,6 +568,8 @@ impl RealBackend {
             host,
             viewer,
             discovery,
+            #[cfg(windows)]
+            service: std::sync::OnceLock::new(),
             own_id,
             bridges,
             chat,
@@ -590,6 +598,17 @@ impl RealBackend {
             admin: false,
         };
 
+        // TLP-service: the port is taken by the installed service, which hosts this device;
+        // mirror it instead of reporting a problem.
+        #[cfg(windows)]
+        if matches!(problem, Some(HostProblem::PortInUse(_)))
+            && tlp_desk_host::service::windows::service_running()
+        {
+            problem = None;
+            let weak: std::sync::Weak<Inner> = Arc::downgrade(&inner);
+            let sink: std::sync::Weak<dyn super::service::ServiceSink> = weak;
+            let _ = inner.service.set(super::service::ServiceLink::start(sink));
+        }
         if let Some(p) = problem {
             inner.emit(BackendEvent::HostUnavailable(p));
         }
@@ -1149,6 +1168,14 @@ impl Inner {
                 }
                 // FEATURE HOOK: lanes map their FeatureEvent payloads to BackendEvents in
                 // their own `backend/<feature>.rs`; match on `event.feature` here.
+                ViewerEvent::Feature(event) if event.feature == super::service::DESKTOP_FEATURE => {
+                    if let Some(state) = event.payload::<super::service::RemoteDesktop>() {
+                        self.emit(BackendEvent::RemoteDesktopState {
+                            session,
+                            state: *state,
+                        });
+                    }
+                }
                 ViewerEvent::Feature(event) if event.feature == TUNNEL_FEATURE => {
                     if let Some(ev) = tunnels::viewer_event(session, &event) {
                         self.emit(ev);
@@ -1222,6 +1249,30 @@ impl Inner {
     }
 }
 
+/// TLP-service: what the service mirror learns lands in the normal local info and events.
+#[cfg(windows)]
+impl super::service::ServiceSink for Inner {
+    fn apply(&self, out: super::service::MirrorOut) {
+        use super::service::MirrorOut;
+        match out {
+            MirrorOut::Event(ev) => self.emit(ev),
+            MirrorOut::Identity { device_id, name } => self.update_local(|l| {
+                l.device_id = device_id;
+                l.device_name = name;
+            }),
+            MirrorOut::Code(code) => self.update_local(|l| l.one_time_code = code),
+        }
+    }
+}
+
+impl RealBackend {
+    /// TLP-service: the service link, when the installed service hosts this device.
+    #[cfg(windows)]
+    fn service(&self) -> Option<&Arc<super::service::ServiceLink>> {
+        self.inner.service.get()
+    }
+}
+
 impl Backend for RealBackend {
     fn local_info(&self) -> LocalInfo {
         self.inner.local()
@@ -1234,6 +1285,11 @@ impl Backend for RealBackend {
     }
 
     fn refresh_one_time_code(&self) {
+        #[cfg(windows)]
+        if let Some(s) = self.service() {
+            s.rotate_code(); // the new code arrives from the service
+            return;
+        }
         if let Some(h) = &self.inner.host {
             h.rotate_code(); // emits CodeChanged -> LocalInfo
         }
@@ -1281,6 +1337,10 @@ impl Backend for RealBackend {
     }
 
     fn respond_to_request(&self, request: RequestId, accept: bool) {
+        #[cfg(windows)]
+        if self.service().is_some_and(|s| s.respond(request, accept)) {
+            return;
+        }
         let Some(id) = self.inner.state().requests.remove(&request) else {
             return;
         };
@@ -1526,6 +1586,10 @@ impl Backend for RealBackend {
 
     fn disconnect(&self, session: SessionId) {
         if self.inner.cancel_reconnect(session) {
+            return;
+        }
+        #[cfg(windows)]
+        if self.service().is_some_and(|s| s.disconnect(session)) {
             return;
         }
         let (viewer, host) = {
