@@ -3,7 +3,9 @@
 
 $ErrorActionPreference = 'Stop'
 $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$script:Dist = Join-Path $script:Root 'dist'
+# Output folder: dist\ in the repo, or TLP_DESK_DIST_DIR to keep build output outside the repo.
+$script:Dist = if ($env:TLP_DESK_DIST_DIR) { [IO.Path]::GetFullPath($env:TLP_DESK_DIST_DIR) } else { Join-Path $script:Root 'dist' }
+New-Item -ItemType Directory -Force $script:Dist | Out-Null
 $script:SignScript = Join-Path $PSScriptRoot 'sign.ps1'
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $script:Utf8Bom = New-Object System.Text.UTF8Encoding $true

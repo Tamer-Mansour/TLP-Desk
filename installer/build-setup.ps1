@@ -33,7 +33,7 @@ Write-Host "==> $iscc" -ForegroundColor Cyan
 # Inno's VersionInfoVersion must be numeric a.b.c.d: "1.0.0-rc.1" -> "1.0.0.1", "1.0.0" -> "1.0.0.0".
 if ($version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z]+\.(\d+))?') { throw "unsupported version $version" }
 $numeric = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$(if ($Matches[4]) { $Matches[4] } else { '0' })"
-$isccArgs = @('/Q', "/DMyAppVersion=$version", "/DMyAppNumericVersion=$numeric", "/DStageDir=$stage")
+$isccArgs = @('/Q', "/O$Dist", "/DMyAppVersion=$version", "/DMyAppNumericVersion=$numeric", "/DStageDir=$stage")
 if ($signMode -ne 'none') {
     # Defines the "tlpsign" Sign Tool that TLP-Desk.iss uses (SignTool=tlpsign $f) to sign the
     # setup and its uninstaller. Inno replaces $q with a quote and $p with "$f" (the quoted file).
