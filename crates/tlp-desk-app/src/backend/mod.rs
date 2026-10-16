@@ -889,6 +889,20 @@ pub trait Backend: Send + Sync {
             "device info not supported by this backend"
         );
     }
+
+    // --- accept popup (TLP-accept-popup) ---
+    /// Host side: answer an [`BackendEvent::IncomingRequest`], granting `permissions` instead
+    /// of the host defaults when accepting (the user switched some off or on in the Accept
+    /// window). `None` = the defaults. Backends that cannot narrow grant the defaults.
+    fn respond_to_request_with(
+        &self,
+        request: RequestId,
+        accept: bool,
+        permissions: Option<Permissions>,
+    ) {
+        let _ = permissions;
+        self.respond_to_request(request, accept);
+    }
 }
 
 #[cfg(test)]
