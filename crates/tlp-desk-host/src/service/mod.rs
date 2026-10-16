@@ -26,10 +26,17 @@
 //! * Ctrl+Alt+Del is sent by the service with `SendSAS`; the `SoftwareSASGeneration` policy
 //!   must allow services (set at install).
 //!
+//! * **User-session features** (IPC v2): the clipboard, Explorer paste, the whiteboard
+//!   overlay, the pointer marker, the local-input hooks, the privacy shield and loopback audio
+//!   must run on the user's desktop, so the agent owns them ([`FeatureHost`] around the app's
+//!   [`AgentFeatures`]) and the service's session features use proxies. Host-side windows (transfers, chat, conflict questions) are shown
+//!   by the user's GUI through app messages on the GUI pipe.
+//!
 //! The pure logic lives in small, unit-tested modules (IPC framing in [`ipc`]); Windows calls
 //! are confined to the platform module.
 
 mod agent;
+mod agent_features;
 mod client;
 mod desktop;
 mod gui;
@@ -47,6 +54,10 @@ pub mod windows;
 
 pub use agent::{
     serve_connection, AgentPlatform, DESKTOP_CHECK_EVERY, DESKTOP_POLL_EVERY, MAX_FRAME_WAIT,
+};
+pub use agent_features::{
+    AgentFeatures, AudioSource, FeatureHost, NoFeatures, StageLink, ACTIVITY_POLL, AUDIO_KEEPALIVE,
+    MAX_FEATURE_OBJECTS,
 };
 pub use client::{gui_command_on, gui_subscribe_on, GuiSubscription};
 pub use gui::{

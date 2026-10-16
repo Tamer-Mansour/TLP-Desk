@@ -218,7 +218,7 @@ impl ServiceMirror {
             GuiEvent::SessionStarted(s) => self.add_session(&s, &mut out),
             GuiEvent::SessionEnded { id } => self.drop_session(id, EndReason::Remote, &mut out),
             GuiEvent::CodeChanged { code } => out.push(MirrorOut::Code(code)),
-            GuiEvent::Desktop(_) => {}
+            GuiEvent::Desktop(_) | GuiEvent::App(_) => {}
         }
         out
     }
