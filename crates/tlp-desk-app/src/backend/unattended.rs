@@ -76,14 +76,21 @@ pub fn lockout_minutes() -> u64 {
     lockout.as_secs().div_ceil(60).max(1)
 }
 
-/// Whether `dir` is the machine-wide data folder (under `%ProgramData%`).
+/// Whether `dir` is the machine-wide data folder (under `%ProgramData%`; `/var/lib` on Unix).
 pub fn is_machine_wide(dir: &Path) -> bool {
-    std::env::var_os("ProgramData")
-        .map(std::path::PathBuf::from)
-        .is_some_and(|pd| {
-            let pd = pd.to_string_lossy().to_lowercase();
-            dir.to_string_lossy().to_lowercase().starts_with(&pd)
-        })
+    #[cfg(windows)]
+    {
+        std::env::var_os("ProgramData")
+            .map(std::path::PathBuf::from)
+            .is_some_and(|pd| {
+                let pd = pd.to_string_lossy().to_lowercase();
+                dir.to_string_lossy().to_lowercase().starts_with(&pd)
+            })
+    }
+    #[cfg(not(windows))]
+    {
+        dir.starts_with("/var/lib")
+    }
 }
 
 /// Whether this process runs elevated (High or System mandatory integrity level). Asks the

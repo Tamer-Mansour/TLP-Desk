@@ -1,4 +1,5 @@
-//! "Start with Windows": a value under the current user's `Run` key
+//! "Start with Windows" (on Linux: a freedesktop autostart `.desktop` file in
+//! `~/.config/autostart`): a value under the current user's `Run` key
 //! (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), so no admin rights are needed and
 //! nothing is installed system-wide.
 //!
@@ -79,10 +80,65 @@ pub fn system() -> Box<dyn AutoStart> {
             }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        match (std::env::current_exe(), autostart_dir()) {
+            (Ok(exe), Some(dir)) => Box::new(xdg::DesktopAutostart::new(dir, &exe)),
+            _ => {
+                tracing::warn!("no executable or config folder; autostart unavailable");
+                Box::new(Unsupported)
+            }
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         Box::new(Unsupported)
     }
+}
+
+/// `$XDG_CONFIG_HOME/autostart` or `~/.config/autostart` (freedesktop Desktop Application
+/// Autostart specification), `None` without a usable home.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn autostart_dir() -> Option<std::path::PathBuf> {
+    autostart_dir_in(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+    )
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn autostart_dir_in(
+    xdg_config_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    let base = xdg_config_home
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            home.filter(|h| !h.is_empty())
+                .map(|h| std::path::PathBuf::from(h).join(".config"))
+        })?;
+    Some(base.join("autostart"))
+}
+
+/// The text of the autostart `.desktop` file for `exe` (freedesktop Desktop Entry spec).
+///
+/// The `Exec` value is double-quoted with `"`, `` ` ``, `$` and `\` escaped, so paths with
+/// spaces or Arabic names start correctly.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn desktop_entry(exe: &Path) -> String {
+    let mut quoted = String::from("\"");
+    for c in exe.to_string_lossy().chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+    }
+    quoted.push('"');
+    format!(
+        "[Desktop Entry]\nType=Application\nName=TLP-Desk\nExec={quoted} {AUTOSTART_FLAG}\n\
+         X-GNOME-Autostart-enabled=true\nTerminal=false\n"
+    )
 }
 
 /// Autostart is not available on this platform / install.
@@ -96,6 +152,50 @@ impl AutoStart for Unsupported {
 
     fn set_enabled(&self, _enabled: bool) -> anyhow::Result<()> {
         anyhow::bail!("starting with the system is not supported here")
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod xdg {
+    use std::path::{Path, PathBuf};
+
+    use anyhow::Context as _;
+
+    use super::{desktop_entry, AutoStart};
+
+    /// `~/.config/autostart/TLP-Desk.desktop`: per user, no elevation.
+    pub struct DesktopAutostart {
+        file: PathBuf,
+        contents: String,
+    }
+
+    impl DesktopAutostart {
+        pub fn new(dir: PathBuf, exe: &Path) -> Self {
+            Self {
+                file: dir.join("TLP-Desk.desktop"),
+                contents: desktop_entry(exe),
+            }
+        }
+    }
+
+    impl AutoStart for DesktopAutostart {
+        fn is_enabled(&self) -> anyhow::Result<bool> {
+            Ok(self.file.is_file())
+        }
+
+        fn set_enabled(&self, enabled: bool) -> anyhow::Result<()> {
+            if enabled {
+                if let Some(dir) = self.file.parent() {
+                    std::fs::create_dir_all(dir).context("creating the autostart folder")?;
+                }
+                std::fs::write(&self.file, &self.contents)
+                    .context("writing the autostart entry")?;
+            } else if self.file.is_file() {
+                std::fs::remove_file(&self.file).context("removing the autostart entry")?;
+            }
+            tracing::info!(enabled, "start with the desktop session changed");
+            Ok(())
+        }
     }
 }
 
@@ -158,6 +258,39 @@ mod tests {
             run_command(exe),
             "\"C:\\Program Files\\TLP-Desk\\برنامج\\TLP-Desk.exe\" --autostart"
         );
+    }
+
+    #[test]
+    fn desktop_entry_quotes_the_executable() {
+        let text = desktop_entry(Path::new("/opt/TLP Desk/برنامج/TLP-Desk"));
+        assert!(text.starts_with("[Desktop Entry]\n"));
+        assert!(
+            text.contains("Exec=\"/opt/TLP Desk/برنامج/TLP-Desk\" --autostart\n"),
+            "{text}"
+        );
+        let tricky = desktop_entry(Path::new("/a\"b$c`d"));
+        assert!(
+            tricky.contains("Exec=\"/a\\\"b\\$c\\`d\" --autostart"),
+            "{tricky}"
+        );
+    }
+
+    #[test]
+    fn autostart_folder_follows_xdg() {
+        use std::ffi::OsString;
+        let os = |s: &str| Some(OsString::from(s));
+        let cfg = std::env::temp_dir().join("cfg");
+        let home = std::env::temp_dir().join("home");
+        let os_path = |p: &std::path::PathBuf| Some(p.clone().into_os_string());
+        assert_eq!(
+            autostart_dir_in(os_path(&cfg), os_path(&home)),
+            Some(cfg.join("autostart"))
+        );
+        assert_eq!(
+            autostart_dir_in(os("relative"), os_path(&home)),
+            Some(home.join(".config").join("autostart"))
+        );
+        assert_eq!(autostart_dir_in(None, None), None);
     }
 
     #[test]

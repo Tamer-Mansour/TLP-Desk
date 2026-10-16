@@ -347,6 +347,16 @@ strings! {
     RemoteLocked => "The remote computer is locked. Use Ctrl+Alt+Del to sign in.", "الحاسوب البعيد مقفل. استخدم Ctrl+Alt+Del لتسجيل الدخول.";
     RemoteSecureDesktop => "The remote computer shows a secure screen (sign-in, lock or an administrator prompt).", "يعرض الحاسوب البعيد شاشة آمنة (تسجيل الدخول أو القفل أو طلب صلاحيات المسؤول).";
 
+    // --- macOS permissions ---
+    PermHeading => "TLP-Desk needs your permission on this Mac", "يحتاج TLP-Desk إلى إذنك على هذا الجهاز";
+    PermIntro => "macOS keeps the screen and the keyboard private until you allow them in System Settings. Until then this Mac cannot be viewed or controlled.", "يحمي macOS الشاشة ولوحة المفاتيح حتى تسمح بهما من إعدادات النظام. إلى ذلك الحين لا يمكن عرض هذا الجهاز أو التحكم به.";
+    PermScreenTitle => "Screen Recording", "تسجيل الشاشة";
+    PermScreenBody => "Lets TLP-Desk send the picture of this screen to the device that connects. Turn on TLP-Desk under Privacy & Security > Screen Recording.", "يتيح لـ TLP-Desk إرسال صورة هذه الشاشة إلى الجهاز المتصل. فعّل TLP-Desk ضمن الخصوصية والأمان > تسجيل الشاشة.";
+    PermAccessTitle => "Accessibility", "إمكانية الوصول";
+    PermAccessBody => "Lets the connected device move the mouse and type on this Mac. Turn on TLP-Desk under Privacy & Security > Accessibility.", "يتيح للجهاز المتصل تحريك الفأرة والكتابة على هذا الجهاز. فعّل TLP-Desk ضمن الخصوصية والأمان > إمكانية الوصول.";
+    PermOpenSettings => "Open System Settings", "فتح إعدادات النظام";
+    PermRestartHint => "After allowing Screen Recording, macOS may ask you to quit and reopen TLP-Desk.", "بعد السماح بتسجيل الشاشة قد يطلب منك macOS إغلاق TLP-Desk وإعادة فتحه.";
+
     // --- privacy ---
     PrivacyMode => "Privacy mode", "وضع الخصوصية";
     PrivacyTurnOff => "Turn off privacy mode", "إيقاف وضع الخصوصية";

@@ -110,6 +110,7 @@ impl App {
                     .inner_margin(20),
             )
             .show(ui, |ui| {
+                self.permissions.card(ui, tx);
                 self.address_book.offer_ui(ui, tx, self.backend.as_ref());
                 ui.columns(2, |cols| {
                     let (first, second) = if tx.rtl() { (1, 0) } else { (0, 1) };

@@ -1,7 +1,10 @@
 //! Screen capture trait and platform implementations.
 //!
 //! On Windows, [`open_capturer`] tries Windows.Graphics.Capture first and falls back to DXGI
-//! Desktop Duplication. Other platforms currently return [`CaptureError::Unsupported`].
+//! Desktop Duplication. On Linux it reads the X11 root window (RandR monitors, XFixes cursor);
+//! Wayland sessions report a clear error until the ScreenCast portal path exists. On macOS it
+//! captures with Quartz Display Services (needs the Screen Recording permission, see
+//! `macos_capture`). Other platforms currently return [`CaptureError::Unsupported`].
 //!
 //! Platform independent helpers:
 //! * [`DirtyTracker`] tells which tiles of a frame changed, so the host skips encoding frames
@@ -17,6 +20,9 @@ use std::time::Duration;
 
 mod compose;
 mod dirty;
+#[cfg(any(target_os = "linux", test))]
+mod linux_capture;
+mod macos_capture;
 mod scale;
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -200,7 +206,15 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, CaptureError> {
     {
         windows_capture::list_monitors()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_capture::list_monitors()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::list_monitors()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         Err(CaptureError::Unsupported)
     }
@@ -213,7 +227,15 @@ pub fn open_capturer(monitor_index: u32) -> Result<Box<dyn ScreenCapturer>, Capt
     {
         windows_capture::open_capturer(monitor_index, CaptureOptions::default())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_capture::open_capturer(monitor_index, CaptureOptions::default())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::open_capturer(monitor_index, CaptureOptions::default())
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = monitor_index;
         Err(CaptureError::Unsupported)
@@ -235,7 +257,13 @@ pub fn open_capturer_with(
             },
         )
     }
-    #[cfg(not(windows))]
+    // X11 has a single backend; the request is honoured by ignoring it.
+    #[cfg(target_os = "linux")]
+    {
+        let _ = backend;
+        linux_capture::open_capturer(monitor_index, CaptureOptions::default())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = (monitor_index, backend);
         Err(CaptureError::Unsupported)
@@ -259,7 +287,15 @@ pub fn open_capturer_opts(
     {
         windows_capture::open_capturer(monitor_index, options)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_capture::open_capturer(monitor_index, options)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::open_capturer(monitor_index, options)
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = (monitor_index, options);
         Err(CaptureError::Unsupported)
@@ -300,7 +336,7 @@ mod tests {
         assert!(BgraFrame::new_tight(5, 3).is_well_formed());
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     #[test]
     fn unsupported_off_windows() {
         assert!(matches!(open_capturer(0), Err(CaptureError::Unsupported)));
@@ -319,6 +355,37 @@ mod tests {
         for (i, m) in monitors.iter().enumerate() {
             assert_eq!(m.index as usize, i);
         }
+    }
+
+    /// Needs an X server, e.g. `xvfb-run -a cargo test -p tlp-desk-capture -- --ignored x11`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs an X server (run under Xvfb)"]
+    fn x11_captures_primary_monitor_scaled_and_native() {
+        let monitors = list_monitors().expect("list monitors");
+        assert!(monitors[0].primary && monitors[0].index == 0);
+        let mon = monitors[0].clone();
+        let mut cap = open_capturer(0).expect("open");
+        let f = cap
+            .next_frame(Duration::from_millis(50))
+            .expect("frame")
+            .expect("some frame");
+        assert_eq!((f.width, f.height), (mon.width, mon.height));
+        assert!(f.is_well_formed());
+        assert!(f.data.chunks_exact(4).all(|p| p[3] == 255));
+        cap.recycle(f);
+        let c = cap.cursor().expect("cursor");
+        assert!(c.shape.is_some(), "first cursor call returns the shape");
+        let mut small =
+            open_capturer_opts(0, CaptureOptions::max_size(mon.width / 2, mon.height / 2))
+                .expect("open scaled");
+        let want = fit_within((mon.width, mon.height), (mon.width / 2, mon.height / 2));
+        assert_eq!(small.frame_size(), want);
+        let f = small
+            .next_frame(Duration::from_millis(50))
+            .expect("frame")
+            .expect("some frame");
+        assert_eq!((f.width, f.height), want);
     }
 
     #[cfg(windows)]

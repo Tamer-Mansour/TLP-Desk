@@ -306,6 +306,7 @@ mod tests {
     }
 
     /// Any component a random generator can build out of dangerous pieces.
+    #[cfg(windows)]
     fn hostile_component() -> impl Strategy<Value = String> {
         prop_oneof![
             Just("..".to_owned()),

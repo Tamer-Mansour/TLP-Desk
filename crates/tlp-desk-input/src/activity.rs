@@ -109,6 +109,7 @@ impl ActivityStamp {
 /// not swallowed by privacy mode. While privacy mode blocks the local keyboard and mouse,
 /// local input priority is suspended: the blocked events reach nobody, so they must not take
 /// control away from the viewer either.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn counts_as_local(injected: bool) -> bool {
     !injected && !crate::privacy::local_input_blocked()
 }

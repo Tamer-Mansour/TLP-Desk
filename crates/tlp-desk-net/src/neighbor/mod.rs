@@ -10,6 +10,10 @@
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows;
+// The parser is plain text handling, so its tests also run on other hosts.
+#[cfg(any(target_os = "linux", test))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod linux;
 
 use std::net::IpAddr;
 
@@ -69,7 +73,11 @@ pub fn neighbor_table() -> Result<Vec<Neighbor>, NetError> {
     {
         windows::table().map(usable)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::table().map(usable)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         Ok(Vec::new())
     }

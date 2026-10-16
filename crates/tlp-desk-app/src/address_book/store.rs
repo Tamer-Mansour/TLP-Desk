@@ -29,9 +29,6 @@ pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// Most entries loaded from one file.
 pub const MAX_ENTRIES: usize = 5_000;
 
-/// Settings folder name under `%APPDATA%` (same as `settings.rs`).
-const APP_DIR: &str = "TLP-Desk";
-
 /// On-disk layout. Entries stay raw JSON until validated one by one.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -71,10 +68,10 @@ impl Store {
         Self { path: path.into() }
     }
 
-    /// `%APPDATA%\TLP-Desk\address_book.json`, or `None` without `APPDATA`.
+    /// `address_book.json` in the per-user data folder ([`crate::settings::app_data_dir`]), or
+    /// `None` when the environment has no such folder.
     pub fn default_location() -> Option<Self> {
-        let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
-        Some(Self::at(base.join(APP_DIR).join(FILE_NAME)))
+        Some(Self::at(crate::settings::app_data_dir()?.join(FILE_NAME)))
     }
 
     /// The file this store reads and writes.

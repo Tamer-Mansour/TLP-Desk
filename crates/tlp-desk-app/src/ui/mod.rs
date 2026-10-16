@@ -12,6 +12,7 @@ pub mod home;
 pub mod icons;
 pub(crate) mod key_forward;
 pub mod perf;
+pub mod permissions;
 pub mod playback;
 pub mod privacy;
 pub mod recordings;

@@ -2,7 +2,7 @@
 //! low-level actions to a sink (real `SendInput` on Windows, a recorder in tests).
 
 // Only the Windows sink and the tests drive this today.
-#![cfg_attr(not(windows), allow(dead_code))]
+#![cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 
 use std::collections::BTreeSet;
 
@@ -103,6 +103,7 @@ impl<S: InputSink> TrackingInjector<S> {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn monitor(&self) -> MonitorRect {
         self.monitor
     }
