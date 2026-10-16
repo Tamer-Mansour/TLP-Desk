@@ -81,6 +81,9 @@ const TICK: Duration = Duration::from_millis(500);
 const AGENT_STARTUP: Duration = Duration::from_secs(15);
 /// Least time between two GUI launches for Accept prompts.
 const GUI_LAUNCH_INTERVAL: Duration = Duration::from_secs(30);
+/// The GUI started for an Accept prompt stays in the notification area: the prompt itself
+/// appears as the stand-alone Accept window (TLP-accept-popup), not the main window.
+const GUI_PROMPT_ARGS: &[&str] = &["--hidden"];
 
 /// Connects to one agent's pipe and checks that its server is that agent's process.
 #[derive(Debug)]
@@ -447,7 +450,7 @@ async fn pump_host_events(
                 if due {
                     let exe = exe.clone();
                     let res = tokio::task::spawn_blocking(move || {
-                        launch(s, LaunchAs::User, &exe, &[]).map(|p| {
+                        launch(s, LaunchAs::User, &exe, GUI_PROMPT_ARGS).map(|p| {
                             use crate::service::AgentProcess as _;
                             p.pid()
                         })
