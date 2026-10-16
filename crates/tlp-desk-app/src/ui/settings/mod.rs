@@ -88,6 +88,8 @@ impl App {
                         ui.add_space(theme::space::L);
                         self.startup_card(ui);
                         ui.add_space(theme::space::L);
+                        self.updates_card(ui);
+                        ui.add_space(theme::space::L);
                         crate::ui::clipboard::settings_card(
                             ui,
                             tx,

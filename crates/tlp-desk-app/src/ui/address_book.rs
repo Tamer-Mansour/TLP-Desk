@@ -985,6 +985,7 @@ mod tests {
             name: "مختبر".into(),
             address: "192.168.1.9".parse().unwrap(),
             online: true,
+            app_version: None,
         }];
         ui.on_devices(&list, &backend, en());
         assert!(ui.is_online(DeviceId(9)));
@@ -1067,6 +1068,7 @@ mod tests {
                     name: "مكتب أحمد".into(),
                     address: "192.168.1.5".parse().unwrap(),
                     online: true,
+                    app_version: None,
                 }],
                 &backend,
                 tx,

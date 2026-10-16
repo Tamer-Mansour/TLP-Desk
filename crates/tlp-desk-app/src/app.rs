@@ -161,6 +161,8 @@ pub struct App {
     pub accept_card: Option<(RequestId, crate::ui::accept_window::AcceptCard)>,
     /// [`StartOptions::start_hidden`].
     pub(crate) start_hidden: bool,
+    /// Update check / download / install state (TLP-updater).
+    pub update: crate::ui::update::UpdateUi,
 }
 
 impl App {
@@ -230,6 +232,7 @@ impl App {
             accept_popups: Default::default(),
             accept_card: None,
             start_hidden: opts.start_hidden,
+            update: Default::default(),
         };
         // The Run key is the truth for "start with Windows" (it can be removed outside the app).
         if let Ok(on) = app.autostart.is_enabled() {
@@ -1088,6 +1091,7 @@ impl eframe::App for App {
         self.recordings.show(&ctx, self.tx, recording_now);
         self.host_chat_windows(&ctx);
         self.host_transfer_ui(&ctx);
+        self.update_frame(&ctx);
 
         if self.session.is_some() {
             let tx = self.tx;

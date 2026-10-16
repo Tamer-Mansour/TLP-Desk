@@ -1070,6 +1070,7 @@ impl Inner {
                     address: d.addrs.first()?.ip(),
                     name: d.name,
                     online: true,
+                    app_version: d.app_version,
                 })
             })
             .collect()

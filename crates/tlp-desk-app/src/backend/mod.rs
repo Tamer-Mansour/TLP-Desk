@@ -106,6 +106,9 @@ pub struct DiscoveredDevice {
     pub name: String,
     pub address: IpAddr,
     pub online: bool,
+    /// App version the device announces on the LAN (`None` for older builds); drives the
+    /// "a newer version is running on ..." notice (TLP-updater).
+    pub app_version: Option<String>,
 }
 
 /// What the user typed or clicked to connect.
