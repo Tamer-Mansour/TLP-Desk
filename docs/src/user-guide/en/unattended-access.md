@@ -52,14 +52,50 @@ works once someone has signed in, unless the TLP-Desk service is installed (see 
 **System > Lock remote PC** locks the remote Windows session. It needs the **Ctrl+Alt+Del and
 locking** permission.
 
-## Coming with the Windows service
+## The Windows service
 
-These parts are built separately and are not available yet:
+Without the service, TLP-Desk only runs while someone is signed in to Windows. Install the
+**TLP-Desk service** and the PC can be reached from the moment Windows starts, at the **sign-in
+screen**, the **lock screen** and over **UAC prompts** (the dimmed "Do you want to allow this app
+to make changes?" screen).
 
-- TLP-Desk running as a **Windows service**, so it is reachable from the moment Windows starts,
-  before anyone signs in, and the reconnect after a restart works at the sign-in screen;
-- control of the **sign-in screen, lock screen and UAC prompts**;
-- the **Send Ctrl+Alt+Del** button in the System menu (it shows a note that the service is needed).
+### Install it
+
+- In the setup program tick **Install as a Windows service (unattended access)**; or
+- run `TLP-Desk.exe install-service` from an **administrator** prompt. `TLP-Desk.exe
+  uninstall-service` removes it again (uninstalling TLP-Desk does this too).
+
+The service is called **TLP-Desk**, starts automatically with Windows and runs as the system
+account. It owns the connection port (UDP 47400), so the TLP-Desk window on that PC does not
+listen itself any more: it shows the service's device ID and one-time code, the **Accept**
+prompts and the "who is connected" banner, and says "Unattended access is on". Closing the
+window does not stop the service. If the service stops or is removed, TLP-Desk goes back to
+hosting by itself on the next start.
+
+Installing also allows services to send Ctrl+Alt+Del: it sets the
+`SoftwareSASGeneration` policy (registry value `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`)
+to *services*. A domain Group Policy can override it. Nothing else about Windows' security is
+changed.
+
+### What it does
+
+- A small helper (the **session agent**) is started in the session at the PC's screen and
+  follows it when someone signs in or out, locks or unlocks, or switches user. If it ever
+  stops, it is restarted automatically with growing pauses.
+- On the lock screen, sign-in screen or a UAC prompt the helper switches to that screen, so you
+  keep seeing and controlling it. The viewer shows a blue banner: "The remote computer is locked"
+  or "shows a secure screen".
+- The **Send Ctrl+Alt+Del** entry in the System menu works (see
+  [Ctrl+Alt+Del and lock](coming-soon/ctrl-alt-del.md)). Without the service it is still shown, with
+  a note that the service is needed.
+- The **reconnect after a restart** works at the sign-in screen too: the service is up before
+  anyone signs in, so your viewer gets back in on its own.
+- The permanent password, one-time code and Accept rules are the same as without the service.
+  The service uses the machine-wide data folder `%ProgramData%\TLP-Desk\`. Its log is
+  `%ProgramData%\TLP-Desk\logs\service.log`.
+
+A viewer that has the permanent password or a valid reconnect ticket connects without an
+**Accept** click, so choose a strong password.
 
 ## Command line
 
