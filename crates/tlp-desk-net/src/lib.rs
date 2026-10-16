@@ -49,8 +49,9 @@ pub use chat::{
     ChatAuthor, ChatEntry, ChatEvent, ChatFeature, ChatLimits, ChatRejected, CHAT_FEATURE,
 };
 pub use discovery::{
-    broadcast_targets, Advertisement, BroadcastPacket, DiscoveredDevice, Discovery,
-    DiscoveryConfig, DiscoveryEvent, PacketKind, BROADCAST_MAGIC, MDNS_SERVICE_TYPE,
+    broadcast_targets, sanitize_app_version, Advertisement, BroadcastPacket, DiscoveredDevice,
+    Discovery, DiscoveryConfig, DiscoveryEvent, PacketKind, APP_VERSION, BROADCAST_MAGIC,
+    MAX_APP_VERSION_LEN, MDNS_SERVICE_TYPE,
 };
 pub use endpoint::{
     default_device_name, sanitize_peer_name, AuthKind, AuthMethod, AwaitingAcceptFn, Endpoint,

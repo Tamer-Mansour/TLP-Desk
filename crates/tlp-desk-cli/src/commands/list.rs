@@ -74,6 +74,7 @@ mod tests {
             name: "حاسوب المحاسبة".into(),
             addrs: vec!["192.168.1.20:47400".parse().unwrap()],
             protocol_version: 4,
+            app_version: Some("1.0.0".into()),
             via_mdns: true,
             via_broadcast: false,
             last_seen: std::time::Instant::now(),

@@ -22,6 +22,21 @@ pub const MDNS_SERVICE_TYPE: &str = "_tlpdesk._udp.local.";
 pub const BROADCAST_MAGIC: &[u8; 4] = b"TLPD";
 /// Device names longer than this are truncated in announcements.
 const MAX_NAME_CHARS: usize = 64;
+/// App versions longer than this are ignored (a semver like `1.0.0-rc.3` is ~10 bytes).
+pub const MAX_APP_VERSION_LEN: usize = 32;
+/// The version this build announces on the LAN (`ver` TXT key / broadcast trailer). Every
+/// crate inherits the workspace version, so this is the app version.
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Accepts a peer-announced app version only if it is short and plain ASCII
+/// (`[0-9A-Za-z.+-]`); anything else is dropped rather than shown.
+pub fn sanitize_app_version(v: &str) -> Option<String> {
+    let ok = !v.is_empty()
+        && v.len() <= MAX_APP_VERSION_LEN
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'+'));
+    ok.then(|| v.to_owned())
+}
 
 /// What this device announces.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +55,9 @@ pub struct DiscoveredDevice {
     /// Addresses to dial (QUIC port included), best first (IPv4 before IPv6).
     pub addrs: Vec<SocketAddr>,
     pub protocol_version: u32,
+    /// App version the peer announces (`1.0.0-rc.3`), `None` for builds older than the
+    /// field or a malformed value. Display/compare only; never trusted for security.
+    pub app_version: Option<String>,
     pub via_mdns: bool,
     pub via_broadcast: bool,
     pub last_seen: Instant,
@@ -88,7 +106,12 @@ impl Default for DiscoveryConfig {
     }
 }
 
-/// Broadcast fallback packet: `b"TLPD" || postcard(BroadcastPacket)`, at most 512 bytes.
+/// Broadcast fallback packet, at most 512 bytes:
+/// `b"TLPD" || postcard(BroadcastPacket) [|| postcard(app_version: String)]`.
+///
+/// postcard is not self-describing, so the app version travels as an optional trailer after
+/// the original struct instead of as a new struct field: older builds decode the struct and
+/// ignore the trailing bytes, newer builds read the trailer when it is present.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BroadcastPacket {
     pub kind: PacketKind,
@@ -98,6 +121,9 @@ pub struct BroadcastPacket {
     pub name: String,
     /// Sender's QUIC port (0 in queries from browse-only peers).
     pub port: u16,
+    /// Sender's app version (the trailer; see the type docs). `None` from older builds.
+    #[serde(skip)]
+    pub app_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +142,9 @@ impl BroadcastPacket {
         p.name = p.name.chars().take(MAX_NAME_CHARS).collect();
         let mut out = BROADCAST_MAGIC.to_vec();
         out.extend(postcard::to_stdvec(&p).unwrap_or_default());
+        if let Some(v) = p.app_version.as_deref().and_then(sanitize_app_version) {
+            out.extend(postcard::to_stdvec(&v).unwrap_or_default());
+        }
         out
     }
 
@@ -124,7 +153,11 @@ impl BroadcastPacket {
             return None;
         }
         let body = bytes.strip_prefix(BROADCAST_MAGIC.as_slice())?;
-        postcard::from_bytes(body).ok()
+        let (mut p, rest): (Self, &[u8]) = postcard::take_from_bytes(body).ok()?;
+        p.app_version = postcard::from_bytes::<String>(rest)
+            .ok()
+            .and_then(|v| sanitize_app_version(&v));
+        Some(p)
     }
 }
 
@@ -170,6 +203,7 @@ impl BroadcastCtx {
             device_id: self.me.as_ref().map_or(0, |m| m.device_id.as_u32()),
             name: self.me.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
             port: self.me.as_ref().map_or(0, |m| m.port),
+            app_version: Some(APP_VERSION.to_owned()),
         }
     }
 
@@ -232,6 +266,7 @@ fn upsert(
                 name: String::new(),
                 addrs: Vec::new(),
                 protocol_version: 0,
+                app_version: None,
                 via_mdns: false,
                 via_broadcast: false,
                 last_seen: Instant::now(),
@@ -397,6 +432,7 @@ fn start_mdns(
             ("name", name),
             ("port", ad.port.to_string()),
             ("pv", PROTOCOL_VERSION.to_string()),
+            ("ver", APP_VERSION.to_owned()),
         ];
         let info = mdns_sd::ServiceInfo::new(
             MDNS_SERVICE_TYPE,
@@ -439,6 +475,9 @@ fn start_mdns(
                         .get_property_val_str("name")
                         .unwrap_or_default()
                         .to_owned();
+                    let app_version = info
+                        .get_property_val_str("ver")
+                        .and_then(sanitize_app_version);
                     let addrs: Vec<SocketAddr> = info
                         .get_addresses()
                         .iter()
@@ -453,6 +492,9 @@ fn start_mdns(
                     upsert(&table, &events, id, |e| {
                         e.device.name = name;
                         e.device.protocol_version = pv;
+                        if app_version.is_some() {
+                            e.device.app_version = app_version;
+                        }
                         e.device.via_mdns = true;
                         e.mdns_fullname = Some(fullname);
                         for a in addrs {
@@ -542,6 +584,9 @@ async fn bcast_recv_loop(
                 upsert(&table, &events, id, |e| {
                     e.device.name = pkt.name;
                     e.device.protocol_version = pkt.protocol_version;
+                    if pkt.app_version.is_some() {
+                        e.device.app_version = pkt.app_version;
+                    }
                     e.device.via_broadcast = true;
                     e.bcast_seen = Some(Instant::now());
                     if !e.device.addrs.contains(&addr) {
@@ -591,6 +636,7 @@ mod tests {
             device_id: 123_456_789,
             name: "مكتب".repeat(100),
             port: 47400,
+            app_version: Some(APP_VERSION.into()),
         };
         let bytes = p.encode();
         assert!(bytes.len() <= BroadcastPacket::MAX_LEN, "{}", bytes.len());
@@ -599,6 +645,81 @@ mod tests {
         assert_eq!(back.name.chars().count(), MAX_NAME_CHARS);
         assert!(BroadcastPacket::decode(b"XXXXjunk").is_none());
         assert!(BroadcastPacket::decode(b"TLPD\xff\xff").is_none());
+    }
+
+    /// Old peers (no trailer) still decode, and the new trailer survives a round trip next
+    /// to an Arabic name.
+    #[test]
+    fn broadcast_app_version_trailer_is_backward_compatible() {
+        #[derive(Serialize)]
+        struct OldPacket {
+            kind: PacketKind,
+            protocol_version: u32,
+            device_id: u32,
+            name: String,
+            port: u16,
+        }
+        let old = OldPacket {
+            kind: PacketKind::Announce,
+            protocol_version: 4,
+            device_id: 123_456_789,
+            name: "حاسوب المحاسبة".into(),
+            port: 47400,
+        };
+        let mut bytes = BROADCAST_MAGIC.to_vec();
+        bytes.extend(postcard::to_stdvec(&old).unwrap());
+        let back = BroadcastPacket::decode(&bytes).unwrap();
+        assert_eq!(back.name, "حاسوب المحاسبة");
+        assert_eq!(back.app_version, None);
+
+        let new = BroadcastPacket {
+            kind: PacketKind::Announce,
+            protocol_version: 4,
+            device_id: 123_456_789,
+            name: "حاسوب المحاسبة".into(),
+            port: 47400,
+            app_version: Some("1.0.0-rc.4".into()),
+        };
+        let bytes = new.encode();
+        let back = BroadcastPacket::decode(&bytes).unwrap();
+        assert_eq!(back, new);
+        // An old build decodes the same bytes: postcard ignores the trailer.
+        #[derive(Deserialize)]
+        struct OldDecode {
+            _kind: PacketKind,
+            _pv: u32,
+            device_id: u32,
+            name: String,
+            port: u16,
+        }
+        let old_view: OldDecode = postcard::from_bytes(&bytes[4..]).unwrap();
+        assert_eq!(old_view.device_id, 123_456_789);
+        assert_eq!(old_view.name, "حاسوب المحاسبة");
+        assert_eq!(old_view.port, 47400);
+    }
+
+    #[test]
+    fn hostile_app_versions_are_dropped() {
+        assert_eq!(
+            sanitize_app_version("1.0.0-rc.3").as_deref(),
+            Some("1.0.0-rc.3")
+        );
+        assert_eq!(sanitize_app_version(""), None);
+        assert_eq!(sanitize_app_version(&"9".repeat(33)), None);
+        assert_eq!(sanitize_app_version("1.0\u{202e}"), None);
+        assert_eq!(sanitize_app_version("١.٠"), None);
+        let p = BroadcastPacket {
+            kind: PacketKind::Announce,
+            protocol_version: 4,
+            device_id: 1,
+            name: "x".into(),
+            port: 1,
+            app_version: None,
+        };
+        let mut bytes = p.encode();
+        bytes.extend(postcard::to_stdvec("bad version!").unwrap());
+        let back = BroadcastPacket::decode(&bytes).unwrap();
+        assert_eq!(back.app_version, None);
     }
 
     #[test]
