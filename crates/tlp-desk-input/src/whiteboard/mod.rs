@@ -1,0 +1,49 @@
+//! Whiteboard / draw-on-screen: the viewer draws annotations that appear on the host's screen.
+//!
+//! * [`Stroke`], [`WhiteboardOp`] and [`Board`]: the shared model and its wire form
+//!   (`Message::WhiteboardStroke` / `Message::WhiteboardClear`), with hard caps on everything a
+//!   peer can send.
+//! * [`StrokeStreamer`], [`simplify`] (Ramer-Douglas-Peucker), [`arrow_points`],
+//!   [`rect_points`]: building strokes on the viewer and streaming them in small chunks while
+//!   the pointer moves, so the host shows them live.
+//! * [`render_region`], [`damage_region`], [`blit`]: incremental anti-aliased rendering with
+//!   `tiny-skia`, identical on host and viewer.
+//! * [`Editor`]: the viewer's document (pen, highlighter, arrow, rectangle, eraser,
+//!   undo/redo, fading strokes) producing the ops to send.
+//! * [`WhiteboardOverlay`] / [`start_whiteboard_overlay`]: the host's topmost, click-through
+//!   layered window over the streamed monitor, with a small "clear" badge for the host user.
+//!
+//! The overlay window is excluded from screen capture: the viewer renders the same strokes
+//! locally on top of the video, so they appear without waiting for a captured, encoded and
+//! decoded frame (which would double the latency and blur thin lines).
+
+mod draw;
+mod editor;
+mod overlay;
+mod render;
+mod simplify;
+mod stroke;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod windows;
+
+pub use draw::{arrow_points, rect_points, StrokeStreamer, FLUSH_POINTS};
+pub use editor::{
+    Editor, Style, Tool, FLUSH_INTERVAL, HIGHLIGHTER_ALPHA, HIGHLIGHTER_WIDTH_FACTOR,
+};
+pub use overlay::{
+    clear_button_image, clear_button_size, lock_board, overlay_size_ok, start_whiteboard_overlay,
+    ClearRequestFn, SharedBoard, WhiteboardOverlay, MAX_OVERLAY_PIXELS,
+};
+pub use render::{
+    blit, damage_region, norm_to_px, render_full, render_region, width_px, ChannelOrder, PxRect,
+};
+pub use simplify::{simplify, SIMPLIFY_EPSILON};
+pub use stroke::{
+    Board, Damage, NormPoint, NormRect, Rgba, Stroke, WhiteboardOp, MAX_POINTS_PER_MESSAGE,
+    MAX_POINTS_PER_STROKE, MAX_STROKES, MAX_TOTAL_POINTS, MAX_WIDTH, MAX_WIRE_POINTS, MIN_WIDTH,
+};
+pub use tiny_skia::Pixmap;
+
+/// `Feature::name` of the whiteboard on both sides, used to route feature events to the UI.
+pub const FEATURE_NAME: &str = "whiteboard";
