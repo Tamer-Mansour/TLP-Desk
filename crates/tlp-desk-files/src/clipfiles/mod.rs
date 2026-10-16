@@ -10,12 +10,17 @@
 //! (`Download`) carrying the announced id; the host's transfer code finds what to send with
 //! [`ClipFilesFeature::announced`].
 //!
-//! **Viewer -> host** (copy here, paste there): only the viewer may start transfers, so the app
-//! reads [`local_file_list`] and uploads those files into a folder of the remote PC.
+//! **Viewer -> host** (copy here, paste there): the viewer watches its own clipboard exactly
+//! like the host and announces copied files under an id with [`VIEWER_ID_BIT`] set. Only the
+//! viewer can start transfers, so when the host's user pastes, the host *echoes* the announcement
+//! back (a `ClipboardFiles` with the viewer's id and the items); the viewer answers by
+//! uploading the files ([`ClipFilesFeature::set_upload_handler`]) into a staging folder the
+//! host chose ([`FileTransfer::set_announced_dest`](crate::FileTransfer::set_announced_dest)).
 //!
-//! Limitation: the pasted files are not offered to Explorer as a "virtual" clipboard entry
-//! (that needs delayed rendering through COM `IDataObject`); the user pastes with the app's
-//! "paste files from the remote PC" action instead, which downloads into a chosen folder.
+//! Both sides report the peer's current announcement to a [`RemoteHandler`]
+//! ([`ClipFilesFeature::set_remote_handler`]); the app uses it to put the files on the local
+//! clipboard as virtual Explorer files ([`crate::shellclip`]), so Ctrl+V in Explorer pastes
+//! them. The "Paste N files" button and Ctrl+V in the session window stay as a fallback.
 
 mod items;
 mod source;
@@ -43,6 +48,10 @@ pub const FEATURE_NAME: &str = "clipfiles";
 /// Set in every transfer id the host picks for an announcement. Viewer-chosen transfer ids
 /// must keep this bit clear.
 pub const CLIPBOARD_ID_BIT: u64 = 1 << 63;
+
+/// Set in every transfer id the viewer picks for an announcement. Disjoint from the ids the
+/// transfer engine allocates (small counters) and from [`CLIPBOARD_ID_BIT`].
+pub const VIEWER_ID_BIT: u64 = 1 << 61;
 
 /// Permissions the session needs for clipboard file sharing.
 pub const REQUIRED: Permissions = Permissions::CLIPBOARD.union(Permissions::FILES);
@@ -109,6 +118,38 @@ impl RemoteClipboardFiles {
     }
 }
 
+/// What a [`RemoteHandler`] is told when the peer's clipboard files change.
+#[derive(Clone)]
+pub struct RemoteUpdate {
+    /// The session (host: `SessionId`, viewer: the viewer feature key).
+    pub session_key: u64,
+    /// Our role in the session.
+    pub role: Role,
+    /// The peer's files, or `None` when there is nothing to paste any more (cleared, permission
+    /// revoked, session ended).
+    pub files: Option<RemoteClipboardFiles>,
+    /// Host only: asks the viewer to upload the announced files (the host's pull; idempotent
+    /// on the viewer side because it only answers for ids it announced).
+    pub pull: Option<PullFn>,
+}
+
+impl std::fmt::Debug for RemoteUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteUpdate")
+            .field("session_key", &self.session_key)
+            .field("role", &self.role)
+            .field("files", &self.files)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Sends the pull request of a host (see [`RemoteUpdate::pull`]).
+pub type PullFn = Arc<dyn Fn() + Send + Sync>;
+/// Called on every change of the peer's announced files.
+pub type RemoteHandler = Arc<dyn Fn(RemoteUpdate) + Send + Sync>;
+/// Viewer: called when the host asks for files this PC announced: `(session_key, files)`.
+pub type UploadHandler = Arc<dyn Fn(u64, AnnouncedFiles) + Send + Sync>;
+
 /// The clipboard file sharing feature. Register one instance for host and viewer sessions.
 pub struct ClipFilesFeature {
     shared: Arc<Shared>,
@@ -119,6 +160,8 @@ struct Shared {
     next_id: AtomicU64,
     announced: Mutex<HashMap<u64, AnnouncedFiles>>,
     remote: Mutex<HashMap<u64, RemoteClipboardFiles>>,
+    remote_handler: Mutex<Option<RemoteHandler>>,
+    upload_handler: Mutex<Option<UploadHandler>>,
 }
 
 impl std::fmt::Debug for ClipFilesFeature {
@@ -140,8 +183,20 @@ impl ClipFilesFeature {
                 next_id: AtomicU64::new(1),
                 announced: Mutex::default(),
                 remote: Mutex::default(),
+                remote_handler: Mutex::default(),
+                upload_handler: Mutex::default(),
             }),
         })
+    }
+
+    /// Registers the receiver of the peer's announcements (both roles).
+    pub fn set_remote_handler(&self, handler: RemoteHandler) {
+        *lock(&self.shared.remote_handler) = Some(handler);
+    }
+
+    /// Viewer: registers what to do when the host's user pastes files this PC announced.
+    pub fn set_upload_handler(&self, handler: UploadHandler) {
+        *lock(&self.shared.upload_handler) = Some(handler);
     }
 
     /// Host: the set announced in session `session_key` under `transfer_id`, if it is the
@@ -153,15 +208,26 @@ impl ClipFilesFeature {
             .cloned()
     }
 
-    /// Viewer: what the remote PC currently has on its clipboard, if files.
+    /// What the peer currently has on its clipboard, if files.
     pub fn remote_files(&self, session_key: u64) -> Option<RemoteClipboardFiles> {
         lock(&self.shared.remote).get(&session_key).cloned()
     }
 }
 
 impl Shared {
-    fn next_transfer_id(&self) -> u64 {
-        CLIPBOARD_ID_BIT | (self.next_id.fetch_add(1, Ordering::Relaxed) & !CLIPBOARD_ID_BIT)
+    fn next_transfer_id(&self, role: Role) -> u64 {
+        let bit = match role {
+            Role::Host => CLIPBOARD_ID_BIT,
+            Role::Viewer => VIEWER_ID_BIT,
+        };
+        bit | (self.next_id.fetch_add(1, Ordering::Relaxed) & (VIEWER_ID_BIT - 1))
+    }
+
+    fn notify(&self, update: RemoteUpdate) {
+        let handler = lock(&self.remote_handler).clone();
+        if let Some(h) = handler {
+            h(update);
+        }
     }
 }
 
@@ -179,23 +245,17 @@ impl Feature for ClipFilesFeature {
             tracing::error!("clipfiles feature started outside a tokio runtime; disabled");
             return;
         };
-        match ctx.role {
-            Role::Host => {
-                rt.spawn(host_loop(self.shared.clone(), ctx, inbox));
-            }
-            Role::Viewer => {
-                rt.spawn(viewer_loop(self.shared.clone(), ctx, inbox));
-            }
-        }
+        rt.spawn(peer_loop(self.shared.clone(), ctx, inbox));
     }
 }
 
-/// Host: announce clipboard changes until the session ends.
-async fn host_loop(me: Arc<Shared>, ctx: FeatureCtx, mut inbox: mpsc::UnboundedReceiver<Message>) {
+/// Both roles: announce local clipboard changes and track the peer's announcements until the
+/// session ends.
+async fn peer_loop(me: Arc<Shared>, ctx: FeatureCtx, mut inbox: mpsc::UnboundedReceiver<Message>) {
     let mut clip = me.watcher.subscribe();
     let mut perms = ctx.permissions.clone();
     let mut current = clip.borrow_and_update().clone();
-    // The list the viewer currently holds from us (`None` = nothing to paste).
+    // The list the peer currently holds from us (`None` = nothing to paste).
     let mut shown: Option<Snapshot> = None;
     loop {
         let target = (ctx.allowed(REQUIRED) && !current.is_empty()).then(|| current.clone());
@@ -207,6 +267,10 @@ async fn host_loop(me: Arc<Shared>, ctx: FeatureCtx, mut inbox: mpsc::UnboundedR
                 Err(()) => break,
             }
         }
+        if !ctx.allowed(REQUIRED) {
+            // Without the permission a paste would be refused: forget the peer's offer.
+            clear_remote(&me, &ctx);
+        }
         tokio::select! {
             changed = clip.changed() => {
                 if changed.is_err() {
@@ -214,18 +278,16 @@ async fn host_loop(me: Arc<Shared>, ctx: FeatureCtx, mut inbox: mpsc::UnboundedR
                 }
                 current = clip.borrow_and_update().clone();
             }
-            // Re-evaluated at the top: a revoke clears the viewer's entry, a grant shows what
-            // is copied right now.
+            // Re-evaluated at the top: a revoke clears both directions, a grant shows what is
+            // copied right now.
             changed = perms.changed() => {
                 if changed.is_err() {
                     break;
                 }
             }
             msg = inbox.recv() => match msg {
-                Some(Message::ClipboardFiles { .. }) => {
-                    // The host cannot pull from the viewer (transfers are viewer-initiated);
-                    // the viewer uploads instead.
-                    tracing::debug!(session = ctx.session_key, "viewer announced clipboard files; ignored on the host");
+                Some(Message::ClipboardFiles { transfer_id, items }) => {
+                    on_peer_message(&me, &ctx, transfer_id, items);
                 }
                 Some(_) => {}
                 None => break,
@@ -233,9 +295,81 @@ async fn host_loop(me: Arc<Shared>, ctx: FeatureCtx, mut inbox: mpsc::UnboundedR
         }
     }
     lock(&me.announced).remove(&ctx.session_key);
+    clear_remote(&me, &ctx);
 }
 
-/// Sends the announcement for `paths` (empty = clear). `Ok(true)` if the viewer now holds a
+/// A `ClipboardFiles` from the peer: either the host's pull request for files we announced
+/// (viewer only) or the peer's new announcement.
+fn on_peer_message(me: &Shared, ctx: &FeatureCtx, transfer_id: u64, items: Vec<TransferItem>) {
+    if ctx.role == Role::Viewer && transfer_id & CLIPBOARD_ID_BIT == 0 {
+        // The host's user pasted files we announced: upload them. Only ids we announced are
+        // honoured and the files come from our own announcement, never from the message.
+        if items.is_empty() || !ctx.allowed(REQUIRED) {
+            return;
+        }
+        let Some(files) = lock(&me.announced)
+            .get(&ctx.session_key)
+            .filter(|a| a.transfer_id == transfer_id)
+            .cloned()
+        else {
+            tracing::debug!(transfer_id, "pull request for files we no longer announce");
+            return;
+        };
+        let handler = lock(&me.upload_handler).clone();
+        if let Some(h) = handler {
+            h(ctx.session_key, files);
+        }
+        return;
+    }
+    if items.is_empty() {
+        clear_remote(me, ctx);
+        return;
+    }
+    if !ctx.allowed(REQUIRED) {
+        tracing::debug!("clipboard files without CLIPBOARD+FILES; ignored");
+        return;
+    }
+    if items.len() > MAX_ITEMS || !items.iter().all(|i| is_safe_rel_path(&i.rel_path)) {
+        tracing::warn!(
+            transfer_id,
+            "peer announced unsafe clipboard file paths; ignored"
+        );
+        return;
+    }
+    let files = RemoteClipboardFiles { transfer_id, items };
+    lock(&me.remote).insert(ctx.session_key, files.clone());
+    let pull = (ctx.role == Role::Host).then(|| pull_fn(ctx, &files));
+    me.notify(RemoteUpdate {
+        session_key: ctx.session_key,
+        role: ctx.role,
+        files: Some(files.clone()),
+        pull,
+    });
+    if ctx.role == Role::Viewer {
+        ctx.emit(FEATURE_NAME, files);
+    }
+}
+
+/// The host's pull: echoes the announcement so the viewer uploads the files.
+fn pull_fn(ctx: &FeatureCtx, files: &RemoteClipboardFiles) -> PullFn {
+    let session = ctx.session.clone();
+    let msg = Message::ClipboardFiles {
+        transfer_id: files.transfer_id,
+        items: files.items.clone(),
+    };
+    let rt = tokio::runtime::Handle::try_current().ok();
+    Arc::new(move || {
+        let Some(rt) = &rt else { return };
+        let (session, msg) = (session.clone(), msg.clone());
+        rt.spawn(async move {
+            if let Err(e) = session.send(&msg).await {
+                tracing::debug!(%e, "cannot ask the viewer for the copied files");
+            }
+        });
+    })
+}
+
+/// Sends the announcement for `paths` (empty = clear). `Ok(true)` if the peer now holds a
 /// non-empty set, `Err` if the session is gone.
 async fn announce(me: &Shared, ctx: &FeatureCtx, paths: &[PathBuf]) -> Result<bool, ()> {
     let set = if paths.is_empty() {
@@ -247,7 +381,7 @@ async fn announce(me: &Shared, ctx: &FeatureCtx, paths: &[PathBuf]) -> Result<bo
             .ok()
             .flatten()
     };
-    let transfer_id = me.next_transfer_id();
+    let transfer_id = me.next_transfer_id(ctx.role);
     let items = set.as_ref().map(|s| s.items.clone()).unwrap_or_default();
     let shown = !items.is_empty();
     {
@@ -274,64 +408,23 @@ async fn announce(me: &Shared, ctx: &FeatureCtx, paths: &[PathBuf]) -> Result<bo
     Ok(shown)
 }
 
-/// Viewer: remember the latest announcement and tell the UI.
-async fn viewer_loop(
-    me: Arc<Shared>,
-    ctx: FeatureCtx,
-    mut inbox: mpsc::UnboundedReceiver<Message>,
-) {
-    let mut perms = ctx.permissions.clone();
-    loop {
-        let msg = tokio::select! {
-            msg = inbox.recv() => match msg {
-                Some(msg) => msg,
-                None => break,
-            },
-            changed = perms.changed() => {
-                if changed.is_err() {
-                    break;
-                }
-                if !ctx.allowed(REQUIRED) {
-                    // Without the permission a paste would be refused: forget the offer.
-                    clear_remote(&me, &ctx);
-                }
-                continue;
-            }
-        };
-        let Message::ClipboardFiles { transfer_id, items } = msg else {
-            continue;
-        };
-        if items.is_empty() {
-            clear_remote(&me, &ctx);
-            continue;
-        }
-        if !ctx.allowed(REQUIRED) {
-            tracing::debug!("clipboard files without CLIPBOARD+FILES; ignored");
-            continue;
-        }
-        if items.len() > MAX_ITEMS || !items.iter().all(|i| is_safe_rel_path(&i.rel_path)) {
-            tracing::warn!(
-                transfer_id,
-                "host announced unsafe clipboard file paths; ignored"
-            );
-            continue;
-        }
-        let files = RemoteClipboardFiles { transfer_id, items };
-        lock(&me.remote).insert(ctx.session_key, files.clone());
-        ctx.emit(FEATURE_NAME, files);
-    }
-    lock(&me.remote).remove(&ctx.session_key);
-}
-
-/// Viewer: nothing to paste any more; tells the UI with an empty set.
+/// Nothing to paste from the peer any more; tells the UI (viewer) and the handler.
 fn clear_remote(me: &Shared, ctx: &FeatureCtx) {
     if let Some(old) = lock(&me.remote).remove(&ctx.session_key) {
-        ctx.emit(
-            FEATURE_NAME,
-            RemoteClipboardFiles {
-                transfer_id: old.transfer_id,
-                items: Vec::new(),
-            },
-        );
+        if ctx.role == Role::Viewer {
+            ctx.emit(
+                FEATURE_NAME,
+                RemoteClipboardFiles {
+                    transfer_id: old.transfer_id,
+                    items: Vec::new(),
+                },
+            );
+        }
+        me.notify(RemoteUpdate {
+            session_key: ctx.session_key,
+            role: ctx.role,
+            files: None,
+            pull: None,
+        });
     }
 }

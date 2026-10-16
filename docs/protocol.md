@@ -326,6 +326,15 @@ Directories (`is_dir`) are created by the receiver; modification times are resto
   user pastes on the other side; then the viewer starts a `TransferOffer` with the same id
   (`Upload` if the files are on the viewer, `Download` if they are on the host). Needs `CLIPBOARD`
   and `FILES`.
+  Id ranges: the host picks ids with bit 63 set; the viewer picks ids with bit 61 set (and bit 63
+  clear), disjoint from the small counters the transfer engine uses for its own offers. Because
+  only the viewer can open a `TransferOffer`, a host user pasting files the *viewer* announced
+  cannot start the transfer itself: the host *echoes* the announcement (a `ClipboardFiles` with the
+  viewer's id and the same items). The viewer answers only for ids it announced and still has,
+  and uploads the files from its own announcement (never from the echoed items) with a
+  `TransferOffer { direction: Upload, dest_dir: "" }` under that id; an empty `dest_dir` means
+  "the host's choice" (the host maps the id to a staging folder, otherwise its default upload
+  folder). No new message or field: `PROTOCOL_VERSION` is unchanged.
 
 ### Chat
 
