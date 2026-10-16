@@ -12,6 +12,7 @@ pub mod input_map;
 pub mod keygrab;
 #[cfg(windows)]
 pub mod service_entry;
+pub mod service_host;
 pub mod settings;
 pub mod text_route;
 pub mod tray;

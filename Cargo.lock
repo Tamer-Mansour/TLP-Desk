@@ -4600,6 +4600,7 @@ dependencies = [
  "egui_kittest",
  "if-addrs 0.15.0",
  "image",
+ "postcard",
  "raw-window-handle",
  "resvg",
  "rfd",

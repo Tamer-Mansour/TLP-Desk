@@ -69,7 +69,7 @@ pub fn user_logged_on(session: u32) -> bool {
     user_token(session).is_ok()
 }
 
-fn user_token(session: u32) -> Result<OwnedHandle, HostError> {
+pub(super) fn user_token(session: u32) -> Result<OwnedHandle, HostError> {
     let mut token = HANDLE::default();
     // SAFETY: `token` is a valid out pointer; on success we own the returned handle.
     unsafe { WTSQueryUserToken(session, &mut token) }
