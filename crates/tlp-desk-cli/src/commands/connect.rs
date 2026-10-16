@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 use tlp_desk_net::FeatureSet;
 use tlp_desk_proto::InputEvent;
 use tlp_desk_viewer::{
-    privacy_request, DecodedFrame, MonitorDesc, PrivacyState, PrivacyViewerFeature, ViewerEvent,
-    ViewerStats,
+    privacy_request, DecodedFrame, MonitorDesc, NetSim, PrivacyState, PrivacyViewerFeature,
+    ViewerEvent, ViewerStats,
 };
 
 use super::common::{dial, peer_json, Ctx, DialArgs};
@@ -47,6 +47,29 @@ pub struct ConnectArgs {
     /// Testing: after `--type`, press Ctrl+<LETTER> (e.g. `s` to save).
     #[arg(long, value_name = "LETTER")]
     pub then_ctrl: Option<char>,
+    /// DEV ONLY (hidden): lose this percentage of the received video frames, to exercise the
+    /// host's adaptive quality on one PC.
+    #[arg(long, value_name = "PCT", hide = true, value_parser = clap::value_parser!(u8).range(0..=100))]
+    pub sim_loss: Option<u8>,
+    /// DEV ONLY (hidden): simulate a link of this many kbit/s for the received video (frames
+    /// that do not fit are lost).
+    #[arg(long, value_name = "KBPS", hide = true)]
+    pub sim_bandwidth_kbps: Option<u32>,
+    /// DEV ONLY (hidden): end the simulated impairment after this many seconds (default: it
+    /// lasts the whole session), to watch the host recover.
+    #[arg(long, value_name = "SECONDS", hide = true)]
+    pub sim_seconds: Option<u64>,
+}
+
+impl ConnectArgs {
+    /// The dev-only link simulation these flags ask for, if any.
+    pub fn net_sim(&self) -> Option<NetSim> {
+        let sim = NetSim {
+            loss_pct: self.sim_loss.unwrap_or(0),
+            bandwidth_kbps: self.sim_bandwidth_kbps.unwrap_or(0),
+        };
+        sim.is_active().then_some(sim)
+    }
 }
 
 /// Runs `connect`.
@@ -72,6 +95,18 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
     }
     let start = Instant::now();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(args.seconds);
+    // Dev only: impair the received video, optionally for a limited time.
+    let sim = args.net_sim();
+    if let Some(sim) = sim {
+        session.set_net_sim(Some(sim));
+        out.event(
+            text::net_sim(Some(sim)),
+            &net_sim_json(start.elapsed(), Some(sim)),
+        );
+    }
+    let sim_end = sim
+        .and(args.sim_seconds)
+        .map(|s| tokio::time::Instant::now() + Duration::from_secs(s));
     let mut last: Option<DecodedFrame> = None;
     let mut ended = None;
     let mut want_monitor = args.monitor;
@@ -96,6 +131,10 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
         tokio::select! {
             _ = tokio::time::sleep_until(deadline) => break,
             _ = tokio::signal::ctrl_c() => break,
+            _ = sleep_until_opt(sim_end), if sim_end.is_some() && session.net_sim().is_some() => {
+                session.set_net_sim(None);
+                out.event(text::net_sim(None), &net_sim_json(start.elapsed(), None));
+            }
             _ = pointer_tick.tick(), if args.move_pointer => {
                 // Normalized coordinates: a circle of ~3% of the screen around the center.
                 let a = f64::from(step) * 0.25;
@@ -205,11 +244,34 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
     Ok(())
 }
 
-/// `{"type":"stats", ...}`, one per second.
+/// Sleeps until `at`, or forever without one.
+async fn sleep_until_opt(at: Option<tokio::time::Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// `{"type":"net_sim", ...}`: the dev-only link simulation started (`active: true`) or ended.
+pub fn net_sim_json(t: Duration, sim: Option<NetSim>) -> Value {
+    let sim = sim.unwrap_or_default();
+    json!({
+        "type": "net_sim",
+        "t_ms": u64::try_from(t.as_millis()).unwrap_or(u64::MAX),
+        "active": sim.is_active(),
+        "loss_pct": sim.loss_pct,
+        "bandwidth_kbps": sim.bandwidth_kbps,
+    })
+}
+
+/// `{"type":"stats", ...}`, one per second. `qp` is the average H.264 quantiser of the frames
+/// received in the last second (lower is sharper; 0 = unknown).
 pub fn stats_json(t: Duration, s: &ViewerStats) -> Value {
     json!({
         "type": "stats",
         "t_s": t.as_secs(),
+        "t_ms": u64::try_from(t.as_millis()).unwrap_or(u64::MAX),
+        "qp": s.qp,
         "fps": s.fps,
         "bitrate_kbps": s.bitrate_kbps,
         "rtt_ms": s.rtt_ms,
@@ -271,13 +333,83 @@ mod tests {
                 "frames_received",
                 "height",
                 "latency_ms",
+                "qp",
                 "rtt_ms",
+                "t_ms",
                 "t_s",
                 "type",
                 "width"
             ]
         );
         assert_eq!(v["t_s"], 3);
+        assert_eq!(v["t_ms"], 3000);
+        let v = stats_json(
+            Duration::from_millis(1500),
+            &ViewerStats {
+                qp: 23.5,
+                ..ViewerStats::default()
+            },
+        );
+        assert_eq!(
+            (v["t_s"].as_u64(), v["t_ms"].as_u64()),
+            (Some(1), Some(1500))
+        );
+        assert_eq!(v["qp"], 23.5);
+    }
+
+    #[test]
+    fn sim_flags_are_hidden_dev_options() {
+        use crate::commands::{Cli, Cmd};
+        use clap::{CommandFactory, Parser};
+
+        let cli = Cli::try_parse_from([
+            "TLP-Desk-cli",
+            "connect",
+            "127.0.0.1:47490",
+            "--sim-loss",
+            "5",
+            "--sim-bandwidth-kbps",
+            "4000",
+            "--sim-seconds",
+            "30",
+        ])
+        .unwrap();
+        let Cmd::Connect(c) = cli.cmd else {
+            panic!("not connect")
+        };
+        assert_eq!(
+            c.net_sim(),
+            Some(NetSim {
+                loss_pct: 5,
+                bandwidth_kbps: 4000
+            })
+        );
+        assert_eq!(c.sim_seconds, Some(30));
+        // Without the flags (or with zeros) nothing is simulated.
+        let plain =
+            Cli::try_parse_from(["TLP-Desk-cli", "connect", "127.0.0.1", "--sim-loss", "0"])
+                .unwrap();
+        let Cmd::Connect(p) = plain.cmd else {
+            panic!("not connect")
+        };
+        assert_eq!(p.net_sim(), None);
+        assert!(
+            Cli::try_parse_from(["TLP-Desk-cli", "connect", "x", "--sim-loss", "101"]).is_err()
+        );
+        // Hidden from --help: users never see them.
+        let help = Cli::command()
+            .find_subcommand_mut("connect")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(!help.contains("sim-"), "{help}");
+
+        let j = net_sim_json(Duration::from_millis(2500), c.net_sim());
+        assert_eq!(
+            (j["active"].as_bool(), j["t_ms"].as_u64()),
+            (Some(true), Some(2500))
+        );
+        assert_eq!(net_sim_json(Duration::ZERO, None)["active"], false);
     }
 
     #[test]

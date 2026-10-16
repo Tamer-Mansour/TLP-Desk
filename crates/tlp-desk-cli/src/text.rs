@@ -356,18 +356,44 @@ pub fn connected_host(peer: &PeerInfo, perms: Permissions) -> String {
 }
 
 pub fn stats_line(t_elapsed: Duration, s: &ViewerStats) -> String {
+    // The quantiser is unknown (0) for encoders that do not signal it per slice.
+    let qp = if s.qp > 0.0 {
+        format!("{:.0}", s.qp)
+    } else {
+        "-".to_owned()
+    };
     t(
         format!(
-            "[{:>3}s] {:>5.1} fps  {:>8.0} kbps  rtt {:>5.1} ms  latency ~{:>5.1} ms  decode {:>5.1} ms  {}x{}  frames {}/{}",
+            "[{:>3}s] {:>5.1} fps  {:>8.0} kbps  rtt {:>5.1} ms  latency ~{:>5.1} ms  decode {:>5.1} ms  {}x{}  Q~{qp}  frames {}/{}",
             t_elapsed.as_secs(), s.fps, s.bitrate_kbps, s.rtt_ms, s.latency_ms, s.decode_ms,
             s.width, s.height, s.frames_decoded, s.frames_received
         ),
         format!(
-            "[{:>3} ث] {:>5.1} إطار/ث  {:>8.0} ك.بت/ث  ذهاب وإياب {:>5.1} م.ث  تأخير ~{:>5.1} م.ث  فك {:>5.1} م.ث  {}x{}  إطارات {}/{}",
+            "[{:>3} ث] {:>5.1} إطار/ث  {:>8.0} ك.بت/ث  ذهاب وإياب {:>5.1} م.ث  تأخير ~{:>5.1} م.ث  فك {:>5.1} م.ث  {}x{}  Q~{qp}  إطارات {}/{}",
             t_elapsed.as_secs(), s.fps, s.bitrate_kbps, s.rtt_ms, s.latency_ms, s.decode_ms,
             s.width, s.height, s.frames_decoded, s.frames_received
         ),
     )
+}
+
+/// The dev-only link simulation of `connect` started (`Some`) or ended (`None`).
+pub fn net_sim(sim: Option<tlp_desk_viewer::NetSim>) -> String {
+    match sim {
+        Some(s) => t(
+            format!(
+                "DEV: simulating {}% video loss, {} kbit/s link",
+                s.loss_pct, s.bandwidth_kbps
+            ),
+            format!(
+                "للمطورين: محاكاة فقدان {}% من الفيديو ووصلة {} ك.بت/ث",
+                s.loss_pct, s.bandwidth_kbps
+            ),
+        ),
+        None => t(
+            "DEV: link simulation ended".to_owned(),
+            "للمطورين: انتهت محاكاة الوصلة".to_owned(),
+        ),
+    }
 }
 
 pub fn session_ended(r: &ViewerEnd) -> String {

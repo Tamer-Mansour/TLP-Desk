@@ -58,7 +58,7 @@ pub use conflict::{
 };
 pub use error::{FilesError, PathIssue};
 pub use hash::PIECE;
-pub use path::{validate_component, validate_rel_path, MAX_DEPTH};
+pub use path::{display_path, validate_component, validate_rel_path, MAX_DEPTH};
 pub use plan::{Decisions, META_SUFFIX, PART_SUFFIX};
 pub use types::{
     ConflictPolicy, FileRow, FileState, TransferConfig, TransferEvent, TransferId, TransferInfo,

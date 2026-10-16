@@ -32,6 +32,7 @@
 
 mod device_info;
 mod frame;
+pub mod netsim;
 mod perf;
 mod privacy;
 mod reconnect;
@@ -54,6 +55,7 @@ pub use device_info::{
     request_device_info, sanitize as sanitize_device_info, DeviceInfoClient, DEVICE_INFO_FEATURE,
 };
 pub use frame::{DecodedFrame, FrameSlot, PixelFormat};
+pub use netsim::NetSim;
 pub use perf::LatencyClock;
 pub use privacy::{privacy_request, PrivacyState, PrivacyViewerFeature, PRIVACY_FEATURE};
 pub use reconnect::{

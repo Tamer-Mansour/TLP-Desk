@@ -29,7 +29,7 @@ use windows::Win32::Media::MediaFoundation::{
     MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
     MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER,
     MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES,
-    MFT_REGISTER_TYPE_INFO, MF_EVENT_FLAG_NO_WAIT, MF_E_NO_EVENTS_AVAILABLE,
+    MFT_REGISTER_TYPE_INFO, MF_EVENT_FLAG_NO_WAIT, MF_E_NOTACCEPTING, MF_E_NO_EVENTS_AVAILABLE,
     MF_E_TRANSFORM_NEED_MORE_INPUT, MF_E_TRANSFORM_STREAM_CHANGE, MF_LOW_LATENCY,
     MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE,
     MF_MT_MPEG2_PROFILE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_MT_VIDEO_NOMINAL_RANGE,
@@ -42,6 +42,9 @@ use windows::Win32::System::Variant::VARIANT;
 
 use crate::convert::{i420_to_nv12, nv12_len, I420Buffer};
 use crate::CodecError;
+
+/// How often one frame may be refused (`MF_E_NOTACCEPTING`) and offered again.
+const MAX_INPUT_REFUSALS: u32 = 3;
 
 fn mf_err(what: &str, e: windows::core::Error) -> CodecError {
     CodecError::Backend(format!("media foundation {what} failed: {e}"))
@@ -485,15 +488,36 @@ impl Mft {
         keyframe: bool,
         deadline: Instant,
     ) -> Result<Option<(Vec<u8>, i64)>, CodecError> {
+        // Take in what the MFT already announced first (an output it finished early, more
+        // input requests): an asynchronous MFT refuses input while an output is waiting.
+        self.drain_events()?;
         self.pump_until(deadline, |m| m.need_input > 0)?;
         if keyframe {
             set_codec(&self.codec, &CODECAPI_AVEncVideoForceKeyFrame, 1u32.into())
                 .map_err(|e| mf_err("force keyframe", e))?;
         }
         let sample = self.input_sample(yuv, timestamp_us)?;
-        // SAFETY: `sample` is a complete NV12 sample; the MFT takes its own reference.
-        unsafe { self.transform.ProcessInput(self.in_id, &sample, 0) }
-            .map_err(|e| mf_err("ProcessInput", e))?;
+        let mut refusals = 0u32;
+        loop {
+            // SAFETY: `sample` is a complete NV12 sample; the MFT takes its own reference.
+            match unsafe { self.transform.ProcessInput(self.in_id, &sample, 0) } {
+                Ok(()) => break,
+                // Seen with Intel Quick Sync under load (rc.2 system test): an input request we
+                // counted is no longer open. Forget the stale credit, wait for the MFT's next
+                // request (handling its pending output on the way) and offer the frame again,
+                // instead of losing the hardware encoder for the rest of the session.
+                Err(e) if e.code() == MF_E_NOTACCEPTING && refusals < MAX_INPUT_REFUSALS => {
+                    refusals += 1;
+                    tracing::debug!(
+                        refusals,
+                        "encoder MFT refused input; waiting for its request"
+                    );
+                    self.need_input = 0;
+                    self.pump_until(deadline, |m| m.need_input > 0)?;
+                }
+                Err(e) => return Err(mf_err("ProcessInput", e)),
+            }
+        }
         self.need_input = self.need_input.saturating_sub(1);
         self.pump_until(deadline, |m| !m.ready.is_empty())?;
         Ok(self.ready.pop_front())
@@ -543,6 +567,18 @@ impl Mft {
             }
         };
         build().map_err(|e| mf_err("input sample", e))
+    }
+
+    /// Handles every event already queued, without waiting for more.
+    fn drain_events(&mut self) -> Result<(), CodecError> {
+        loop {
+            // SAFETY: non-blocking event query on the live MFT.
+            match unsafe { self.events.GetEvent(MF_EVENT_FLAG_NO_WAIT) } {
+                Ok(ev) => self.handle_event(&ev)?,
+                Err(e) if e.code() == MF_E_NO_EVENTS_AVAILABLE => return Ok(()),
+                Err(e) => return Err(mf_err("GetEvent", e)),
+            }
+        }
     }
 
     /// Handles queued events until `done` holds; fails at `deadline`.

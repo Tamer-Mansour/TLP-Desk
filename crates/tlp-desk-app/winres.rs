@@ -82,6 +82,9 @@ fn embed_windows_resources(file_description: &str, original_filename: &str, icon
         v("CARGO_PKG_VERSION_PATCH"),
     );
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    // VS_FF_PRERELEASE = 0x2 for "-rc.N" style versions, so Explorer's details match the release.
+    let prerelease = std::env::var("CARGO_PKG_VERSION_PRE").is_ok_and(|p| !p.is_empty());
+    let flags = if prerelease { "0x2L" } else { "0x0L" };
     let icon_abs = icon.canonicalize().unwrap_or_else(|_| icon.to_path_buf());
     let icon_str = icon_abs
         .to_string_lossy()
@@ -90,13 +93,16 @@ fn embed_windows_resources(file_description: &str, original_filename: &str, icon
 
     // Numeric constants instead of <winver.h> so rc.exe needs no INCLUDE path:
     // VOS_NT_WINDOWS32 = 0x40004, VFT_APP = 0x1, 0x0409/1200 = en-US, Unicode.
+    // Keep every StringFileInfo field filled in (company, product, description, copyright,
+    // original file name): Explorer shows them under Properties > Details, and the signature's
+    // publisher should match CompanyName (docs/src/dev/code-signing.md).
     let script = format!(
         r#"1 ICON "{icon}"
 1 VERSIONINFO
 FILEVERSION {major},{minor},{patch},0
 PRODUCTVERSION {major},{minor},{patch},0
 FILEFLAGSMASK 0x3fL
-FILEFLAGS 0x0L
+FILEFLAGS {flags}
 FILEOS 0x40004L
 FILETYPE 0x1L
 FILESUBTYPE 0x0L
@@ -105,11 +111,12 @@ BEGIN
   BEGIN
     BLOCK "040904b0"
     BEGIN
+      VALUE "Comments", "Free, open-source remote desktop for the local network. MIT OR Apache-2.0. https://github.com/Tamer-Mansour/TLP-Desk"
       VALUE "CompanyName", "TLP"
       VALUE "FileDescription", "{desc}"
       VALUE "FileVersion", "{version}"
       VALUE "InternalName", "{orig}"
-      VALUE "LegalCopyright", "MIT OR Apache-2.0"
+      VALUE "LegalCopyright", "Copyright (c) 2026 Tamer Mansour and the TLP-Desk contributors"
       VALUE "OriginalFilename", "{orig}"
       VALUE "ProductName", "TLP-Desk"
       VALUE "ProductVersion", "{version}"

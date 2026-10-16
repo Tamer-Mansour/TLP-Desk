@@ -1,0 +1,45 @@
+# winget locale manifest (Arabic). Regenerate with scripts/update-winget-manifest.ps1.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.locale.1.12.0.schema.json
+
+PackageIdentifier: TLP.TLP-Desk
+PackageVersion: 1.0.0-rc.2
+PackageLocale: ar-SA
+Publisher: TLP
+PublisherUrl: https://github.com/Tamer-Mansour/TLP-Desk
+PublisherSupportUrl: https://github.com/Tamer-Mansour/TLP-Desk/issues
+PrivacyUrl: https://github.com/Tamer-Mansour/TLP-Desk/blob/TLP-Desk/docs/src/user-guide/ar/security-privacy.md
+Author: Tamer Mansour
+PackageName: TLP-Desk
+PackageUrl: https://github.com/Tamer-Mansour/TLP-Desk
+License: MIT OR Apache-2.0
+LicenseUrl: https://github.com/Tamer-Mansour/TLP-Desk#license
+Copyright: Copyright (c) 2026 Tamer Mansour and the TLP-Desk contributors
+ShortDescription: 'سطح مكتب بعيد مجاني ومفتوح المصدر لشبكتك المحلية: بلا سحابة ولا حساب ولا تتبُّع.'
+Description: |-
+  يتيح لك TLP-Desk رؤية حاسوب آخر في شبكتك المحلية نفسها والتحكم فيه. يعمل دون إنترنت بالكامل: فلا
+  خدمة سحابية ولا خادم وسيط ولا حساب ولا جمع بيانات، ويواصل العمل حتى بعد فصل الإنترنت. والبرنامج
+  نفسه يعمل جهازًا مضيفًا وجهاز عرض معًا.
+  - يعثر على الأجهزة في الشبكة تلقائيًا، أو يتصل بمعرّف الجهاز المكوّن من 9 أرقام أو باسمه أو بعنوان IP
+  - كل اتصال مشفَّر بـ QUIC وTLS 1.3، ومعرّف الجهاز يثبّت مفتاح الجهاز المضيف
+  - لا تبدأ الجلسة إلا إذا نقر مستخدم الجهاز المضيف «قبول»، أو أدخل جهاز العرض الرمز لمرة واحدة، أو
+    بكلمة مرور الوصول غير المراقَب
+  - فيديو H.264 سلس حتى 60 إطارًا في الثانية، وتعدد الشاشات، ونقل الملفات، ومشاركة الحافظة،
+    والمحادثة، وصوت الحاسوب البعيد
+  - واجهة كاملة بالعربية والإنجليزية
+Tags:
+- سطح-المكتب-البعيد
+- التحكم-عن-بعد
+- الدعم-عن-بعد
+- مشاركة-الشاشة
+- نقل-الملفات
+- شبكة-محلية
+- دون-إنترنت
+- مفتوح-المصدر
+- remote-desktop
+- lan
+ReleaseNotesUrl: https://github.com/Tamer-Mansour/TLP-Desk/releases/tag/v1.0.0-rc.2
+Documentations:
+- DocumentLabel: دليل المستخدم
+  DocumentUrl: https://github.com/Tamer-Mansour/TLP-Desk/blob/TLP-Desk/docs/src/user-guide/ar/index.md
+ManifestType: locale
+ManifestVersion: 1.12.0

@@ -167,7 +167,7 @@ fn finish(
             s.info.dest_dir.clone(),
         )
     });
-    let dest = local_dest.map_or(dest, |d| d.display().to_string());
+    let dest = shown_destination(local_dest, dest);
     match state {
         TransferState::Completed => {
             let secs = start.elapsed().as_secs_f64();
@@ -200,6 +200,12 @@ fn finish(
             Err(FilesError::Cancelled.into())
         }
     }
+}
+
+/// The destination as people write it: a local folder loses the long-path prefix the engine
+/// works with (`\\?\C:\x` is shown as `C:\x`).
+fn shown_destination(local_dest: Option<PathBuf>, remote_dest: String) -> String {
+    local_dest.map_or(remote_dest, |d| tlp_desk_files::display_path(&d))
 }
 
 #[cfg(test)]
@@ -236,6 +242,31 @@ mod tests {
         assert!(
             parse(&["send-file", "123456789"]).is_err(),
             "paths are required"
+        );
+    }
+
+    /// Regression (rc.1 and rc.2 system tests): `get-file` printed `\\?\C:\...`.
+    #[test]
+    fn destination_is_shown_without_the_long_path_prefix() {
+        use std::path::PathBuf;
+
+        use super::shown_destination;
+        assert_eq!(
+            shown_destination(Some(PathBuf::from(r"\\?\C:\مجلد\تنزيلات")), String::new()),
+            r"C:\مجلد\تنزيلات"
+        );
+        assert_eq!(
+            shown_destination(Some(PathBuf::from(r"\\?\UNC\خادم\مشاركة")), String::new()),
+            r"\\خادم\مشاركة"
+        );
+        assert_eq!(
+            shown_destination(Some(PathBuf::from(r"D:\بيانات")), String::new()),
+            r"D:\بيانات"
+        );
+        // Uploads have no local destination: the host's folder is shown as it came.
+        assert_eq!(
+            shown_destination(None, r"C:\Users\مستخدم\Desktop".into()),
+            r"C:\Users\مستخدم\Desktop"
         );
     }
 
