@@ -2,7 +2,9 @@
 //! button variants, text fields with a focus ring, switches, chips, a segmented control,
 //! hoverable list rows, section headers, toasts and empty states.
 
-use eframe::egui::{self, Align, Color32, CornerRadius, Id, Margin, Response, Sense, Stroke, Ui};
+use eframe::egui::{
+    self, Align, Color32, CornerRadius, Id, Margin, Response, RichText, Sense, Stroke, Ui,
+};
 
 use super::bidi_edit::BidiEdit;
 use super::icons::{self, Icon};
@@ -72,7 +74,9 @@ pub fn copy_button(ui: &mut Ui, tx: Tx, id: Id, value_for_clipboard: &str) {
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
         resp.on_hover_text(label)
     } else {
-        ghost_scope(ui, |ui| icons::icon_button(ui, tx, Icon::Copy, tx.t(S::Copy)))
+        ghost_scope(ui, |ui| {
+            icons::icon_button(ui, tx, Icon::Copy, tx.t(S::Copy))
+        })
     };
     if resp.clicked() {
         ui.ctx().copy_text(value_for_clipboard.to_owned());
@@ -126,7 +130,9 @@ fn filled_button<'a>(
     } else {
         base
     };
-    let text = egui::RichText::new(text.to_owned()).color(p.on_fill).strong();
+    let text = egui::RichText::new(text.to_owned())
+        .color(p.on_fill)
+        .strong();
     icons::icon_text_colored(tx, icon, text, p.on_fill)
         .fill(fill)
         .stroke(Stroke::NONE)
@@ -255,7 +261,10 @@ pub fn switch(ui: &mut Ui, tx: Tx, on: &mut bool, label: &str) -> Response {
     let gap = space::M - 2.0;
     let size = egui::vec2(
         track.x + gap + galley.size().x,
-        track.y.max(galley.size().y).max(ui.spacing().interact_size.y - 6.0),
+        track
+            .y
+            .max(galley.size().y)
+            .max(ui.spacing().interact_size.y - 6.0),
     );
     let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click());
     if resp.clicked() {
@@ -334,7 +343,7 @@ pub fn segmented<T: PartialEq + Copy>(
     ui: &mut Ui,
     tx: Tx,
     value: &mut T,
-    options: &[(T, Icon, &str)],
+    options: &[(T, Option<Icon>, &str)],
 ) -> bool {
     let p = theme::tokens(ui);
     let mut changed = false;
@@ -356,7 +365,10 @@ pub fn segmented<T: PartialEq + Copy>(
                 v.widgets.inactive.fg_stroke.color = p.text_muted;
                 for (opt, icon, label) in options {
                     let selected = *value == *opt;
-                    let b = icons::icon_text_selectable(tx, selected, *icon, *label);
+                    let b = match icon {
+                        Some(icon) => icons::icon_text_selectable(tx, selected, *icon, *label),
+                        None => egui::Button::selectable(selected, *label),
+                    };
                     let b = if selected {
                         b.stroke(Stroke::new(1.0, p.border))
                     } else {
@@ -386,7 +398,11 @@ pub fn list_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> (R, Response)
         });
     let rect = inner.response.rect;
     let hovered = ui.rect_contains_pointer(rect);
-    let fill = if hovered { p.surface_hover } else { p.surface_alt };
+    let fill = if hovered {
+        p.surface_hover
+    } else {
+        p.surface_alt
+    };
     ui.painter().set(
         bg,
         egui::Shape::rect_filled(rect, CornerRadius::same(radius::MD + 2), fill),
@@ -400,7 +416,8 @@ pub fn divider(ui: &mut Ui) {
     ui.add_space(space::S);
     let p = theme::tokens(ui);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, p.border));
+    ui.painter()
+        .hline(rect.x_range(), rect.center().y, Stroke::new(1.0, p.border));
     ui.add_space(space::S);
 }
 
@@ -449,9 +466,61 @@ pub fn toast_row(ui: &mut Ui, tx: Tx, tone: Tone, icon: Icon, text: &str) {
     });
 }
 
+/// Shorten `s` to at most `max` characters (not bytes: Arabic stays intact), ending in "…".
+/// Works on logical order, so the reading end is what gets cut in both directions.
+pub fn elide(s: &str, max: usize) -> std::borrow::Cow<'_, str> {
+    if s.chars().count() <= max {
+        return s.into();
+    }
+    let keep: String = s.chars().take(max.saturating_sub(1)).collect();
+    format!("{keep}…").into()
+}
+
+/// Elide `text` (in logical order) until `style(text)` fits in `max_w` points, so Arabic is
+/// cut at its reading end too (egui's own truncation cuts the visual end of shaped text).
+pub fn fit(ui: &egui::Ui, text: &str, max_w: f32, style: impl Fn(&str) -> RichText) -> String {
+    let width = |s: &str| {
+        egui::WidgetText::from(style(s))
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Body,
+            )
+            .size()
+            .x
+    };
+    if width(text) <= max_w {
+        return text.to_owned();
+    }
+    let total = text.chars().count();
+    // Largest prefix that fits (binary search: a handful of layouts per row at most).
+    let (mut lo, mut hi) = (1usize, total);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if width(&elide(text, mid)) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    elide(text, lo).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elide_counts_characters_not_bytes() {
+        assert_eq!(elide("Office-PC", 28), "Office-PC");
+        assert_eq!(elide("abcdef", 4), "abc…");
+        let ar = "حاسوب-المكتبة-الرئيسية-في-الطابق-الثاني";
+        let short = elide(ar, 10);
+        assert_eq!(short.chars().count(), 10);
+        assert!(short.starts_with("حاسوب"));
+        assert!(short.ends_with('…'));
+    }
 
     #[test]
     fn lerp_color_hits_both_ends_and_clamps() {

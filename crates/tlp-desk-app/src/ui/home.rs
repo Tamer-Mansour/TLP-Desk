@@ -37,7 +37,8 @@ fn top_bar(ui: &mut egui::Ui, tx: Tx, actions: &mut Vec<Action>, show_settings_b
         .show(ui, |ui| {
             theme::row(ui, tx.rtl(), |ui| {
                 let dark = ui.visuals().dark_mode;
-                let (mark, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
+                let (mark, _) =
+                    ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::hover());
                 theme::paint_brand_mark(ui.painter(), mark, dark);
                 ui.label(
                     RichText::new(tx.t(S::AppTitle))
@@ -194,8 +195,7 @@ impl App {
                             };
                             theme::row(ui, tx.rtl(), |ui| {
                                 ui.label(
-                                    theme::mono(&tx.n(&grouped), theme::font::CODE)
-                                        .color(p.accent),
+                                    theme::mono(&tx.n(&grouped), theme::font::CODE).color(p.accent),
                                 );
                                 widgets::copy_button(ui, tx, Id::new("copy-code"), code);
                                 let ghost = widgets::ButtonKind::Ghost;
@@ -279,8 +279,12 @@ impl App {
                     tx,
                     &mut self.address_book.tab,
                     &[
-                        (HomeTab::Nearby, Icon::Network, tx.t(S::NearbyDevices)),
-                        (HomeTab::AddressBook, Icon::AddressBook, tx.t(S::AbTitle)),
+                        (HomeTab::Nearby, Some(Icon::Network), tx.t(S::NearbyDevices)),
+                        (
+                            HomeTab::AddressBook,
+                            Some(Icon::AddressBook),
+                            tx.t(S::AbTitle),
+                        ),
                     ],
                 );
                 ui.add_space(theme::space::S);
@@ -320,47 +324,6 @@ impl App {
 const MAX_ADDRESS_CHARS: usize = 22;
 /// Longest device name shown in a device row before it is elided.
 const MAX_NAME_CHARS: usize = 28;
-
-/// Shorten `s` to at most `max` characters (not bytes: Arabic stays intact), ending in "…".
-/// Works on logical order, so the reading end is what gets cut in both directions.
-fn elide(s: &str, max: usize) -> std::borrow::Cow<'_, str> {
-    if s.chars().count() <= max {
-        return s.into();
-    }
-    let keep: String = s.chars().take(max.saturating_sub(1)).collect();
-    format!("{keep}…").into()
-}
-
-/// Elide `text` (in logical order) until `style(text)` fits in `max_w` points, so Arabic is
-/// cut at its reading end too (egui's own truncation cuts the visual end of shaped text).
-fn fit(ui: &egui::Ui, text: &str, max_w: f32, style: impl Fn(&str) -> RichText) -> String {
-    let width = |s: &str| {
-        egui::WidgetText::from(style(s))
-            .into_galley(
-                ui,
-                Some(egui::TextWrapMode::Extend),
-                f32::INFINITY,
-                egui::TextStyle::Body,
-            )
-            .size()
-            .x
-    };
-    if width(text) <= max_w {
-        return text.to_owned();
-    }
-    let total = text.chars().count();
-    // Largest prefix that fits (binary search: a handful of layouts per row at most).
-    let (mut lo, mut hi) = (1usize, total);
-    while lo < hi {
-        let mid = (lo + hi).div_ceil(2);
-        if width(&elide(text, mid)) <= max_w {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    elide(text, lo).into_owned()
-}
 
 /// Where the two halves of a device row ended up (for layout tests).
 #[derive(Clone, Copy, Debug)]
@@ -419,7 +382,7 @@ fn device_row(
         theme::status_dot(&mut lead, color);
         theme::column(&mut lead, rtl, |ui| {
             let max_w = ui.available_width();
-            let name = fit(ui, &elide(&dev.name, MAX_NAME_CHARS), max_w, |s| {
+            let name = widgets::fit(ui, &widgets::elide(&dev.name, MAX_NAME_CHARS), max_w, |s| {
                 RichText::new(tx.d(s)).strong()
             });
             let r = ui.label(RichText::new(tx.d(&name)).strong());
@@ -428,9 +391,9 @@ fn device_row(
             }
             let id = tx.digits(&dev.device_id.to_string());
             let full = dev.address.to_string();
-            let ip = tx.digits(&elide(&full, MAX_ADDRESS_CHARS));
+            let ip = tx.digits(&widgets::elide(&full, MAX_ADDRESS_CHARS));
             // Build the meta line in logical order, then shape once.
-            let meta = fit(ui, &format!("{id} · {ip}"), max_w, |s| {
+            let meta = widgets::fit(ui, &format!("{id} · {ip}"), max_w, |s| {
                 theme::caption(ui, &tx.p(s))
             });
             ui.label(theme::caption(ui, &tx.p(&meta)))
@@ -494,17 +457,6 @@ mod tests {
 
     fn tx(lang: Lang) -> Tx {
         Tx::new(lang, DigitStyle::Western)
-    }
-
-    #[test]
-    fn elide_counts_characters_not_bytes() {
-        assert_eq!(elide("Office-PC", 28), "Office-PC");
-        assert_eq!(elide("abcdef", 4), "abc…");
-        let ar = "حاسوب-المكتبة-الرئيسية-في-الطابق-الثاني";
-        let short = elide(ar, 10);
-        assert_eq!(short.chars().count(), 10);
-        assert!(short.starts_with("حاسوب"));
-        assert!(short.ends_with('…'));
     }
 
     /// Regression: a long IPv6 link-local address used to push the status under the star and
