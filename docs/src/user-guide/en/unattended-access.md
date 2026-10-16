@@ -92,7 +92,8 @@ changed.
   anyone signs in, so your viewer gets back in on its own.
 - The permanent password, one-time code and Accept rules are the same as without the service.
   The service uses the machine-wide data folder `%ProgramData%\TLP-Desk\`. Its log is
-  `%ProgramData%\TLP-Desk\logs\service.log`.
+  `%ProgramData%\TLP-Desk\logs\service.log` (a technical log in English, for support; notices you
+  see on screen are in your language, and nothing is written to the Windows Event Log).
 
 A viewer that has the permanent password or a valid reconnect ticket connects without an
 **Accept** click, so choose a strong password.
