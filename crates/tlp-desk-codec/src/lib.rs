@@ -79,17 +79,19 @@ pub struct EncoderConfig {
 
 impl EncoderConfig {
     /// A sensible default for LAN screen sharing: `fps` frames per second and a bitrate that
-    /// scales with the encoded resolution under [`Downscale::Auto`]: about 12.4 Mbps for
-    /// 1080p60, 13.8 Mbps for 1920x1200@60, 6.2 Mbps for 1080p30.
+    /// scales with the encoded resolution under [`Downscale::Auto`]: about 14.9 Mbps for
+    /// 1080p60, 16.6 Mbps for 1920x1200@60, 7.5 Mbps for 1080p30.
     ///
     /// For frames already downscaled by the capturer (`CaptureOptions::max_size`), pass the
     /// *frame* size: it fits the encoder, so it is encoded as is (no second downscale).
     pub fn for_screen(width: u32, height: u32, fps: u32) -> Self {
         let (ew, eh) = h264::auto_encoded_size(width, height);
         let pixels_per_sec = ew as u64 * eh as u64 * fps.max(1) as u64;
-        // ~0.1 bits per pixel (sharp text when scrolling at 60 fps), clamped to a range that
-        // suits wired and Wi-Fi LANs. Rate control spends far less on static screens.
-        let kbps = (pixels_per_sec / 10_000).clamp(1_000, 40_000) as u32;
+        // 0.12 bits per pixel: the codec benchmark (`bench --quality`) puts UI and code text at
+        // ~42 dB edge PSNR there (0.1: ~41 dB, 0.06: ~39 dB), with headroom for scrolling at
+        // 60 fps. Clamped to a range that suits wired and Wi-Fi LANs. Rate control spends far
+        // less on static screens (the QP floor stops it chasing invisible detail).
+        let kbps = (pixels_per_sec * 12 / 100_000).clamp(1_000, 60_000) as u32;
         Self {
             width,
             height,
