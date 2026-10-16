@@ -1,11 +1,11 @@
 //! Stable process exit codes, so scripts and agents can branch on *why* a command failed.
 //!
 //! The numbers are part of the CLI's public contract: never renumber, only append. The same
-//! table is printed by `--help` ([`HELP_TABLE`]) and documented in `docs/cli.md`.
+//! table is printed by `--help` ([`HELP_TABLE`]) and documented in `docs/src/dev/crates/cli.md`.
 
 use tlp_desk_net::NetError;
 use tlp_desk_proto::RejectReason;
-use tlp_desk_viewer::ViewerError;
+use tlp_desk_viewer::{TunnelCloseReason, ViewerError};
 
 /// Why the CLI stopped. `as u8` is the process exit code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +84,9 @@ impl Exit {
             if let Some(e) = cause.downcast_ref::<CliError>() {
                 return e.exit();
             }
+            if let Some(e) = cause.downcast_ref::<tlp_desk_files::fs::FsClientError>() {
+                return of_fs(e);
+            }
             if let Some(e) = cause.downcast_ref::<ViewerError>() {
                 return of_viewer(e);
             }
@@ -91,6 +94,9 @@ impl Exit {
                 if let Some(x) = of_net(e) {
                     return x;
                 }
+            }
+            if let Some(e) = cause.downcast_ref::<tlp_desk_files::FilesError>() {
+                return of_files(e);
             }
         }
         Exit::Failure
@@ -108,7 +114,47 @@ fn of_viewer(e: &ViewerError) -> Exit {
         }
         ViewerError::VersionMismatch { .. } => Exit::VersionMismatch,
         ViewerError::Net(n) => of_net(n).unwrap_or(Exit::Failure),
-        ViewerError::KnownHosts(_) => Exit::Failure,
+        // --- tunnels (TLP-tunnel) ---
+        ViewerError::TunnelNotAllowed => Exit::PermissionDenied,
+        ViewerError::TunnelRefused(r) => match r {
+            TunnelCloseReason::TargetNotAllowed
+            | TunnelCloseReason::PermissionDenied
+            | TunnelCloseReason::PermissionRevoked => Exit::PermissionDenied,
+            TunnelCloseReason::NoAnswer => Exit::Timeout,
+            _ => Exit::Failure,
+        },
+        ViewerError::TunnelSpec(_) | ViewerError::TunnelLanBind(_) => Exit::Usage,
+        ViewerError::TunnelBind { .. } | ViewerError::TunnelLimit => Exit::Failure,
+        ViewerError::SessionEnded => Exit::Unreachable,
+        ViewerError::KnownHosts(_)
+        | ViewerError::RecordingIo(_)
+        | ViewerError::DiskFull { .. }
+        | ViewerError::BadRecording(_)
+        | ViewerError::BadVideo(_)
+        | ViewerError::Decoder(_) => Exit::Failure,
+    }
+}
+
+fn of_fs(e: &tlp_desk_files::fs::FsClientError) -> Exit {
+    use tlp_desk_files::fs::FsClientError as C;
+    match e {
+        C::NoPermission | C::Remote(tlp_desk_proto::FsError::PermissionDenied) => {
+            Exit::PermissionDenied
+        }
+        C::Timeout => Exit::Timeout,
+        _ => Exit::Failure,
+    }
+}
+
+fn of_files(e: &tlp_desk_files::FilesError) -> Exit {
+    use tlp_desk_files::FilesError as F;
+    use tlp_desk_proto::FsError;
+    match e {
+        F::PermissionDenied | F::Remote(FsError::PermissionDenied) => Exit::PermissionDenied,
+        F::Remote(FsError::NotFound) => Exit::NotFound,
+        F::Cancelled => Exit::Interrupted,
+        F::Net(n) => of_net(n).unwrap_or(Exit::Failure),
+        _ => Exit::Failure,
     }
 }
 
@@ -140,6 +186,14 @@ fn of_net(e: &NetError) -> Option<Exit> {
 pub enum CliError {
     /// Ctrl+C before the command finished.
     Interrupted,
+    /// The peer did not answer within the given number of seconds.
+    Timeout(u64),
+    /// The session does not hold the permission this command needs (its machine name).
+    PermissionDenied(&'static str),
+    /// The session ended before the command finished (reason, for logs).
+    SessionEnded(String),
+    /// A name / alias could not be resolved.
+    NotFound(String),
 }
 
 impl CliError {
@@ -147,6 +201,10 @@ impl CliError {
     pub fn exit(&self) -> Exit {
         match self {
             CliError::Interrupted => Exit::Interrupted,
+            CliError::Timeout(_) => Exit::Timeout,
+            CliError::PermissionDenied(_) => Exit::PermissionDenied,
+            CliError::SessionEnded(_) => Exit::Failure,
+            CliError::NotFound(_) => Exit::NotFound,
         }
     }
 }
@@ -155,6 +213,10 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CliError::Interrupted => f.write_str("interrupted"),
+            CliError::Timeout(s) => write!(f, "no answer within {s} s"),
+            CliError::PermissionDenied(p) => write!(f, "the session lacks the {p} permission"),
+            CliError::SessionEnded(r) => write!(f, "the session ended: {r}"),
+            CliError::NotFound(n) => write!(f, "{n} was not found"),
         }
     }
 }
@@ -218,6 +280,12 @@ mod tests {
         let cases: Vec<(anyhow::Error, Exit)> = vec![
             (anyhow::anyhow!("disk full"), Exit::Failure),
             (CliError::Interrupted.into(), Exit::Interrupted),
+            (CliError::Timeout(5).into(), Exit::Timeout),
+            (
+                CliError::PermissionDenied("view").into(),
+                Exit::PermissionDenied,
+            ),
+            (CliError::SessionEnded("Local".into()).into(), Exit::Failure),
             (ViewerError::NotFound("مكتب".into()).into(), Exit::NotFound),
             (
                 ViewerError::Unreachable("10.0.0.9".into()).into(),

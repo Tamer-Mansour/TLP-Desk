@@ -34,3 +34,16 @@ If the person at the remote PC allowed **viewing only**, the button is switched 
 changed; hovering over it shows **The host allows viewing only.**
 
 While view only is on, system keys (Windows key, Alt+Tab) stay on your own PC.
+
+## Quality
+
+The **Quality** button (sliders icon) in the session toolbar picks a preset for the picture:
+
+| Preset | Picture | Use it for |
+|---|---|---|
+| **Speed** | up to 1280 × 720, 60 fps, low bitrate | slow Wi-Fi, lowest delay |
+| **Balanced** | up to 1920 × 1200, 60 fps | everyday use (default) |
+| **Quality** | the remote monitor's full size, up to 3840 × 2160, 60 fps, high bitrate | reading small text or detail on a fast network |
+
+The change applies immediately. New sessions start with the preset chosen in **Settings**.
+Within the preset the remote PC still adapts the bitrate to the network by itself.

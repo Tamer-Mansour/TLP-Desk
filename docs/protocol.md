@@ -151,7 +151,7 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `AuthResult::Spake2Reply { spake2_msg }` | host → viewer | Host's SPAKE2 half |
 | `AuthRequest::KeyConfirm { mac }` | viewer → host | Viewer's SPAKE2 key confirmation (v2) |
 | `AuthResult::KeyConfirm { mac }` | host → viewer | Host's SPAKE2 key confirmation (v2) |
-| `AuthRequest::ReconnectTicket { token }` | viewer → host | Re-authorize with a single-use ticket (v4; refused until implemented) |
+| `AuthRequest::ReconnectTicket { token }` | viewer → host | Re-authorize with a single-use ticket (v4) |
 | `AuthResult::Accepted { permissions }` | host → viewer | Session authorized |
 | `AuthResult::Rejected { reason }` | host → viewer | `UserDeclined`, `WrongCredentials`, `RateLimited`, `NotAllowed`, `VersionMismatch` |
 | `VideoFrame { seq, timestamp_us, width, height, codec, keyframe, data }` | host → viewer (one uni stream per frame) | One encoded frame, H.264 Annex-B |
@@ -336,8 +336,20 @@ body is a sequence of `u16` LE length + one Opus packet. `enabled: false` stops 
 
 `ReconnectTicket { token, expires_unix_ms }` is single-use and bound on the host to the viewer's
 TLS fingerprint. After the host restarts, the viewer reconnects and sends
-`AuthRequest::ReconnectTicket { token }` instead of a prompt/code; a ticket presented by another
-key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited like passwords).
+`AuthRequest::ReconnectTicket { token }` instead of a prompt/code; the host answers `Accepted`
+with the permissions the session had when the ticket was issued. Every ticket check counts
+against the per-IP rate limit like a password attempt. Refusals:
+
+- unknown, already used, revoked, expired, or presented by another key (the ticket is then
+  burned): `Rejected(WrongCredentials)`; the viewer stops trying;
+- the host process that issued the ticket is still running (the restart has not happened yet),
+  or the host does not accept tickets: `Rejected(NotAllowed)`; the viewer may retry later.
+
+Host behavior (TLP-Desk): the token is 32 random bytes; only its SHA-256 is stored (persisted in
+the data folder so it survives the reboot), it expires after 10 minutes, a viewer holds at most
+one, and it is revoked when the session's permissions change, when the session is ended on
+purpose (host user disconnects, viewer says `Bye(UserClosed)`, `VIEW` revoked), or when the
+restart fails. Before anyone logs in the host only answers if the TLP-Desk service runs.
 
 ### Quality and latency
 
@@ -357,6 +369,19 @@ key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited l
   `TunnelOpened { id }` or `TunnelClose { id, error }`. Each local TCP connection accepted by the
   viewer becomes one `StreamKind::Tunnel` bidi stream (stream id = tunnel id), opened by the viewer;
   the host connects to the target for each stream and copies bytes both ways.
+  - **Targets**: `target_host` must be an IP literal (IPv6 optionally in brackets) or
+    `localhost`, and inside the host's allow-list (default: loopback, RFC 1918, link-local,
+    IPv6 ULA). Host names are never resolved, so no DNS query leaves the LAN; unspecified,
+    multicast and broadcast addresses are refused.
+  - **Close reasons**: the host fills `TunnelClose::error` with one of `target-not-allowed`,
+    `bad-target`, `too-many-tunnels`, `duplicate-id`, `permission-denied`,
+    `permission-revoked` (sent for every open tunnel when `TUNNEL` is revoked). Receivers
+    treat other text as free text (control characters stripped, at most 200 characters).
+  - **Half-close**: TCP EOF finishes the stream's send direction; a finished stream shuts down
+    the TCP write half; the other direction keeps flowing.
+  - **Refusal / abort**: a tunnel stream for an unknown or closed tunnel, beyond the host's
+    connection limit, without `TUNNEL`, or whose target cannot be reached is stopped/reset
+    with `STREAM_REFUSED`; aborted (idle, revoked) connections are reset the same way.
 - **Whiteboard** (`WHITEBOARD`): `WhiteboardStroke { id, points, color_rgba, width }` with points
   normalized to `0..=65535` over the streamed monitor, `color_rgba = 0xRRGGBBAA`, width in 1/10000
   of the monitor height; `WhiteboardClear` erases all.

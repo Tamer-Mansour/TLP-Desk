@@ -167,7 +167,7 @@ async fn rig_with(perms: Permissions, factory: Option<ShieldFactory>) -> Rig {
     let cfg = HostConfig {
         advertise: false,
         default_permissions: perms,
-        capturer_factory: Arc::new(|_| {
+        capturer_factory: Arc::new(|_, _| {
             Ok(Box::new(IdleCapturer(monitor())) as Box<dyn ScreenCapturer>)
         }),
         monitor_lister: Arc::new(|| Ok(vec![monitor()])),

@@ -39,6 +39,14 @@ pub struct ConnectArgs {
     /// `serve --allow-privacy`).
     #[arg(long)]
     pub privacy: bool,
+    /// Testing: after a short delay type this text into the host's focused window (US key
+    /// positions; a backslash-n escape is not interpreted, pass a real newline for Enter;
+    /// needs keyboard permission).
+    #[arg(long = "type", value_name = "TEXT")]
+    pub type_text: Option<String>,
+    /// Testing: after `--type`, press Ctrl+<LETTER> (e.g. `s` to save).
+    #[arg(long, value_name = "LETTER")]
+    pub then_ctrl: Option<char>,
 }
 
 /// Runs `connect`.
@@ -69,6 +77,21 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
     let mut want_monitor = args.monitor;
     let mut pointer_tick = tokio::time::interval(Duration::from_millis(50));
     let mut step = 0u32;
+    // Testing: typed after a delay so the caller can focus the target window.
+    let mut typing: std::collections::VecDeque<InputEvent> = args
+        .type_text
+        .as_deref()
+        .map(super::typing::typing_events)
+        .unwrap_or_default()
+        .into_iter()
+        .chain(
+            args.then_ctrl
+                .map(super::typing::ctrl_chord)
+                .unwrap_or_default(),
+        )
+        .collect();
+    let typing_from = Instant::now() + Duration::from_secs(2);
+    let mut typing_tick = tokio::time::interval(Duration::from_millis(15));
     loop {
         tokio::select! {
             _ = tokio::time::sleep_until(deadline) => break,
@@ -83,6 +106,11 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
                     x: (c + r * a.cos()) as u16,
                     y: (c + r * a.sin()) as u16,
                 });
+            }
+            _ = typing_tick.tick(), if !typing.is_empty() && Instant::now() >= typing_from => {
+                if let Some(ev) = typing.pop_front() {
+                    session.send_input(ev);
+                }
             }
             ev = events.recv() => match ev {
                 Some(ViewerEvent::HostInputPriority(active)) => out.event(

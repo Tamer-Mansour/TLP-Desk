@@ -12,6 +12,8 @@ workspace = true
 [dependencies]
 tlp-desk-proto.workspace = true
 thiserror.workspace = true
+# Anti-aliased whiteboard strokes (host overlay and viewer). No PNG support needed.
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

@@ -17,6 +17,7 @@ use tlp_desk_host::{
 use tlp_desk_net::{AuthKind, DiscoveredDevice, PeerInfo};
 use tlp_desk_proto::{Permissions, RejectReason};
 use tlp_desk_viewer::{EndReason as ViewerEnd, MonitorDesc, ViewerStats};
+use tlp_desk_viewer::{ForwardSpec, TunnelCloseReason, TunnelId, TunnelStatus, ViewerError};
 
 /// Language of the human-readable output.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
@@ -101,7 +102,31 @@ pub fn no_frame() -> &'static str {
 }
 
 pub fn error_line(err: &anyhow::Error) -> String {
-    t(format!("error: {err:#}"), format!("خطأ: {err:#}"))
+    if let Some(fs) = err.downcast_ref::<tlp_desk_files::fs::FsClientError>() {
+        return t(
+            format!("error: {}", fs_error(fs)),
+            format!("خطأ: {}", fs_error(fs)),
+        );
+    }
+    use crate::exit::CliError;
+    let cli = err.chain().find_map(|c| c.downcast_ref::<CliError>());
+    let detail = match cli {
+        Some(CliError::Interrupted) => t("interrupted".into(), "أُوقف بـ Ctrl+C".into()),
+        Some(CliError::Timeout(s)) => {
+            t(format!("no answer within {s} s"), format!("لا رد خلال {s} ث"))
+        }
+        Some(CliError::PermissionDenied(p)) => t(
+            format!("the session lacks the {p} permission"),
+            format!("الجلسة لا تملك صلاحية {p}"),
+        ),
+        Some(CliError::SessionEnded(r)) => t(
+            format!("the session ended: {r}"),
+            format!("انتهت الجلسة: {r}"),
+        ),
+        Some(CliError::NotFound(n)) => t(format!("{n} was not found"), format!("لم يُعثر على {n}")),
+        None => format!("{err:#}"),
+    };
+    t(format!("error: {detail}"), format!("خطأ: {detail}"))
 }
 
 pub fn identity(id: DeviceId, fp: &Fingerprint, dir: &str) -> String {
@@ -225,6 +250,14 @@ pub fn viewer_left(peer: &PeerInfo, reason: &HostEnd) -> String {
         ),
         format!("انقطع: {} ({}) - {reason:?}", peer.device_id, peer.addr),
     )
+}
+
+pub fn input_blocked() -> String {
+    t(
+        "INPUT BLOCKED: an administrator window or secure screen is in front",
+        "الإدخال محجوب: نافذة مسؤول أو شاشة آمنة في المقدمة",
+    )
+    .into()
 }
 
 pub fn code_changed(code: &str) -> String {
@@ -495,6 +528,563 @@ pub fn viewer_privacy(enabled: bool) -> &'static str {
         )
     }
 }
+
+pub fn wol_sent(mac: &str, to: &str) -> String {
+    t(
+        format!("Wake-on-LAN packet for {mac} sent ({to})."),
+        format!("أُرسلت حزمة التشغيل عن بُعد إلى {mac} ({to})."),
+    )
+}
+
+// --- permanent password ---
+
+pub fn password_removed() -> String {
+    t(
+        "Permanent password removed: password sign-in is off.".to_owned(),
+        "أُزيلت كلمة المرور الدائمة: تسجيل الدخول بكلمة المرور متوقف.".to_owned(),
+    )
+}
+
+pub fn password_set(path: &str) -> String {
+    t(
+        format!("Permanent password set (only its Argon2id verifier is stored, in {path})."),
+        format!("عُيّنت كلمة المرور الدائمة (يُخزَّن فقط ناتج Argon2id الخاص بها، في {path})."),
+    )
+}
+
+pub fn password_too_short() -> String {
+    let n = tlp_desk_crypto::MIN_PASSWORD_CHARS;
+    t(
+        format!("The password is too short: use at least {n} characters."),
+        format!("كلمة المرور قصيرة جدًا: استخدم {n} أحرف على الأقل."),
+    )
+}
+
+// --- device info ---
+
+/// `bytes` in binary units with one decimal (`16.0 GiB` / `16.0 غ.ب`).
+pub fn bytes(bytes: u64) -> String {
+    let units = t(
+        ["B", "KiB", "MiB", "GiB", "TiB", "PiB"],
+        ["بايت", "ك.ب", "م.ب", "غ.ب", "ت.ب", "ب.ب"],
+    );
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < units.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    let name = units.get(unit).copied().unwrap_or_default();
+    if unit == 0 {
+        format!("{bytes} {name}")
+    } else {
+        format!("{value:.1} {name}")
+    }
+}
+
+/// An uptime like `3 d 4 h 5 min` / `3 ي 4 س 5 د`.
+pub fn uptime(secs: u64) -> String {
+    let (d, h, m) = (secs / 86_400, secs % 86_400 / 3600, secs % 3600 / 60);
+    let (ud, uh, um) = t(("d", "h", "min"), ("ي", "س", "د"));
+    if d > 0 {
+        format!("{d} {ud} {h} {uh} {m} {um}")
+    } else if h > 0 {
+        format!("{h} {uh} {m} {um}")
+    } else {
+        format!("{m} {um}")
+    }
+}
+
+/// The device-info block printed by `info`.
+pub fn device_info(info: &tlp_desk_viewer::DeviceInfo) -> String {
+    let (host, os, cpu, ram, up, disks, free_of) = t(
+        (
+            "Computer",
+            "System",
+            "Processor",
+            "Memory",
+            "Up for",
+            "Disks",
+            "free of",
+        ),
+        (
+            "الحاسوب",
+            "النظام",
+            "المعالج",
+            "الذاكرة",
+            "مدة التشغيل",
+            "الأقراص",
+            "متاح من",
+        ),
+    );
+    let threads = t("threads", "مسارات");
+    let mut out = format!(
+        "{host}: {}\n{os}: {} ({})\n{cpu}: {} ({} {threads})\n{ram}: {}\n{up}: {}\n{disks}:",
+        info.hostname,
+        info.os,
+        info.version,
+        info.cpu,
+        info.cores,
+        bytes(info.ram_bytes),
+        uptime(info.uptime_s)
+    );
+    for d in &info.disks {
+        let label = if d.label.is_empty() {
+            String::new()
+        } else {
+            format!(" \"{}\"", d.label)
+        };
+        out.push_str(&format!(
+            "\n  {}{label}  {} {free_of} {}",
+            d.mount,
+            bytes(d.free_bytes),
+            bytes(d.total_bytes)
+        ));
+    }
+    out
+}
+
+pub fn device_info_served(session: u64) -> String {
+    t(
+        format!("Sent device info to viewer session {session}"),
+        format!("أُرسلت معلومات الجهاز إلى جلسة المشاهد {session}"),
+    )
+}
+
+pub fn requesting_device_info() -> &'static str {
+    t(
+        "Asking the host for its device info...",
+        "جارٍ طلب معلومات الجهاز من المضيف...",
+    )
+}
+
+// --- tunnels: port forwarding (TLP-tunnel) ---
+
+pub fn tunnels_allowed() -> &'static str {
+    t(
+        "Port forwarding is ALLOWED for viewers (--allow-tunnels): they can reach services on \
+         this PC and its local network.",
+        "إعادة توجيه المنافذ مسموحة للمشاهدين (--allow-tunnels): يمكنهم الوصول إلى الخدمات على \
+         هذا الجهاز وشبكته المحلية.",
+    )
+}
+
+pub fn tunnel_waiting_permission() -> &'static str {
+    t(
+        "The host has not allowed port forwarding yet. Waiting until the host user grants it \
+         (Ctrl+C to stop)...",
+        "لم يسمح المضيف بإعادة توجيه المنافذ بعد. بانتظار أن يمنحها مستخدم المضيف \
+         (Ctrl+C للإيقاف)...",
+    )
+}
+
+pub fn forward_running() -> &'static str {
+    t(
+        "Forwarding. Press Ctrl+C to stop.",
+        "إعادة التوجيه تعمل. اضغط Ctrl+C للإيقاف.",
+    )
+}
+
+pub fn lan_bind_warning(bind: std::net::SocketAddr) -> String {
+    t(
+        format!(
+            "WARNING: listening on {bind}: other devices on your network can use this tunnel too."
+        ),
+        format!("تحذير: الاستماع على {bind}: يمكن للأجهزة الأخرى على شبكتك استخدام هذا النفق أيضًا."),
+    )
+}
+
+pub fn lan_bind_needs_flag(bind: std::net::SocketAddr) -> String {
+    t(
+        format!(
+            "{bind} is not a loopback address: other devices could use the tunnel. Add \
+             --bind-lan to confirm."
+        ),
+        format!(
+            "{bind} ليس عنوانًا محليًا (loopback): قد تستخدم أجهزة أخرى النفق. أضف --bind-lan \
+             للتأكيد."
+        ),
+    )
+}
+
+pub fn forward_started(s: &TunnelStatus) -> String {
+    t(
+        format!(
+            "Forwarding {} -> {} on the host (rule {})",
+            s.local,
+            s.target_display(),
+            s.id
+        ),
+        format!(
+            "إعادة توجيه {} -> {} على المضيف (القاعدة {})",
+            s.local,
+            s.target_display(),
+            s.id
+        ),
+    )
+}
+
+pub fn forward_failed(spec: &ForwardSpec, e: &ViewerError) -> String {
+    t(
+        format!("Cannot forward {spec}: {e}"),
+        format!("تعذّرت إعادة توجيه {spec}: {e}"),
+    )
+}
+
+pub fn forward_closed(id: TunnelId, reason: &TunnelCloseReason) -> String {
+    t(
+        format!("Rule {id} closed by the host: {reason}"),
+        format!("أغلق المضيف القاعدة {id}: {reason}"),
+    )
+}
+
+pub fn forward_stats(list: &[TunnelStatus]) -> String {
+    let mut out = String::new();
+    for s in list {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let (from, to) = (s.local, s.target_display());
+        out.push_str(&t(
+            format!(
+                "  {from} -> {to}: {} open, {} total, {} failed, sent {} B, received {} B",
+                s.active, s.connections, s.failed, s.bytes_sent, s.bytes_received
+            ),
+            format!(
+                "  {from} -> {to}: {} مفتوح، {} إجمالًا، {} فاشل، أُرسل {} بايت، استُقبل {} بايت",
+                s.active, s.connections, s.failed, s.bytes_sent, s.bytes_received
+            ),
+        ));
+    }
+    out
+}
+
+pub fn host_tunnels(list: &[tlp_desk_host::HostTunnelInfo]) -> String {
+    if list.is_empty() {
+        return t(
+            "Port forwarding: no tunnel open.",
+            "إعادة توجيه المنافذ: لا يوجد نفق مفتوح.",
+        )
+        .into();
+    }
+    let mut out = String::from(t("Port forwarding:", "إعادة توجيه المنافذ:"));
+    for tn in list {
+        out.push_str(&t(
+            format!(
+                "\n  tunnel {} -> {}: {} open, {} total, {} failed",
+                tn.id, tn.target, tn.active, tn.connections, tn.failed
+            ),
+            format!(
+                "\n  النفق {} -> {}: {} مفتوح، {} إجمالًا، {} فاشل",
+                tn.id, tn.target, tn.active, tn.connections, tn.failed
+            ),
+        ));
+    }
+    out
+}
+
+pub fn host_tunnel_refused(target_host: Option<&str>, port: u16, reason: &str) -> String {
+    let host = target_host.unwrap_or("localhost");
+    t(
+        format!("Refused port forwarding to {host:?}:{port} ({reason})"),
+        format!("رُفضت إعادة التوجيه إلى {host:?}:{port} ({reason})"),
+    )
+}
+
+// --- chat (TLP-chat) ---
+
+/// A chat message from the other side (`from` is the peer's name).
+pub fn chat_received(from: &str, text: &str) -> String {
+    t(
+        format!("[chat] {from}: {text}"),
+        format!("[دردشة] {from}: {text}"),
+    )
+}
+
+pub fn chat_sent() -> &'static str {
+    t("Message sent.", "أُرسلت الرسالة.")
+}
+
+pub fn chat_not_allowed() -> &'static str {
+    t(
+        "The host does not allow chat in this session.",
+        "لا يسمح الجهاز المضيف بالدردشة في هذه الجلسة.",
+    )
+}
+
+/// Why the message was not sent (`detail` is the technical reason).
+pub fn chat_rejected(detail: &str) -> String {
+    t(
+        format!("Message not sent: {detail}"),
+        format!("لم تُرسل الرسالة: {detail}"),
+    )
+}
+
+// --- clipboard (TLP-clipboard) ---
+
+pub fn clip_sent(bytes: u64) -> String {
+    t(
+        format!("Clipboard sent ({bytes} bytes)."),
+        format!("أُرسلت الحافظة ({bytes} بايت)."),
+    )
+}
+
+pub fn clip_received(bytes: u64) -> String {
+    t(
+        format!("Clipboard received ({bytes} bytes)."),
+        format!("استُلمت الحافظة ({bytes} بايت)."),
+    )
+}
+
+pub fn clip_not_synced() -> &'static str {
+    t(
+        "The clipboard could not be synced.",
+        "تعذّرت مزامنة الحافظة.",
+    )
+}
+
+pub fn clip_too_large() -> &'static str {
+    t(
+        "The clipboard content is too large to sync.",
+        "محتوى الحافظة أكبر من أن تتم مزامنته.",
+    )
+}
+
+pub fn clip_not_allowed() -> &'static str {
+    t(
+        "The host does not allow clipboard sync for this session.",
+        "لا يسمح المضيف بمزامنة الحافظة في هذه الجلسة.",
+    )
+}
+
+pub fn clip_ended_early() -> &'static str {
+    t(
+        "The session ended before the clipboard was sent.",
+        "انتهت الجلسة قبل إرسال الحافظة.",
+    )
+}
+
+pub fn clip_timeout() -> &'static str {
+    t(
+        "Timed out waiting for the clipboard to be sent.",
+        "انتهت المهلة قبل إرسال الحافظة.",
+    )
+}
+
+pub fn clip_nothing() -> &'static str {
+    t(
+        "Nothing to send: give the text or --file.",
+        "لا شيء للإرسال: اكتب النص أو استخدم --file.",
+    )
+}
+
+// --- files: remote file system (TLP-files-fs) ---
+
+/// One line of `ls`: `<DIR>` or the size in bytes, then the name.
+pub fn fs_entry_row(e: &tlp_desk_proto::FsEntry) -> String {
+    let kind = if e.is_dir {
+        t("<DIR>".to_owned(), "<مجلد>".to_owned())
+    } else {
+        e.size.to_string()
+    };
+    let flags = match (e.hidden, e.readonly) {
+        (true, true) => t(" (hidden, read-only)", " (مخفي، للقراءة فقط)"),
+        (true, false) => t(" (hidden)", " (مخفي)"),
+        (false, true) => t(" (read-only)", " (للقراءة فقط)"),
+        (false, false) => "",
+    };
+    format!("{kind:>14}  {}{flags}", e.name)
+}
+
+/// One line of `ls` without a path: a drive or known folder.
+pub fn fs_root_row(r: &tlp_desk_proto::FsRoot) -> String {
+    use tlp_desk_proto::FsRootKind as K;
+    let kind = match r.kind {
+        K::Drive => t("drive", "قرص"),
+        K::Home => t("home", "المجلد الشخصي"),
+        K::Desktop => t("desktop", "سطح المكتب"),
+        K::Documents => t("documents", "المستندات"),
+        K::Downloads => t("downloads", "التنزيلات"),
+        K::Pictures => t("pictures", "الصور"),
+        K::Music => t("music", "الموسيقى"),
+        K::Videos => t("videos", "الفيديو"),
+        K::Other => t("shared folder", "مجلد مشترك"),
+    };
+    let space = match (r.free_bytes, r.total_bytes) {
+        (Some(f), Some(tot)) => t(
+            format!("  {} of {} GB free", f / 1_000_000_000, tot / 1_000_000_000),
+            format!(
+                "  {} من {} غيغابايت متاحة",
+                f / 1_000_000_000,
+                tot / 1_000_000_000
+            ),
+        ),
+        _ => String::new(),
+    };
+    let label = if r.label.is_empty() {
+        String::new()
+    } else {
+        format!(" \"{}\"", r.label)
+    };
+    format!("{}  [{kind}]{label}{space}", r.path)
+}
+
+pub fn fs_empty_folder() -> &'static str {
+    t("The folder is empty.", "المجلد فارغ.")
+}
+
+pub fn fs_created(path: &str) -> String {
+    t(format!("Created {path}"), format!("أُنشئ {path}"))
+}
+
+pub fn fs_deleted(path: &str) -> String {
+    t(format!("Deleted {path}"), format!("حُذف {path}"))
+}
+
+pub fn fs_moved(from: &str, to: &str) -> String {
+    t(
+        format!("Moved {from} -> {to}"),
+        format!("نُقل {from} <- {to}"),
+    )
+}
+
+pub fn fs_error(e: &tlp_desk_files::fs::FsClientError) -> String {
+    use tlp_desk_files::fs::FsClientError as C;
+    use tlp_desk_proto::FsError as F;
+    match e {
+        C::Remote(F::NotFound) => t("Not found on the remote PC.", "غير موجود على الجهاز البعيد.").into(),
+        C::Remote(F::PermissionDenied) => t(
+            "The remote PC denied access to this path.",
+            "رفض الجهاز البعيد الوصول إلى هذا المسار.",
+        )
+        .into(),
+        C::Remote(F::AlreadyExists) => t("It already exists.", "موجود بالفعل.").into(),
+        C::Remote(F::NotEmpty) => t(
+            "The folder is not empty (use --recursive).",
+            "المجلد ليس فارغاً (استخدم --recursive).",
+        )
+        .into(),
+        C::Remote(F::InvalidPath) => t(
+            "Invalid path: use an absolute path such as C:\\Users.",
+            "مسار غير صالح: استخدم مساراً كاملاً مثل C:\\Users.",
+        )
+        .into(),
+        C::Remote(F::NoSpace) => t("The remote disk is full.", "القرص البعيد ممتلئ.").into(),
+        C::Remote(F::Busy) => t(
+            "The file is in use on the remote PC.",
+            "الملف قيد الاستخدام على الجهاز البعيد.",
+        )
+        .into(),
+        C::Remote(other) => t(
+            format!("The remote PC reported an error: {other:?}"),
+            format!("أبلغ الجهاز البعيد عن خطأ: {other:?}"),
+        ),
+        C::NoPermission => t(
+            "The host does not allow file access in this session (it must grant \"files\").",
+            "لا يسمح الجهاز المضيف بالوصول إلى الملفات في هذه الجلسة (يجب أن يمنح صلاحية \"الملفات\").",
+        )
+        .into(),
+        C::Timeout => t("The remote PC did not answer in time.", "لم يرد الجهاز البعيد في الوقت المحدد.").into(),
+        C::Closed => t("The session ended.", "انتهت الجلسة.").into(),
+        C::Send(d) => t(format!("Cannot send the request: {d}"), format!("تعذّر إرسال الطلب: {d}")),
+        C::UnexpectedReply => t(
+            "The remote PC sent an unexpected answer.",
+            "أرسل الجهاز البعيد رداً غير متوقع.",
+        )
+        .into(),
+    }
+}
+
+// --- files-transfer lane: send-file / get-file ---
+
+/// `1:05` / `1:02:03` for a duration in seconds.
+fn clock(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+pub fn transfer_started(label: &str, files: u32, total: u64, upload: bool) -> String {
+    let size = bytes(total);
+    if upload {
+        t(
+            format!("Sending \"{label}\": {files} file(s), {size}..."),
+            format!("جارٍ إرسال \"{label}\": {files} ملف، {size}..."),
+        )
+    } else {
+        t(
+            format!("Receiving \"{label}\": {files} file(s), {size}..."),
+            format!("جارٍ استلام \"{label}\": {files} ملف، {size}..."),
+        )
+    }
+}
+
+pub fn transfer_progress(done: u64, total: u64, rate: u64, files_done: u32, files: u32) -> String {
+    let pct = done.saturating_mul(100).checked_div(total).unwrap_or(100);
+    let eta = total
+        .saturating_sub(done)
+        .checked_div(rate)
+        .map_or_else(|| "-".to_string(), clock);
+    let (d, tt, r) = (bytes(done), bytes(total), bytes(rate));
+    t(
+        format!("{pct:>3}%  {d} / {tt}  {r}/s  ETA {eta}  files {files_done}/{files}"),
+        format!("{pct:>3}%  {d} / {tt}  {r}/ث  المتبقي {eta}  الملفات {files_done}/{files}"),
+    )
+}
+
+pub fn transfer_item_failed(rel_path: &str, error: &str) -> String {
+    t(
+        format!("failed: {rel_path} ({error})"),
+        format!("فشل: {rel_path} ({error})"),
+    )
+}
+
+pub fn transfer_done(files: u32, total: u64, secs: f64, failed: u32, dest: &str) -> String {
+    let rate = bytes((total as f64 / secs.max(0.001)) as u64);
+    let size = bytes(total);
+    t(
+        format!(
+            "Done: {files} file(s), {size} in {secs:.1} s ({rate}/s), {failed} failed. Destination: {dest}"
+        ),
+        format!(
+            "اكتمل: {files} ملف، {size} خلال {secs:.1} ث ({rate}/ث)، فشل {failed}. الوجهة: {dest}"
+        ),
+    )
+}
+
+pub fn transfer_stopped(state: &str) -> String {
+    t(
+        format!("Transfer stopped: {state}"),
+        format!("توقف النقل: {state}"),
+    )
+}
+
+pub fn transfer_items_failed(failed: u32) -> String {
+    t(
+        format!("{failed} file(s) could not be transferred"),
+        format!("تعذّر نقل {failed} ملف"),
+    )
+}
+
+pub fn serve_transfer(label: &str, upload: bool) -> String {
+    if upload {
+        t(
+            format!("Receiving files from the viewer: \"{label}\""),
+            format!("استلام ملفات من العارض: \"{label}\""),
+        )
+    } else {
+        t(
+            format!("Sending files to the viewer: \"{label}\""),
+            format!("إرسال ملفات إلى العارض: \"{label}\""),
+        )
+    }
+}
+
+// --- end files-transfer lane ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -535,6 +1125,46 @@ mod tests {
             with_lang(Lang::Ar, || permissions(Permissions::NONE)),
             "لا شيء"
         );
+    }
+
+    #[test]
+    fn byte_and_uptime_formatting() {
+        assert_eq!(with_lang(Lang::En, || bytes(512)), "512 B");
+        assert_eq!(with_lang(Lang::En, || bytes(16 << 30)), "16.0 GiB");
+        assert_eq!(with_lang(Lang::Ar, || bytes(1536)), "1.5 ك.ب");
+        assert_eq!(with_lang(Lang::En, || bytes(u64::MAX)), "16384.0 PiB");
+        assert_eq!(with_lang(Lang::En, || uptime(90_061)), "1 d 1 h 1 min");
+        assert_eq!(with_lang(Lang::Ar, || uptime(3_660)), "1 س 1 د");
+        assert_eq!(with_lang(Lang::En, || uptime(59)), "0 min");
+    }
+
+    #[test]
+    fn device_info_block_in_both_languages() {
+        let info = tlp_desk_viewer::DeviceInfo {
+            os: "Windows 11 Pro".into(),
+            version: "10.0.26100".into(),
+            cpu: "Test CPU".into(),
+            cores: 8,
+            ram_bytes: 16 << 30,
+            disks: vec![tlp_desk_viewer::DiskInfo {
+                mount: "C:\\".into(),
+                label: "النظام".into(),
+                total_bytes: 512 << 30,
+                free_bytes: 128 << 30,
+            }],
+            uptime_s: 3600,
+            hostname: "حاسوب-المكتب".into(),
+        };
+        let en = with_lang(Lang::En, || device_info(&info));
+        assert!(en.starts_with("Computer: حاسوب-المكتب\n"), "{en}");
+        assert!(en.contains("Memory: 16.0 GiB"), "{en}");
+        assert!(
+            en.contains("C:\\ \"النظام\"  128.0 GiB free of 512.0 GiB"),
+            "{en}"
+        );
+        let ar = with_lang(Lang::Ar, || device_info(&info));
+        assert!(ar.starts_with("الحاسوب: حاسوب-المكتب\n"), "{ar}");
+        assert!(ar.contains("الذاكرة: 16.0 غ.ب"), "{ar}");
     }
 
     #[test]

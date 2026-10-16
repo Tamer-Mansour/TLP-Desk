@@ -17,13 +17,28 @@
 //! * **Features.** Register feature modules in [`ViewerConfig::features`]; each session starts
 //!   them and routes the host's feature messages to them ([`ViewerEvent::Feature`] for the UI).
 //!   Privacy mode: [`PrivacyViewerFeature`] + [`privacy_request`].
+//! * **Restart and reconnect.** [`ReconnectTickets`] keeps the ticket a host sends before it
+//!   restarts; [`Viewer::reconnect_with_ticket`] gets back in once the host is up again.
+//! * **Performance.** Each session sends `ViewerFeedback` ~4x/s for the host's adaptive
+//!   bitrate and `LatencyProbe` every 500 ms to synchronize clocks for the latency overlay
+//!   ([`ViewerStats::latency_ms`], method in [`LatencyClock`]); the UI picks presets with
+//!   [`ViewerSession::set_quality`] and the "all monitors" view with
+//!   [`ViewerSession::select_all_monitors`].
+//! * **Recording.** [`Recording::start`] writes what a session receives to an MP4 file;
+//!   [`recording::Player`] plays such files back (see the [`recording`] module).
 //! * **Threads.** Decoding runs on a dedicated std thread; networking on tokio tasks. Cancel a
 //!   pending [`Viewer::connect`] by dropping its future (or aborting its task).
 #![forbid(unsafe_code)]
 
+mod device_info;
 mod frame;
+mod perf;
 mod privacy;
+mod reconnect;
+pub mod recording;
 mod session;
+mod tunnel;
+mod whiteboard;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -35,13 +50,27 @@ use tlp_desk_crypto::{CryptoError, DeviceId, Fingerprint, HostKey, KnownHosts, K
 use tlp_desk_net::{AllowList, DiscoveredDevice, Discovery, Endpoint, NetError, Pin, DEFAULT_PORT};
 use tlp_desk_proto::RejectReason;
 
+pub use device_info::{
+    request_device_info, sanitize as sanitize_device_info, DeviceInfoClient, DEVICE_INFO_FEATURE,
+};
 pub use frame::{DecodedFrame, FrameSlot, PixelFormat};
+pub use perf::LatencyClock;
 pub use privacy::{privacy_request, PrivacyState, PrivacyViewerFeature, PRIVACY_FEATURE};
+pub use reconnect::{
+    AttemptFn, HeldTicket, ReconnectPolicy, ReconnectTickets, TicketReceived, RECONNECT_FEATURE,
+};
+pub use recording::{Recording, RecordingConfig, RecordingSummary};
 pub use session::{EndReason, ViewerEvent, ViewerEvents, ViewerSession, ViewerStats};
 pub use tlp_desk_net::{
     AuthMethod, AwaitingAcceptFn, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo,
 };
-pub use tlp_desk_proto::MonitorDesc;
+pub use tlp_desk_proto::{DeviceInfo, DiskInfo};
+pub use tlp_desk_proto::{MonitorDesc, QualityPreset, QualitySettings};
+pub use tunnel::{
+    ForwardSpec, TunnelCloseReason, TunnelEvent, TunnelId, TunnelStatus, TunnelViewerConfig,
+    ViewerTunnels, TUNNEL_FEATURE,
+};
+pub use whiteboard::{WhiteboardEvent, WhiteboardViewer};
 
 /// Callback invoked (from any thread) when a new frame or event is available, e.g. to wake
 /// the GUI for a repaint.
@@ -198,6 +227,45 @@ pub enum ViewerError {
     KnownHosts(#[from] CryptoError),
     #[error(transparent)]
     Net(NetError),
+
+    // --- tunnels: port forwarding (TLP-tunnel) ---
+    /// The host has not granted `TUNNEL` in this session.
+    #[error("the host has not allowed port forwarding in this session")]
+    TunnelNotAllowed,
+    /// The host refused the tunnel (bad or non-LAN target, limits...).
+    #[error("the host refused port forwarding: {0}")]
+    TunnelRefused(TunnelCloseReason),
+    /// The local listening socket could not be opened (port in use, no rights...).
+    #[error("cannot listen on {addr}: {reason}")]
+    TunnelBind { addr: SocketAddr, reason: String },
+    /// Listening on a non-loopback address exposes the remote service to the whole network;
+    /// the caller must confirm it with `ForwardSpec::allow_lan_bind`.
+    #[error("{0} is reachable from other devices; LAN binding must be confirmed")]
+    TunnelLanBind(SocketAddr),
+    /// A forwarding rule could not be parsed.
+    #[error("invalid forwarding rule {0:?}: use LOCAL_PORT:REMOTE_HOST:REMOTE_PORT")]
+    TunnelSpec(String),
+    /// The maximum number of forwarding rules for this session is reached.
+    #[error("too many port forwarding rules")]
+    TunnelLimit,
+    /// The session is over (or unknown to the tunnel feature).
+    #[error("the session has ended")]
+    SessionEnded,
+    /// Reading or writing a recording file failed.
+    #[error("recording file: {0}")]
+    RecordingIo(#[source] std::io::Error),
+    /// Not enough free disk space to (keep) recording.
+    #[error("only {available} bytes free on the recording disk, {needed} needed")]
+    DiskFull { available: u64, needed: u64 },
+    /// A recording file is damaged or not one of ours.
+    #[error("unusable recording: {0}")]
+    BadRecording(&'static str),
+    /// The received H.264 stream could not be parsed for recording.
+    #[error("unrecordable video: {0}")]
+    BadVideo(&'static str),
+    /// The video decoder failed (playback).
+    #[error("video decoder: {0}")]
+    Decoder(String),
 }
 
 impl ViewerError {

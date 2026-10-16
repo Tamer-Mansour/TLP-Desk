@@ -21,6 +21,10 @@
 //! [`privacy`]: a [`PrivacyShield`] blanks the host's physical screens (overlay excluded from
 //! capture) and swallows physical keyboard/mouse input while the viewer's injected input
 //! passes, with a local emergency exit. See the module docs for the safety rules.
+//! # Whiteboard
+//! [`whiteboard`] holds the draw-on-screen model shared by both sides (strokes, simplification,
+//! the viewer's [`whiteboard::Editor`], `tiny-skia` rendering) and the host's overlay window
+//! ([`whiteboard::start_whiteboard_overlay`]), which is excluded from capture like the marker.
 //!
 //! # Viewer
 //! [`ViewRect`] maps a pointer position inside the displayed (scaled, letterboxed) video to
@@ -37,6 +41,7 @@ mod mapping;
 mod marker_shape;
 pub mod privacy;
 mod tracker;
+pub mod whiteboard;
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
