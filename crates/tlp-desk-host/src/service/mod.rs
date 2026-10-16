@@ -40,6 +40,7 @@ mod agent;
 mod agent_features;
 mod client;
 mod desktop;
+mod extension;
 mod feature_proxy;
 mod gui;
 pub mod ipc;
@@ -62,6 +63,7 @@ pub use agent_features::{
     MAX_FEATURE_OBJECTS,
 };
 pub use client::{gui_command_on, gui_subscribe_on, GuiSubscription};
+pub use extension::{ConsoleUser, ServiceCommands, ServiceContext, ServiceExtension};
 pub use feature_proxy::{
     AgentActivity, AgentAudio, AgentFeatureHub, AgentMarker, AgentOverlay, AgentShield,
     StageHandler, OVERLAY_POINTS_PER_REQUEST,

@@ -10,8 +10,10 @@ use tlp_desk_input::{InputError, InputInjector, MonitorRect};
 use super::desktop::WinDesktopSource;
 use super::launch::{current_session_id, wait_for_exit};
 use super::{pipe, sas};
+use super::folders::allow_interactive_com_calls;
 use crate::service::{
-    is_agent_pipe_name, serve_connection, AgentPlatform, DesktopSource, PipeSpec,
+    is_agent_pipe_name, serve_connection, AgentFeatures, AgentPlatform, DesktopSource,
+    FeatureHost, PipeSpec,
 };
 use crate::HostError;
 
@@ -19,6 +21,7 @@ use crate::HostError;
 #[derive(Debug)]
 struct WinAgentPlatform {
     session: u32,
+    features: Arc<FeatureHost>,
 }
 
 impl AgentPlatform for WinAgentPlatform {
@@ -53,11 +56,21 @@ impl AgentPlatform for WinAgentPlatform {
     fn desktop_source(&self) -> Box<dyn DesktopSource> {
         Box::new(WinDesktopSource::new())
     }
+
+    fn feature_host(&self) -> Option<&Arc<FeatureHost>> {
+        Some(&self.features)
+    }
 }
 
 /// Runs the agent until the service tells it to exit, the service process ends, or the pipe
-/// cannot be served. `pipe_name` must be a well-formed agent pipe name.
-pub fn run_agent(pipe_name: &str, parent_pid: u32) -> Result<(), HostError> {
+/// cannot be served. `pipe_name` must be a well-formed agent pipe name. `features` are the
+/// user-session features the agent runs for the service (clipboard, Explorer paste, overlays,
+/// shield, hooks, audio).
+pub fn run_agent(
+    pipe_name: &str,
+    parent_pid: u32,
+    features: Arc<dyn AgentFeatures>,
+) -> Result<(), HostError> {
     if !is_agent_pipe_name(pipe_name) {
         return Err(HostError::IpcRefused(format!(
             "not an agent pipe name: {pipe_name:?}"
@@ -68,6 +81,10 @@ pub fn run_agent(pipe_name: &str, parent_pid: u32) -> Result<(), HostError> {
     }
     let session = current_session_id()?;
     tracing::info!(session, %pipe_name, parent_pid, "session agent starting");
+    // Explorer (the user) pastes from virtual files this SYSTEM process puts on the clipboard.
+    if let Err(e) = allow_interactive_com_calls() {
+        tracing::warn!(%e, "COM security not set; Explorer paste may be refused");
+    }
 
     // Never outlive the service (it may be killed without telling us).
     std::thread::Builder::new()
@@ -94,7 +111,10 @@ pub fn run_agent(pipe_name: &str, parent_pid: u32) -> Result<(), HostError> {
             })?;
     }
 
-    let platform: Arc<WinAgentPlatform> = Arc::new(WinAgentPlatform { session });
+    let platform: Arc<WinAgentPlatform> = Arc::new(WinAgentPlatform {
+        session,
+        features: FeatureHost::new(features),
+    });
     let spec = PipeSpec {
         name: pipe_name.to_owned(),
         ..PipeSpec::agent(0, 0, 0)

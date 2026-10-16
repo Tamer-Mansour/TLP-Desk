@@ -89,7 +89,10 @@ pub fn dispatch() -> Option<i32> {
     Some(match entry {
         Entry::Gui => return None,
         Entry::Service => finish("service", win::run_dispatcher(service_options)),
-        Entry::Agent { pipe, parent } => finish("agent", win::run_agent(&pipe, parent)),
+        Entry::Agent { pipe, parent } => finish(
+            "agent",
+            win::run_agent(&pipe, parent, Arc::new(tlp_desk_host::service::NoFeatures)),
+        ),
         Entry::Install => install(),
         Entry::Uninstall => finish("uninstall-service", win::uninstall_service()),
         Entry::Invalid(why) => {
