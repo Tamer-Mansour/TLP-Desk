@@ -4,7 +4,7 @@
 //! loopback audio.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use tlp_desk_audio::{AudioCapture, DeviceHandle, PcmChunk, PcmSink, SystemCapture};
@@ -22,7 +22,9 @@ use super::proxies::{clip_content, clip_data};
 /// The agent's real features.
 pub struct AppAgentFeatures {
     clipboard: Arc<SystemClipboard>,
-    shell: Arc<ShellClipboard>,
+    /// Created on the first offer: its COM thread must start after the agent set the
+    /// process's COM security (`allow_interactive_com_calls`).
+    shell: OnceLock<Arc<ShellClipboard>>,
 }
 
 impl Default for AppAgentFeatures {
@@ -36,8 +38,12 @@ impl AppAgentFeatures {
     pub fn new() -> Self {
         Self {
             clipboard: Arc::new(SystemClipboard::new()),
-            shell: ShellClipboard::system(),
+            shell: OnceLock::new(),
         }
+    }
+
+    fn shell(&self) -> &Arc<ShellClipboard> {
+        self.shell.get_or_init(ShellClipboard::system)
     }
 }
 
@@ -124,11 +130,13 @@ impl AgentFeatures for AppAgentFeatures {
         stage: Arc<dyn StageLink>,
     ) {
         let staged = StagedItems::new(dir, items, Arc::new(StageAdapter(stage)));
-        self.shell.offer(offer, staged);
+        self.shell().offer(offer, staged);
     }
 
     fn shell_clear(&self, offer: u64) {
-        self.shell.clear(offer);
+        if let Some(shell) = self.shell.get() {
+            shell.clear(offer);
+        }
     }
 
     fn open_overlay(
