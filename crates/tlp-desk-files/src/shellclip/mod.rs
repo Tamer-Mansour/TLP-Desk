@@ -13,6 +13,8 @@
 //! * `windows` (Windows only, the only `unsafe` code): the `IDataObject`, `IStream` and
 //!   `IDataObjectAsyncCapability` implementations and the STA thread that owns the clipboard.
 //! * [`ShellClipboard`]: the per-process manager (one offer at a time, keyed by session).
+//! * [`drag`]: the same virtual files dragged out of the file browser into Explorer
+//!   (`DoDragDrop`), listed and downloaded through the transfer engine on demand.
 //!
 //! The clipboard object lives in the process that owns the GUI session. In the service
 //! deployment the agent in the user's session must own it (a service on session 0 has no
@@ -23,6 +25,7 @@
 //! "IDataObjectAsyncCapability", `OleSetClipboard`.
 
 pub mod descriptor;
+pub mod drag;
 pub mod engine;
 pub mod staged;
 #[cfg(windows)]
