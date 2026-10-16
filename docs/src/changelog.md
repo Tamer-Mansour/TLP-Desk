@@ -8,6 +8,10 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-10-16
+
+Multi-viewer sessions, on-screen Accept window, Windows-service feature parity, Explorer drag-and-drop, security hardening (audit F1-F5), visual design refresh, code-signing pipeline and winget manifests, dependency updates.
+
 ### Added
 
 - **Visual design refresh.** A token-based design system (light and dark palettes with semantic colors, spacing, radii, type scale, soft elevation) and new components: button variants with hover states, focus rings, switches, chips, segmented controls, hoverable rows. The home screen has a hero card for this device, segmented tabs and status chips; long IPv6 addresses and long names no longer run under the row buttons. Settings use switches; the session toolbar, stats overlay and Accept card follow the same look. See [Design system](dev/design.md).
