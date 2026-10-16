@@ -308,6 +308,20 @@ impl DragOut {
     }
 }
 
+/// Where the mouse pointer is on the screen, in physical pixels (`None` when unknown, and on
+/// platforms without drag-out). While another program drags files over a window, winit
+/// reports no pointer position, so a drop onto the file browser is hit-tested with this.
+pub fn cursor_screen_position() -> Option<(i32, i32)> {
+    #[cfg(windows)]
+    {
+        windows::cursor_screen_position()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// What the drag loop does next (`IDropSource::QueryContinueDrag`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DragStep {

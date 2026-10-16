@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use windows::core::{implement, Interface, BOOL, HRESULT};
 use windows::Win32::Foundation::{
-    DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, S_OK,
+    DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, POINT, S_OK,
 };
 use windows::Win32::System::Com::Marshal::CoMarshalInterThreadInterfaceInStream;
 use windows::Win32::System::Com::StructuredStorage::CoGetInterfaceAndReleaseStream;
@@ -30,7 +30,7 @@ use windows::Win32::System::Ole::{
 };
 use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
 use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, TranslateMessage, MSG,
+    DispatchMessageW, GetCursorPos, GetMessageW, TranslateMessage, MSG,
 };
 
 use super::super::staged::StagedItems;
@@ -76,6 +76,14 @@ fn ole() -> Result<OleGuard, String> {
         Ok(()) => Ok(OleGuard),
         Err(e) => Err(format!("OLE unavailable on this thread: {e}")),
     }
+}
+
+/// See [`super::cursor_screen_position`].
+pub(super) fn cursor_screen_position() -> Option<(i32, i32)> {
+    let mut pt = POINT::default();
+    // SAFETY: `pt` is a valid out-pointer for the duration of the call.
+    unsafe { GetCursorPos(&mut pt) }.ok()?;
+    Some((pt.x, pt.y))
 }
 
 /// Runs the drag on the calling (GUI) thread. See [`super::DragOut::run`].
