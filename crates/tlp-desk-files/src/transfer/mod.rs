@@ -823,7 +823,10 @@ mod roots_tests {
         assert!(!path_within(&other, &roots));
         assert!(!path_within(&other.join("System32"), &roots));
         // `..` below the existing part cannot climb out.
-        assert!(!path_within(&home.join("nope").join("..").join(".."), &roots));
+        assert!(!path_within(
+            &home.join("nope").join("..").join(".."),
+            &roots
+        ));
 
         let engine = FileTransfer::new(TransferConfig::default());
         assert!(engine.inner.path_allowed(&other));

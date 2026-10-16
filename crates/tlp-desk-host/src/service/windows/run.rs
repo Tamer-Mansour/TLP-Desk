@@ -20,9 +20,8 @@ use crate::service::ipc::{self, AgentChannel, AgentEvent, WireDesktop};
 use crate::service::{
     agent_pipe_name, route_prompt, serve_gui_connection, AgentConn, AgentConnector,
     AgentFeatureHub, AgentLink, AgentSupervisor, DesktopStatus, GuiHub, PipeSpec, PromptRoute,
-    RestartPolicy, ServiceCommands, ServiceContext, ServiceExtension, SessionAction,
-    SessionChange, SessionTracker, SupervisorEvent, SystemActions, SystemControl,
-    NO_CONSOLE_SESSION,
+    RestartPolicy, ServiceCommands, ServiceContext, ServiceExtension, SessionAction, SessionChange,
+    SessionTracker, SupervisorEvent, SystemActions, SystemControl, NO_CONSOLE_SESSION,
 };
 use crate::{Host, HostConfig, HostError, HostEvent, HostEvents, MAX_CAPTURE_SIZE};
 

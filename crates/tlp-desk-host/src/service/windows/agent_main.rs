@@ -8,12 +8,12 @@ use tlp_desk_capture::{CaptureBackend, CaptureError, CaptureOptions, MonitorInfo
 use tlp_desk_input::{InputError, InputInjector, MonitorRect};
 
 use super::desktop::WinDesktopSource;
+use super::folders::allow_interactive_com_calls;
 use super::launch::{current_session_id, wait_for_exit};
 use super::{pipe, sas};
-use super::folders::allow_interactive_com_calls;
 use crate::service::{
-    is_agent_pipe_name, serve_connection, AgentFeatures, AgentPlatform, DesktopSource,
-    FeatureHost, PipeSpec,
+    is_agent_pipe_name, serve_connection, AgentFeatures, AgentPlatform, DesktopSource, FeatureHost,
+    PipeSpec,
 };
 use crate::HostError;
 

@@ -14,8 +14,8 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::{
     GetSecurityDescriptorDacl, GetSecurityDescriptorGroup, GetSecurityDescriptorOwner,
     InitializeSecurityDescriptor, SetSecurityDescriptorDacl, SetSecurityDescriptorGroup,
-    SetSecurityDescriptorOwner, ACL, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_DESCRIPTOR,
+    SetSecurityDescriptorOwner, ACL, DACL_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_DESCRIPTOR,
 };
 use windows::Win32::System::Com::{
     CoInitializeEx, CoInitializeSecurity, CoTaskMemFree, COINIT_MULTITHREADED, EOAC_NONE,

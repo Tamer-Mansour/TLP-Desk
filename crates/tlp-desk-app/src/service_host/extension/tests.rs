@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use tlp_desk_host::service::ServiceExtension;
-use tlp_desk_net::{ChatEntry, ChatAuthor, ChatEvent, FeatureEvent, CHAT_FEATURE};
+use tlp_desk_net::{ChatAuthor, ChatEntry, ChatEvent, FeatureEvent, CHAT_FEATURE};
 
 use super::*;
 
@@ -128,10 +128,7 @@ fn chat_and_privacy_feature_events_become_ui_events() {
             active: true
         })
     );
-    assert_eq!(
-        ui_event(9, &FeatureEvent::new("files", 9, 1u8)),
-        None
-    );
+    assert_eq!(ui_event(9, &FeatureEvent::new("files", 9, 1u8)), None);
 }
 
 #[test]

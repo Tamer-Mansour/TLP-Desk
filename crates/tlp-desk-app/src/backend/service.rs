@@ -91,7 +91,8 @@ pub fn mirror_transfer_id(service: u64) -> Option<TransferId> {
 
 /// The service's id for a UI transfer id, if it is one of the service's.
 pub fn service_transfer_id(id: TransferId) -> Option<u64> {
-    id.0.checked_sub(MIRROR_ID_BASE).filter(|_| id.0 > MIRROR_ID_BASE)
+    id.0.checked_sub(MIRROR_ID_BASE)
+        .filter(|_| id.0 > MIRROR_ID_BASE)
 }
 
 /// Maps the service's GUI events to backend events and remembers which UI ids belong to the
@@ -416,7 +417,11 @@ mod link {
         }
 
         /// Answers an upload question of the service; `false` if the id is not the service's.
-        pub fn resolve_conflict(&self, id: TransferId, answer: Option<&ConflictResolution>) -> bool {
+        pub fn resolve_conflict(
+            &self,
+            id: TransferId,
+            answer: Option<&ConflictResolution>,
+        ) -> bool {
             let Some(id) = service_transfer_id(id) else {
                 return false;
             };
@@ -432,7 +437,9 @@ mod link {
             let Some(id) = service_transfer_id(id) else {
                 return false;
             };
-            send(GuiCommand::App(wire::encode(&UiCommand::CancelTransfer { id })));
+            send(GuiCommand::App(wire::encode(&UiCommand::CancelTransfer {
+                id,
+            })));
             true
         }
 
@@ -753,7 +760,10 @@ mod tests {
         };
         assert!(matches!(
             &m.on_event(GuiEvent::App(encode(&privacy)))[..],
-            [MirrorOut::Event(BackendEvent::HostPrivacyChanged { active: true, .. })]
+            [MirrorOut::Event(BackendEvent::HostPrivacyChanged {
+                active: true,
+                ..
+            })]
         ));
         // Unknown session or garbage: nothing.
         let unknown = UiEvent::ChatAvailability {

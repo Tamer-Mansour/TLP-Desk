@@ -9,13 +9,10 @@ use tlp_desk_files::clipfiles::ClipFilesConfig;
 use tlp_desk_files::fs::FsConfig;
 use tlp_desk_files::shellclip::ShellClipboard;
 use tlp_desk_files::{
-    ClipboardConfig, ClipboardFeature, ConflictPolicy, FileTransfer, TransferConfig,
-    TransferEvent,
+    ClipboardConfig, ClipboardFeature, ConflictPolicy, FileTransfer, TransferConfig, TransferEvent,
 };
 use tlp_desk_host::service::ipc::GuiEvent;
-use tlp_desk_host::service::{
-    AgentFeatureHub, ConsoleUser, ServiceContext, ServiceExtension,
-};
+use tlp_desk_host::service::{AgentFeatureHub, ConsoleUser, ServiceContext, ServiceExtension};
 use tlp_desk_host::{HostConfig, HostEvent, PrivacyFeature, WhiteboardHost};
 use tlp_desk_net::{EndpointConfig, FeatureSet};
 use tlp_desk_proto::Permissions;
@@ -129,7 +126,9 @@ impl AppServiceExtension {
                 Err(e) => UiReply::Error(format!("{e:?}")),
             },
             UiCommand::ResolveConflict { id, answer } => {
-                let answer = answer.as_ref().map(tlp_desk_files::ConflictResolution::from);
+                let answer = answer
+                    .as_ref()
+                    .map(tlp_desk_files::ConflictResolution::from);
                 if self
                     .files
                     .resolve_conflicts(tlp_desk_files::TransferId(id), answer)
@@ -374,8 +373,7 @@ impl ServiceExtension for AppServiceExtension {
         // The service writes as SYSTEM: viewers only reach the console user's own folders.
         match &user {
             Some(u) => {
-                self.files
-                    .set_allowed_roots(Some(vec![u.profile.clone()]));
+                self.files.set_allowed_roots(Some(vec![u.profile.clone()]));
                 self.files.set_default_upload_dir(Some(u.desktop.clone()));
                 if let Some(fsb) = self.fsb.get() {
                     fsb.set_fs_config(FsConfig {
