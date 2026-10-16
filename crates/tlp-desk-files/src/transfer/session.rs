@@ -14,6 +14,7 @@ use tlp_desk_proto::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+use super::conflict;
 use super::error::FilesError;
 use super::path::display_path;
 use super::receiver::{self, Receiving};
@@ -193,6 +194,7 @@ pub async fn run(state: Arc<SessionState>, mut inbox: mpsc::UnboundedReceiver<Me
     }
     accept.abort();
     ticker.abort();
+    state.inner.pending.drop_session(state.ctx.session_key);
     let all: Vec<_> = lock(&state.transfers).values().cloned().collect();
     for t in all {
         state.end(&t, TransferState::Disconnected);
@@ -317,11 +319,18 @@ async fn host_receive(state: &Arc<SessionState>, offer: TransferOffer) -> Result
     check_offer(&offer, state.inner.cfg.max_items)?;
     let dest = upload_dest(&state.inner, &offer.dest_dir)?;
     let policy = state.inner.cfg.conflict;
+    let id = state.inner.alloc_id();
+    // The host user may be asked (policy `Ask`); declining declines the viewer's upload.
+    let decisions = conflict::decide(state, id, &dest, &offer.items, policy, false)
+        .await
+        .map_err(|e| match e {
+            FilesError::Cancelled => FilesError::Remote(FsError::Declined),
+            other => other,
+        })?;
     let items = offer.items.clone();
-    let rx = tokio::task::spawn_blocking(move || Receiving::prepare(&dest, items, policy))
+    let rx = tokio::task::spawn_blocking(move || Receiving::prepare(&dest, items, &decisions))
         .await
         .map_err(|_| FilesError::Protocol("planning task failed".into()))??;
-    let id = state.inner.alloc_id();
     let info = info_for(
         state,
         id,

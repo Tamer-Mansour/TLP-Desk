@@ -38,6 +38,11 @@ pub enum ConflictPolicy {
     Overwrite,
     /// Keep the existing file and skip the incoming one.
     Skip,
+    /// Ask the user, once per transfer, before anything is written: the engine emits
+    /// [`TransferEvent::ConflictsFound`] and waits for
+    /// [`crate::FileTransfer::resolve_conflicts`]. Without conflicts nothing is asked. After
+    /// [`TransferConfig::ask_timeout`] without an answer the files are kept both.
+    Ask,
 }
 
 /// Engine settings (one per [`crate::FileTransfer`]).
@@ -54,6 +59,8 @@ pub struct TransferConfig {
     pub default_upload_dir: Option<PathBuf>,
     /// Maximum files + folders in one transfer.
     pub max_items: usize,
+    /// How long a [`ConflictPolicy::Ask`] prompt waits for the user before keeping both files.
+    pub ask_timeout: std::time::Duration,
 }
 
 impl Default for TransferConfig {
@@ -63,6 +70,7 @@ impl Default for TransferConfig {
             conflict: ConflictPolicy::Rename,
             default_upload_dir: None,
             max_items: 200_000,
+            ask_timeout: std::time::Duration::from_secs(120),
         }
     }
 }
@@ -174,6 +182,12 @@ pub enum TransferEvent {
         /// Why.
         error: FsError,
     },
+    /// Files already exist at the destination and the policy is [`ConflictPolicy::Ask`]:
+    /// show a prompt and answer with [`crate::FileTransfer::resolve_conflicts`]. The transfer
+    /// itself starts (event [`TransferEvent::Started`]) only after the answer.
+    ConflictsFound(super::conflict::ConflictRequest),
+    /// The prompt of this transfer was answered, timed out or its session ended: close it.
+    ConflictsResolved(TransferId),
     /// The transfer stopped (see [`TransferState::is_final`]).
     Finished {
         /// Which transfer.
@@ -192,6 +206,8 @@ impl TransferEvent {
     pub fn id(&self) -> TransferId {
         match self {
             Self::Started(i) => i.id,
+            Self::ConflictsFound(r) => r.id,
+            Self::ConflictsResolved(id) => *id,
             Self::Progress { id, .. } | Self::ItemFailed { id, .. } | Self::Finished { id, .. } => {
                 *id
             }

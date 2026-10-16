@@ -18,11 +18,12 @@ use super::hash::{
     combine, hash_file, hash_pieces_from_disk, piece_count, piece_len, Digest, PieceHasher, PIECE,
 };
 use super::plan::{
-    create_dirs, meta_of, plan_receive, remove_partial, write_meta, ReceivePlan, Target,
+    create_dirs, meta_of, plan_receive_with, remove_partial, write_meta, Decisions, ReceivePlan,
+    Target,
 };
 use super::session::SessionState;
 use super::state::{lock, RangeSet, Transfer};
-use super::types::{ConflictPolicy, TransferEvent, TransferState};
+use super::types::{TransferEvent, TransferState};
 
 /// How long a new stream may take to deliver its 12-byte header.
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -72,9 +73,9 @@ impl Receiving {
     pub fn prepare(
         dest: &Path,
         items: Vec<TransferItem>,
-        policy: ConflictPolicy,
+        decisions: &Decisions,
     ) -> Result<Self, FilesError> {
-        let plan = plan_receive(dest, &items, policy)?;
+        let plan = plan_receive_with(dest, &items, decisions)?;
         let free = available_space(&plan.root).map_err(|e| FilesError::io(&plan.root, e))?;
         if plan.need_bytes > free {
             return Err(FilesError::NoSpace {

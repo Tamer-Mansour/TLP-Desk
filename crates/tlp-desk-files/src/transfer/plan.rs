@@ -26,6 +26,34 @@ const META_MAGIC: &str = "tlpdesk-part 1";
 /// Conflict names tried before giving up (`name (2)` .. `name (999)`).
 const MAX_RENAME_TRIES: u32 = 999;
 
+/// Conflict policy for a whole offer: one default plus exceptions by item index.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Decisions {
+    default: ConflictPolicy,
+    per_item: HashMap<u32, ConflictPolicy>,
+}
+
+impl Decisions {
+    /// The same policy for every item.
+    pub fn uniform(policy: ConflictPolicy) -> Self {
+        Self {
+            default: policy,
+            per_item: HashMap::new(),
+        }
+    }
+
+    /// A different policy for one item.
+    pub fn with_item(mut self, item: u32, policy: ConflictPolicy) -> Self {
+        self.per_item.insert(item, policy);
+        self
+    }
+
+    /// The policy for the item at `index` (its exception, else the default).
+    pub fn for_item(&self, index: u32) -> ConflictPolicy {
+        self.per_item.get(&index).copied().unwrap_or(self.default)
+    }
+}
+
 /// What happens to one incoming item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
@@ -74,10 +102,24 @@ pub struct ReceivePlan {
 /// # Errors
 /// Invalid or duplicate item paths, paths escaping `dest` (through links), a missing or
 /// non-directory `dest`, or a directory name already taken by a file.
+#[cfg(test)]
 pub fn plan_receive(
     dest: &Path,
     items: &[TransferItem],
     policy: ConflictPolicy,
+) -> Result<ReceivePlan, FilesError> {
+    plan_receive_with(dest, items, &Decisions::uniform(policy))
+}
+
+/// Like [`plan_receive`] with a conflict policy per item (the answers to an
+/// [`ConflictPolicy::Ask`] prompt).
+///
+/// # Errors
+/// See [`plan_receive`].
+pub fn plan_receive_with(
+    dest: &Path,
+    items: &[TransferItem],
+    decisions: &Decisions,
 ) -> Result<ReceivePlan, FilesError> {
     let root = std::fs::canonicalize(dest).map_err(|e| FilesError::io(dest, e))?;
     if !root.is_dir() {
@@ -88,7 +130,7 @@ pub fn plan_receive(
     }
     let mut p = Planner {
         root: root.clone(),
-        policy,
+        policy: decisions.default,
         dirs: HashMap::new(),
         claimed: HashSet::new(),
         inside: HashMap::new(),
@@ -115,6 +157,7 @@ pub fn plan_receive(
             targets.push(Target::Dir { path });
             continue;
         }
+        p.policy = decisions.for_item(idx);
         let target = p.plan_file(&parent, name, item)?;
         match &target {
             Target::File { resume: r, .. } => {
@@ -417,6 +460,57 @@ mod tests {
         let plan = plan_receive(d.path(), &items, ConflictPolicy::Skip).unwrap();
         assert!(matches!(plan.targets[0], Target::Skipped { .. }));
         assert_eq!(plan.resume, vec![(0, 10)]);
+    }
+
+    #[test]
+    fn decisions_apply_per_item_and_ask_without_answer_keeps_both() {
+        let d = tempfile::tempdir().unwrap();
+        for n in ["أ.txt", "ب.txt", "ج.txt"] {
+            std::fs::write(d.path().join(n), b"old").unwrap();
+        }
+        let items = [file("أ.txt", 9), file("ب.txt", 9), file("ج.txt", 9)];
+        let decisions = Decisions::uniform(ConflictPolicy::Skip)
+            .with_item(1, ConflictPolicy::Overwrite)
+            .with_item(2, ConflictPolicy::Rename);
+        let plan = plan_receive_with(d.path(), &items, &decisions).unwrap();
+        assert!(matches!(plan.targets[0], Target::Skipped { .. }));
+        let Target::File { final_path, .. } = &plan.targets[1] else {
+            panic!()
+        };
+        assert!(final_path.ends_with("ب.txt"));
+        let Target::File { final_path, .. } = &plan.targets[2] else {
+            panic!()
+        };
+        assert!(final_path.ends_with("ج (2).txt"));
+        // `Ask` that reaches the planner unanswered must never destroy anything.
+        let plan = plan_receive(d.path(), &items, ConflictPolicy::Ask).unwrap();
+        assert!(plan.targets.iter().all(|t| matches!(
+            t,
+            Target::File { final_path, .. } if final_path.to_string_lossy().contains("(2)")
+        )));
+    }
+
+    #[test]
+    fn resume_continues_a_partial_file_even_when_the_final_name_exists() {
+        let d = tempfile::tempdir().unwrap();
+        let item = file("كبير.bin", 3 * PIECE + 7);
+        let final_path = d.path().join("كبير.bin");
+        std::fs::write(&final_path, b"older version").unwrap();
+        std::fs::write(
+            part_of(&final_path),
+            vec![0u8; usize::try_from(PIECE).unwrap()],
+        )
+        .unwrap();
+        write_meta(&final_path, &item, PIECE);
+        let plan = plan_receive(
+            d.path(),
+            std::slice::from_ref(&item),
+            ConflictPolicy::Overwrite,
+        )
+        .unwrap();
+        assert_eq!(plan.resume, vec![(0, PIECE)]);
+        let plan = plan_receive(d.path(), &[item], ConflictPolicy::Rename).unwrap();
+        assert!(plan.resume.is_empty(), "keep-both never reuses the partial");
     }
 
     #[test]

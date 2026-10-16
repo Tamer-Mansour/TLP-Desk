@@ -28,6 +28,7 @@
 //! `name.tlpdesk-part`, verified with BLAKE3 and renamed into place, so a file with its real
 //! name is always complete.
 
+mod conflict;
 mod disk;
 mod error;
 mod hash;
@@ -51,10 +52,14 @@ use tlp_desk_proto::{
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+pub use conflict::{
+    detect_conflicts, ConflictChoice, ConflictRequest, ConflictResolution, FileConflict,
+    MAX_LISTED_CONFLICTS,
+};
 pub use error::{FilesError, PathIssue};
 pub use hash::PIECE;
 pub use path::{validate_component, validate_rel_path, MAX_DEPTH};
-pub use plan::{META_SUFFIX, PART_SUFFIX};
+pub use plan::{Decisions, META_SUFFIX, PART_SUFFIX};
 pub use types::{
     ConflictPolicy, TransferConfig, TransferEvent, TransferId, TransferInfo, TransferRole,
     TransferSnapshot, TransferState,
@@ -103,6 +108,8 @@ pub(crate) struct Inner {
     pub events: broadcast::Sender<(u64, TransferEvent)>,
     pub hooks: TestHooks,
     specs: Mutex<HashMap<TransferId, (u64, Spec)>>,
+    /// Open [`ConflictPolicy::Ask`] prompts.
+    pub(crate) pending: conflict::Pending,
     /// Host: finds the source folder of an offer that names none (a paste of files the user
     /// copied in Explorer), from `(session_key, offer id)`.
     pub announced_source: Mutex<Option<SourceLookup>>,
@@ -148,6 +155,7 @@ impl FileTransfer {
                 events,
                 hooks: TestHooks::default(),
                 specs: Mutex::new(HashMap::new()),
+                pending: conflict::Pending::default(),
                 announced_source: Mutex::new(None),
             }),
         })
@@ -290,6 +298,13 @@ impl FileTransfer {
             policy,
         };
         self.start(session_key, spec, None, wire_id).await
+    }
+
+    /// Answers a [`TransferEvent::ConflictsFound`] prompt: `Some(resolution)` continues the
+    /// transfer accordingly, `None` cancels it (on the host the viewer's upload is declined).
+    /// `false` if no prompt waits for `id` (already answered, timed out, session ended).
+    pub fn resolve_conflicts(&self, id: TransferId, answer: Option<ConflictResolution>) -> bool {
+        self.inner.pending.answer(id, answer)
     }
 
     /// Cancels a transfer (either side). Partial files are kept so a new transfer of the same
@@ -470,7 +485,8 @@ async fn download(
 ) -> Result<(), FilesError> {
     let dest = local_dest.clone();
     let plan_items = items.clone();
-    let rx = tokio::task::spawn_blocking(move || Receiving::prepare(&dest, plan_items, policy))
+    let decisions = conflict::decide(s, id, &local_dest, &items, policy, true).await?;
+    let rx = tokio::task::spawn_blocking(move || Receiving::prepare(&dest, plan_items, &decisions))
         .await
         .map_err(|_| FilesError::Protocol("planning task failed".into()))??;
     let offer = offer_of(
