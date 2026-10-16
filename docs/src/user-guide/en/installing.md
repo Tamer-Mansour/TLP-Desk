@@ -17,7 +17,7 @@ install and run, but the green remote-pointer marker may then show up in the vie
 Each release lists a `SHA256SUMS.txt` file. In PowerShell:
 
 ```powershell
-Get-FileHash .\TLP-Desk-0.1.0-setup.exe -Algorithm SHA256
+Get-FileHash .\TLP-Desk-1.0.0-rc.1-setup.exe -Algorithm SHA256
 ```
 
 The long number must match the line for that file in `SHA256SUMS.txt`.
