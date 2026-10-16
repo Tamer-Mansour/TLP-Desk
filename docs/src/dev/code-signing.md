@@ -168,7 +168,10 @@ $env:TLP_SIGN_ALLOW_UNTRUSTED = '1'      # test certificates only; refused with 
 $env:TLP_DESK_DIST_DIR = "$tmp\dist"     # keep the test build outside the repo
 powershell -NoProfile -ExecutionPolicy Bypass -File installer\build-setup.ps1
 signtool verify /pa /v "$tmp\dist\TLP-Desk-<version>-setup.exe"   # signature shown, root "not trusted"
+
+# Clean up: the PFX, and the public test certificate that signing caches in CurrentUser\CA.
 Remove-Item "$tmp\test-sign.pfx"
+Get-ChildItem Cert:\CurrentUser\CA | Where-Object Subject -like '*TLP-Desk TEST*' | Remove-Item
 ```
 
 `sign.ps1` still runs `signtool verify /pa` and prints its output; `TLP_SIGN_ALLOW_UNTRUSTED=1` only
