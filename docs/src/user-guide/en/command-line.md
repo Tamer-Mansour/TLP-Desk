@@ -14,6 +14,7 @@ For shortcuts and scripts.
 | `--code <6 digits>` | Uses this one-time code for `--connect` (without it, the other side gets an Accept prompt) |
 | `--lang ar` / `--lang en` | Starts in Arabic or English |
 | `--settings` | Opens the Settings screen first |
+| `--hidden` | Starts in the notification area this time (the service uses it to ask about a connection) |
 | `--port <number>` | Uses another UDP port instead of 47400 (other PCs must then add `:port` to your address) |
 
 Tip: create a desktop shortcut to `TLP-Desk.exe` and add `--connect 123456789` to its **Target** to
