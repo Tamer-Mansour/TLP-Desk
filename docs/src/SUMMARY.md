@@ -33,6 +33,7 @@
   - [Troubleshooting](user-guide/en/troubleshooting.md)
   - [FAQ](user-guide/en/faq.md)
   - [Uninstalling](user-guide/en/uninstall.md)
+  - [Manual test checklist (two PCs)](user-guide/en/manual-test.md)
   - [Coming soon](user-guide/en/coming-soon/index.md)
     - [Address book](user-guide/en/coming-soon/address-book.md)
     - [Ctrl+Alt+Del and lock](user-guide/en/coming-soon/ctrl-alt-del.md)
@@ -69,6 +70,7 @@
   - [حل المشكلات](user-guide/ar/troubleshooting.md)
   - [أسئلة شائعة](user-guide/ar/faq.md)
   - [إزالة التثبيت](user-guide/ar/uninstall.md)
+  - [قائمة الاختبار اليدوي (جهازان)](user-guide/ar/manual-test.md)
   - [قريبًا](user-guide/ar/coming-soon/index.md)
     - [دفتر العناوين](user-guide/ar/coming-soon/address-book.md)
     - [Ctrl+Alt+Del والقفل](user-guide/ar/coming-soon/ctrl-alt-del.md)
@@ -103,6 +105,7 @@
 - [Performance notes](dev/performance.md)
 - [i18n and Arabic](dev/i18n.md)
 - [Release process](dev/release.md)
+- [System test report (1.0.0-rc.1)](dev/system-test-report.md)
 
 # Architecture decisions
 
