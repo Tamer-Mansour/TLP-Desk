@@ -19,6 +19,7 @@ pub mod convert;
 mod h264;
 #[cfg(windows)]
 mod mf;
+mod qp;
 mod select;
 
 pub use h264::{Downscale, H264Complexity, H264Decoder, H264Encoder, H264Tuning};
@@ -27,9 +28,44 @@ pub use mf::{
     list_adapters, list_hw_encoders, GpuAdapter, HwAdapter, HwEncoderInfo, MfEncoder, VENDOR_AMD,
     VENDOR_INTEL, VENDOR_NVIDIA,
 };
+pub use qp::QpProbe;
 pub use select::{
     new_encoder_with, EncoderOptions, EncoderPreference, FallbackEncoder, ADAPTER_ENV, ENCODER_ENV,
 };
+
+/// Quantiser limits of an encoder (H.264 QP, 0-51; lower is sharper).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QpBounds {
+    /// Finest quantiser rate control may use (bits below this buy nothing visible).
+    pub min: u8,
+    /// Coarsest quantiser rate control may use: the quality floor. A frame that cannot be
+    /// coded this well within the bitrate overshoots it, and the adaptive controller then
+    /// lowers the resolution instead of the quality.
+    pub max: u8,
+}
+
+impl QpBounds {
+    /// The quality floor every session uses.
+    pub const FLOOR: Self = Self {
+        min: QUALITY_MIN_QP,
+        max: QUALITY_MAX_QP,
+    };
+    /// No limits (the benchmark's "before" setting).
+    pub const UNBOUNDED: Self = Self { min: 0, max: 51 };
+}
+
+impl Default for QpBounds {
+    fn default() -> Self {
+        Self::FLOOR
+    }
+}
+
+/// Quality floor: the coarsest quantiser (H.264 QP, 0-51) the encoders may use. About 32 keeps
+/// UI text legible; a stream that cannot afford it is made smaller (lower resolution) by the
+/// host's adaptive controller instead of blurrier.
+pub const QUALITY_MAX_QP: u8 = 32;
+/// The finest quantiser the encoders use (below this the bits buy nothing visible).
+pub const QUALITY_MIN_QP: u8 = 12;
 
 /// Encoder settings. `width`/`height` are the size of the *input* frames (the captured
 /// monitor); the encoded size may be smaller, see [`H264Encoder::encoded_size`].
@@ -43,17 +79,19 @@ pub struct EncoderConfig {
 
 impl EncoderConfig {
     /// A sensible default for LAN screen sharing: `fps` frames per second and a bitrate that
-    /// scales with the encoded resolution under [`Downscale::Auto`]: about 12.4 Mbps for
-    /// 1080p60, 13.8 Mbps for 1920x1200@60, 6.2 Mbps for 1080p30.
+    /// scales with the encoded resolution under [`Downscale::Auto`]: about 14.9 Mbps for
+    /// 1080p60, 16.6 Mbps for 1920x1200@60, 7.5 Mbps for 1080p30.
     ///
     /// For frames already downscaled by the capturer (`CaptureOptions::max_size`), pass the
     /// *frame* size: it fits the encoder, so it is encoded as is (no second downscale).
     pub fn for_screen(width: u32, height: u32, fps: u32) -> Self {
         let (ew, eh) = h264::auto_encoded_size(width, height);
         let pixels_per_sec = ew as u64 * eh as u64 * fps.max(1) as u64;
-        // ~0.1 bits per pixel (sharp text when scrolling at 60 fps), clamped to a range that
-        // suits wired and Wi-Fi LANs. Rate control spends far less on static screens.
-        let kbps = (pixels_per_sec / 10_000).clamp(1_000, 40_000) as u32;
+        // 0.12 bits per pixel: the codec benchmark (`bench --quality`) puts UI and code text at
+        // ~42 dB edge PSNR there (0.1: ~41 dB, 0.06: ~39 dB), with headroom for scrolling at
+        // 60 fps. Clamped to a range that suits wired and Wi-Fi LANs. Rate control spends far
+        // less on static screens (the QP floor stops it chasing invisible detail).
+        let kbps = (pixels_per_sec * 12 / 100_000).clamp(1_000, 60_000) as u32;
         Self {
             width,
             height,

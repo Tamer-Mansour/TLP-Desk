@@ -207,15 +207,19 @@ fn sudden_congestion_backs_off_fast_and_keeps_latency_bounded() {
         .sum::<f64>()
         / late.len() as f64;
     assert!(avg >= 1_500.0, "average {avg:.0} kbps on a 3 Mbps link");
-    // 3 Mbps is above the floor: no need to give up frame rate or resolution.
-    assert!(late.iter().all(|t| t.decision.scale_permille == 1000));
+    // 3 Mbps is far under the bits-per-pixel floor of a ~2.3 Mpx frame at 60 fps (0.02 bpp):
+    // the picture gets smaller instead of blurrier.
+    assert!(
+        late.last().unwrap().decision.scale_permille < 1000,
+        "never stepped the resolution down"
+    );
 }
 
 #[test]
 fn recovers_to_full_quality_after_congestion_ends() {
     let mut ctl = Controller::new(ControllerConfig::adaptive(MAX, 60));
     let mut link = Link::new(100_000.0, 0.5);
-    let trace = run(&mut ctl, &mut link, Duration::ZERO, 70, |t| {
+    let trace = run(&mut ctl, &mut link, Duration::ZERO, 160, |t| {
         let s = t.as_secs();
         Some(if (20..40).contains(&s) {
             3_000.0
@@ -245,13 +249,10 @@ fn starved_link_lowers_fps_then_resolution_and_recovers() {
     let trace = run(&mut ctl, &mut link, Duration::ZERO, 40, |_| Some(400.0));
     let worst = trace.last().unwrap().decision;
     assert_eq!(worst.fps, 15, "{worst:?}");
-    assert_eq!(worst.scale_permille, 500, "{worst:?}");
-    // Frame rate went down before resolution, one step at a time.
-    let first_scale = trace
-        .iter()
-        .position(|t| t.decision.scale_permille < 1000)
-        .unwrap();
-    assert!(trace[..first_scale].iter().any(|t| t.decision.fps == 15));
+    assert_eq!(worst.scale_permille, 534, "{worst:?}");
+    // Resolution and frame rate both stepped down, never faster than every 4 s.
+    assert_structural_spacing(&trace);
+    assert!(trace.iter().any(|t| t.decision.scale_permille < 1000));
     // Latency stays bounded by the in-flight limit even when starved (the first ticks still
     // drain the three full-rate frames that were in flight when the link collapsed).
     assert!(after(&trace, 2).all(|t| t.queue_ms < 600.0));
@@ -281,4 +282,168 @@ fn starved_link_lowers_fps_then_resolution_and_recovers() {
         })
         .expect("never recovered");
     assert!(ok.at <= Duration::from_secs(40 + 60), "at {:?}", ok.at);
+}
+
+/// 1920x1200 frames at 60 fps, the ceiling at 0.12 bpp (the `for_screen` default).
+const FRAME_PX: u64 = 1920 * 1200;
+const CEILING: u32 = 16_589;
+
+fn ladder_config() -> ControllerConfig {
+    ControllerConfig::adaptive(CEILING, 60).with_frame_pixels(FRAME_PX)
+}
+
+/// Bits per pixel the stream gets at a decision.
+fn bpp_of(d: AdaptDecision) -> f64 {
+    let scale = f64::from(d.scale_permille) / 1000.0;
+    f64::from(d.bitrate_kbps) * 1000.0 / (FRAME_PX as f64 * scale * scale * f64::from(d.fps))
+}
+
+/// Typical H.264 QP for text-heavy screens at a bit budget, fitted to the codec benchmark
+/// (`bench --quality`: QP 12 at 0.2 bpp, 17 at 0.1, 22.5 at 0.04, 27 at 0.02: about 4.5 QP
+/// per halving), capped by the encoder's quality floor of 32.
+fn modelled_qp(bpp: f64) -> f64 {
+    (12.0 + 4.5 * (0.2 / bpp.max(1e-4)).log2()).clamp(12.0, 32.0)
+}
+
+fn changes(trace: &[Tick]) -> Vec<(Duration, AdaptDecision)> {
+    let mut out = Vec::new();
+    let mut prev: Option<AdaptDecision> = None;
+    for t in trace {
+        let key = |d: AdaptDecision| (d.scale_permille, d.fps);
+        if prev.is_some_and(|p| key(p) != key(t.decision)) {
+            out.push((t.at, t.decision));
+        }
+        prev = Some(t.decision);
+    }
+    out
+}
+
+fn assert_structural_spacing(trace: &[Tick]) {
+    let ch = changes(trace);
+    for w in ch.windows(2) {
+        assert!(
+            w[1].0 - w[0].0 >= Duration::from_secs(4),
+            "structural changes {:?} and {:?} are too close",
+            w[0],
+            w[1]
+        );
+    }
+}
+
+#[test]
+fn congestion_lowers_the_resolution_and_keeps_the_quantiser_low() {
+    let mut ctl = Controller::new(ladder_config());
+    let mut link = Link::new(100_000.0, 0.5);
+    let drop_at = Duration::from_secs(20);
+    // 100 Mbps, then 2.5 Mbps: 0.018 bpp at 1920x1200@60, far under the 0.07 floor.
+    let trace = run(&mut ctl, &mut link, Duration::ZERO, 90, |t| {
+        (t >= drop_at).then_some(2_500.0)
+    });
+    assert!(trace
+        .iter()
+        .filter(|t| t.at < drop_at)
+        .all(|t| t.decision.scale_permille == 1000));
+    // Within 15 s the picture is smaller (1280x800 or less) ...
+    let settled: Vec<_> = after(&trace, 35).collect();
+    assert!(
+        settled.iter().all(|t| t.decision.scale_permille <= 667),
+        "{:?}",
+        settled.first()
+    );
+    // ... and from then on the stream never goes under the bits-per-pixel floor by much,
+    // so the quantiser stays well below the ceiling of 32.
+    let worst_bpp = settled
+        .iter()
+        .map(|t| bpp_of(t.decision))
+        .fold(f64::MAX, f64::min);
+    assert!(worst_bpp >= 0.055, "worst bpp {worst_bpp:.3}");
+    let worst_qp = settled
+        .iter()
+        .map(|t| modelled_qp(bpp_of(t.decision)))
+        .fold(0.0, f64::max);
+    assert!(worst_qp <= 24.0, "modelled QP {worst_qp:.1}");
+    // Without the ladder the same link would have meant 0.018 bpp.
+    assert!(modelled_qp(0.018) > 27.0);
+    assert_structural_spacing(&trace);
+    // Latency still bounded.
+    assert!(after(&trace, 25).all(|t| t.queue_ms < 300.0));
+    // The picture went down in few steps, not a staircase of one rung per second.
+    assert!(changes(&trace).len() <= 4, "{:?}", changes(&trace));
+}
+
+#[test]
+fn recovery_steps_back_up_slowly_without_flapping() {
+    let mut ctl = Controller::new(ladder_config());
+    let mut link = Link::new(100_000.0, 0.5);
+    let trace = run(&mut ctl, &mut link, Duration::ZERO, 200, |t| {
+        let s = t.as_secs();
+        Some(if (20..80).contains(&s) {
+            2_500.0
+        } else {
+            100_000.0
+        })
+    });
+    assert_structural_spacing(&trace);
+    let ch = changes(&trace);
+    // Down at the congestion, then only ups: no step down after the first step up.
+    let first_up = ch
+        .iter()
+        .position(|(at, _)| *at >= Duration::from_secs(80))
+        .expect("never stepped back up");
+    let ups = &ch[first_up..];
+    assert!(ups
+        .iter()
+        .all(|(_, d)| d.scale_permille >= 667 || d.fps >= 30));
+    // Steps up are at least 10 s apart (the hysteresis wait).
+    for w in ups.windows(2) {
+        assert!(w[1].0 - w[0].0 >= Duration::from_secs(10), "{w:?}");
+    }
+    // Back to full quality within a couple of minutes.
+    let last = trace.last().unwrap().decision;
+    assert_eq!((last.scale_permille, last.fps), (1000, 60), "{last:?}");
+    assert!(last.bitrate_kbps >= CEILING * 9 / 10);
+}
+
+#[test]
+fn a_borderline_link_settles_instead_of_flapping() {
+    // 6 Mbps carries 1600x1000@60 at 0.062 bpp ... but not 1920x1200: the controller must find
+    // a rung and stay, not retry the bigger picture every ten seconds.
+    let mut ctl = Controller::new(ladder_config());
+    let mut link = Link::new(6_000.0, 1.0).wifi(2.0, 0.03, 15.0);
+    let trace = run(&mut ctl, &mut link, Duration::ZERO, 600, |_| None);
+    let ch = changes(&trace);
+    let late = ch
+        .iter()
+        .filter(|(at, _)| *at >= Duration::from_secs(180))
+        .count();
+    assert!(ch.len() <= 8, "{} structural changes: {ch:?}", ch.len());
+    assert!(late <= 2, "{late} changes after settling: {ch:?}");
+    assert_structural_spacing(&trace);
+    // Quality stays above the floor most of the time.
+    let tail: Vec<_> = after(&trace, 60).collect();
+    let low = tail.iter().filter(|t| bpp_of(t.decision) < 0.05).count();
+    assert!(
+        low * 10 <= tail.len(),
+        "{low} of {} ticks under 0.05 bpp",
+        tail.len()
+    );
+}
+
+#[test]
+fn a_capped_ceiling_still_climbs_back() {
+    // The Speed preset's ceiling is only 60 % of the default bitrate: the thresholds scale down
+    // with it, so the ladder still steps up after congestion ends.
+    let cfg = ControllerConfig::adaptive(CEILING * 6 / 10, 60).with_frame_pixels(FRAME_PX / 2);
+    let mut ctl = Controller::new(cfg);
+    let mut link = Link::new(100_000.0, 0.5);
+    let trace = run(&mut ctl, &mut link, Duration::ZERO, 160, |t| {
+        let s = t.as_secs();
+        Some(if (10..50).contains(&s) {
+            800.0
+        } else {
+            100_000.0
+        })
+    });
+    assert!(trace.iter().any(|t| t.decision.scale_permille < 1000));
+    assert_eq!(trace.last().unwrap().decision.scale_permille, 1000);
 }

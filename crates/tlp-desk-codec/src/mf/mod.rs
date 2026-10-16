@@ -131,6 +131,19 @@ impl MfEncoder {
     /// # Errors
     /// Fails when no hardware H.264 MFT is available there or it rejects the settings.
     pub fn new(config: EncoderConfig, adapter: HwAdapter) -> Result<Self, CodecError> {
+        Self::with_qp(config, adapter, crate::QpBounds::FLOOR)
+    }
+
+    /// Like [`MfEncoder::new`] with explicit quantiser limits (vendors that ignore them keep
+    /// their own).
+    ///
+    /// # Errors
+    /// As [`MfEncoder::new`].
+    pub fn with_qp(
+        config: EncoderConfig,
+        adapter: HwAdapter,
+        qp: crate::QpBounds,
+    ) -> Result<Self, CodecError> {
         if config.width == 0 || config.height == 0 {
             return Err(CodecError::Backend("zero-sized encoder config".into()));
         }
@@ -141,6 +154,7 @@ impl MfEncoder {
             height: encoded.1,
             fps: config.fps.max(1),
             bitrate_bps: config.bitrate_kbps.max(1).saturating_mul(1000),
+            qp,
         };
         let (tx, cmd_rx) = mpsc::channel();
         let (reply_tx, rx) = mpsc::channel();

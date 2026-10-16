@@ -54,6 +54,8 @@ pub struct EncoderOptions {
     /// GPU for the hardware encoder (Windows).
     #[cfg(windows)]
     pub adapter: crate::mf::HwAdapter,
+    /// Quantiser limits of whichever encoder runs.
+    pub qp: crate::QpBounds,
 }
 
 impl EncoderOptions {
@@ -84,9 +86,10 @@ fn open_hardware(
     config: EncoderConfig,
     options: &EncoderOptions,
 ) -> Result<Box<dyn VideoEncoder>, CodecError> {
-    Ok(Box::new(crate::mf::MfEncoder::new(
+    Ok(Box::new(crate::mf::MfEncoder::with_qp(
         config,
         options.adapter,
+        options.qp,
     )?))
 }
 
@@ -120,13 +123,16 @@ pub fn new_encoder_with(
         },
         EncoderPreference::Hardware => Some(open_hardware(config, options)?),
     };
-    Ok(Box::new(FallbackEncoder::new(config, primary)?))
+    Ok(Box::new(FallbackEncoder::with_qp(
+        config, primary, options.qp,
+    )?))
 }
 
 /// Runs a primary (hardware) encoder and swaps in OpenH264 the moment it fails.
 pub struct FallbackEncoder {
     config: EncoderConfig,
     active: Box<dyn VideoEncoder>,
+    qp: crate::QpBounds,
     /// Whether `active` is still the primary encoder.
     on_primary: bool,
 }
@@ -140,15 +146,34 @@ impl FallbackEncoder {
         config: EncoderConfig,
         primary: Option<Box<dyn VideoEncoder>>,
     ) -> Result<Self, CodecError> {
+        Self::with_qp(config, primary, crate::QpBounds::FLOOR)
+    }
+
+    /// Like [`FallbackEncoder::new`] with explicit quantiser limits for the OpenH264 encoder.
+    ///
+    /// # Errors
+    /// As [`FallbackEncoder::new`].
+    pub fn with_qp(
+        config: EncoderConfig,
+        primary: Option<Box<dyn VideoEncoder>>,
+        qp: crate::QpBounds,
+    ) -> Result<Self, CodecError> {
+        let software = |config| {
+            H264Encoder::with_tuning(
+                config,
+                crate::H264Tuning {
+                    qp,
+                    ..crate::H264Tuning::default()
+                },
+            )
+        };
         let (active, on_primary) = match primary {
             Some(p) => (p, true),
-            None => (
-                Box::new(H264Encoder::new(config)?) as Box<dyn VideoEncoder>,
-                false,
-            ),
+            None => (Box::new(software(config)?) as Box<dyn VideoEncoder>, false),
         };
         Ok(Self {
             config,
+            qp,
             active,
             on_primary,
         })
@@ -167,7 +192,13 @@ impl FallbackEncoder {
             error = %cause,
             "hardware encoder failed, switching to OpenH264"
         );
-        let mut sw = H264Encoder::new(self.config)?;
+        let mut sw = H264Encoder::with_tuning(
+            self.config,
+            crate::H264Tuning {
+                qp: self.qp,
+                ..crate::H264Tuning::default()
+            },
+        )?;
         sw.request_keyframe();
         self.active = Box::new(sw);
         self.on_primary = false;

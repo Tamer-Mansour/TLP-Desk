@@ -110,6 +110,7 @@ cargo run --release -p tlp-desk-codec --example bench -- --seconds 10 --fps 60
 | `--pipelined` | off | capture, encode and decode on separate threads with a newest-wins mailbox |
 | `--animate` | off | open a small animated window so there is always motion |
 | `--conv` | off | time the BGRA → I420 conversion separately |
+| `--quality` | off | PSNR / edge PSNR / SSIM / QP on text-heavy off-screen scenes (also `--bpp a,b,c`, `--frames N`, `--scene ui\|code\|scroll\|photo`, `--qp MIN:MAX`, `--synthetic WxH`); see [Performance notes](../performance.md#measured-bench---quality) |
 
 It prints average / p95 / max per stage, Mbps, KB per frame, keyframe count and process CPU
 time. A recorded run without NASM: 51.7 fps serial at 1080p, encode 5.95 ms, decode 2.88 ms.

@@ -20,14 +20,16 @@ const MAX_CEILING_KBPS: u64 = 80_000;
 /// control is not reset for noise.
 const RETUNE_PERMILLE: u64 = 30;
 
-/// Controller bounds for a quality target and a frame size.
+/// Controller bounds for a quality target and the *full-size* frame (the capture cap, before
+/// the ladder shrinks it).
 pub(crate) fn controller_config(q: &QualityTarget, size: (u32, u32)) -> ControllerConfig {
     match q.bitrate {
         BitrateMode::Fixed(kbps) => ControllerConfig::fixed(kbps, q.fps),
         BitrateMode::Adaptive { ceiling_pct } => {
             let base = EncoderConfig::for_screen(size.0.max(2), size.1.max(2), q.fps).bitrate_kbps;
             let ceiling = (u64::from(base) * u64::from(ceiling_pct) / 100).min(MAX_CEILING_KBPS);
-            ControllerConfig::adaptive(ceiling as u32, q.fps)
+            let pixels = u64::from(size.0.max(2)) * u64::from(size.1.max(2));
+            ControllerConfig::adaptive(ceiling as u32, q.fps).with_frame_pixels(pixels)
         }
     }
 }
@@ -99,10 +101,15 @@ impl EncodeAdapter {
     }
 
     /// Configuration for a new encoder for `size` frames, at the current target bitrate.
+    /// `size` is the captured (possibly ladder-scaled) frame; the controller works with the
+    /// full-size frame it came from.
     pub(crate) fn encoder_config(&mut self, size: (u32, u32)) -> EncoderConfig {
         self.refresh_quality();
-        self.size = size;
-        self.ctl.reconfigure(controller_config(&self.quality, size));
+        let scale = u64::from(self.ctl.decision().scale_permille.clamp(100, 1000));
+        let up = |v: u32| u32::try_from(u64::from(v) * 1000 / scale).unwrap_or(u32::MAX);
+        self.size = (up(size.0), up(size.1));
+        self.ctl
+            .reconfigure(controller_config(&self.quality, self.size));
         let d = self.ctl.decision();
         self.applied_kbps = d.bitrate_kbps;
         EncoderConfig {
@@ -179,20 +186,22 @@ mod tests {
     fn ceilings_follow_preset_and_frame_size() {
         let d = QualityTarget::host_default((1920, 1200), 60);
         let c = controller_config(&d, (1920, 1080));
-        assert_eq!(c.max_kbps, 12_441);
+        assert_eq!(c.max_kbps, 14_929);
+        // The ladder works from the full-size frame.
+        assert_eq!(c.frame_pixels, 1920 * 1080);
         assert!(c.adaptive);
         let speed = QualityTarget {
             preset: QualityPreset::Speed,
             bitrate: BitrateMode::Adaptive { ceiling_pct: 60 },
             ..d
         };
-        assert_eq!(controller_config(&speed, (1280, 720)).max_kbps, 3_317);
+        assert_eq!(controller_config(&speed, (1280, 720)).max_kbps, 3_981);
         let quality = QualityTarget {
             bitrate: BitrateMode::Adaptive { ceiling_pct: 160 },
             ..d
         };
-        // 4K60: 40 Mbps default, x1.6 = 64 Mbps.
-        assert_eq!(controller_config(&quality, (3840, 2160)).max_kbps, 64_000);
+        // 4K60: ~60 Mbps default, x1.6 is capped at 80 Mbps.
+        assert_eq!(controller_config(&quality, (3840, 2160)).max_kbps, 80_000);
         let fixed = QualityTarget {
             bitrate: BitrateMode::Fixed(2_500),
             fps: 30,
