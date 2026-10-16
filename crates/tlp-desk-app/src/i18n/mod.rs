@@ -337,6 +337,11 @@ strings! {
     AudioOnConnectHint => "Sound plays only if the other device allows it. You can mute it at any time from the session toolbar.", "لا يُشغَّل الصوت إلا إذا سمح به الجهاز الآخر، ويمكنك كتمه في أي وقت من شريط أدوات الجلسة.";
 
     // --- service ---
+    ServiceDisplayName => "TLP-Desk Service", "خدمة TLP-Desk";
+    ServiceDescription => "Lets trusted devices on your local network reach this computer with TLP-Desk, including at the lock and sign-in screens (unattended access).", "تتيح للأجهزة الموثوقة في شبكتك المحلية الوصول إلى هذا الحاسوب عبر TLP-Desk، حتى عند شاشة القفل وشاشة تسجيل الدخول (الوصول غير المراقَب).";
+    ServiceHosting => "Unattended access is on: the TLP-Desk service receives connections for this device.", "الوصول غير المراقَب مفعّل: خدمة TLP-Desk تستقبل الاتصالات لهذا الجهاز.";
+    RemoteLocked => "The remote computer is locked. Use Ctrl+Alt+Del to sign in.", "الحاسوب البعيد مقفل. استخدم Ctrl+Alt+Del لتسجيل الدخول.";
+    RemoteSecureDesktop => "The remote computer shows a secure screen (sign-in, lock or an administrator prompt).", "يعرض الحاسوب البعيد شاشة آمنة (تسجيل الدخول أو القفل أو طلب صلاحيات المسؤول).";
 
     // --- privacy ---
 

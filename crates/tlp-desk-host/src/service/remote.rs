@@ -688,7 +688,10 @@ mod tests {
         // Third request: no change.
         assert!(cap.next_frame(Duration::from_millis(5)).unwrap().is_none());
         // Unknown monitor.
-        assert!(matches!(factory(7, CaptureOptions::default()), Err(CaptureError::NoSuchMonitor(7))));
+        assert!(matches!(
+            factory(7, CaptureOptions::default()),
+            Err(CaptureError::NoSuchMonitor(7))
+        ));
     }
 
     #[test]
@@ -729,7 +732,10 @@ mod tests {
         // The agent goes away (logoff): the link is cleared and connections break.
         agent.dead.store(true, Ordering::SeqCst);
         link.set(None);
-        assert!(matches!(factory(0, CaptureOptions::default()), Err(CaptureError::Platform(_))));
+        assert!(matches!(
+            factory(0, CaptureOptions::default()),
+            Err(CaptureError::Platform(_))
+        ));
         assert!(link.list_monitors().is_err());
         // A new agent comes up.
         let os = agent.os.clone();
@@ -739,7 +745,10 @@ mod tests {
             dead: AtomicBool::new(false),
         });
         link.set(Some(agent2.clone()));
-        assert!(factory(0, CaptureOptions::default()).unwrap().next_frame(Duration::ZERO).is_ok());
+        assert!(factory(0, CaptureOptions::default())
+            .unwrap()
+            .next_frame(Duration::ZERO)
+            .is_ok());
         assert_eq!(link.list_monitors().unwrap().len(), 2);
         drop(cap);
     }

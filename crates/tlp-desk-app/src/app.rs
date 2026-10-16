@@ -122,6 +122,8 @@ pub struct App {
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    /// TLP-service: the installed service hosts this device.
+    pub service_hosting: bool,
     /// Permanent password card and password sign-in (TLP-unattended).
     pub unattended: crate::ui::unattended::UnattendedUi,
     /// Saved devices (home screen tab).
@@ -192,6 +194,7 @@ impl App {
             host_input_blocked: None,
             session: None,
             notice: None,
+            service_hosting: false,
             address_book,
             settings_ui: Default::default(),
             autostart: crate::settings::autostart::system(),
@@ -484,6 +487,14 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- service (TLP-service) ---
+                BackendEvent::RemoteDesktopState { session, state } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.remote_desktop = Some(state);
+                        s.unattended.host_service = true;
+                    }
+                }
+                BackendEvent::ServiceHosting(on) => self.service_hosting = on,
                 // --- unattended (TLP-unattended) ---
                 BackendEvent::PasswordState(state) => self.unattended.state = state,
                 BackendEvent::PasswordChanged(result) => {
@@ -980,6 +991,9 @@ impl eframe::App for App {
         self.host_banner(ui);
         if self.session.is_none() {
             self.host_problem_banner(ui);
+            if self.service_hosting {
+                crate::ui::service::hosting_banner(ui, self.tx);
+            }
         }
         let modal_open = self.dialogs(&ctx);
         let recording_now = self

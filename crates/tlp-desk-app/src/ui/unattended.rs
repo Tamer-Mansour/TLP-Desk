@@ -339,6 +339,8 @@ pub struct SessionUnattended {
     pub attempt: u32,
     /// Why the reconnect failed (display text), shown when the session then ends.
     pub failed: Option<String>,
+    /// The host runs the TLP-Desk service (it reported `DesktopState`), so Ctrl+Alt+Del works.
+    pub host_service: bool,
 }
 
 impl SessionUnattended {
@@ -386,7 +388,7 @@ impl SessionUnattended {
                     let allowed = perms.contains(action.required()) && !self.restarting;
                     let b = icons::icon_text_button(tx, icon, tx.t(key));
                     let mut r = ui.add_enabled(allowed, b);
-                    if action == SystemAction::CtrlAltDel {
+                    if action == SystemAction::CtrlAltDel && !self.host_service {
                         r = r.on_hover_text(tx.t(S::CtrlAltDelHint));
                     }
                     let r = r.on_disabled_hover_text(tx.t(S::SystemNotAllowed));

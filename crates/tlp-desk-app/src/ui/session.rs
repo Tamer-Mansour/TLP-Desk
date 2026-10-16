@@ -65,6 +65,8 @@ pub struct ViewerSession {
     active_monitor: u32,
     /// System menu, confirmations and restart progress (TLP-unattended).
     pub unattended: super::unattended::SessionUnattended,
+    /// TLP-service: the host's secure-desktop / lock state, once reported.
+    pub remote_desktop: Option<crate::backend::service::RemoteDesktop>,
     /// Quality preset requested from the host (toolbar menu; starts as the Settings default).
     pub quality: QualityChoice,
     /// Remote device-info window (toolbar button).
@@ -128,6 +130,7 @@ impl ViewerSession {
             monitors: Vec::new(),
             active_monitor: 0,
             unattended: Default::default(),
+            remote_desktop: None,
             quality: QualityChoice::default(),
             device_info: Default::default(),
             tunnels: Default::default(),
@@ -266,6 +269,9 @@ impl ViewerSession {
         }
         if self.host_input_priority {
             self.priority_banner(ui, tx);
+        }
+        if let Some(state) = self.remote_desktop {
+            super::service::desktop_banner(ui, tx, state);
         }
         // Restart / lock confirmations and the reconnect overlay block input (TLP-unattended).
         let confirm_open = self
