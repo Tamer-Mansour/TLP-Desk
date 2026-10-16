@@ -15,6 +15,7 @@
 //! * unattended (TLP-unattended): password sign-in succeeds unless the password starts with
 //!   'wrong' (wrong credentials) or is 'locked' (locked out); the permanent password can be set
 //!   and removed; 'Restart remote PC' goes down after ~1.5 s, retries three times and comes back.
+//! * privacy mode requests are answered with the requested state after ~300 ms.
 
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
@@ -855,6 +856,20 @@ impl Backend for FakeBackend {
         });
     }
 
+    /// The fake host grants everything and answers after a short delay, like a real one.
+    fn set_privacy_mode(&self, session: SessionId, enabled: bool) {
+        if !self.inner.state().sessions.contains_key(&session) {
+            return;
+        }
+        let me = Arc::clone(&self.inner);
+        self.inner.rt.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            if me.state().sessions.contains_key(&session) {
+                me.emit(BackendEvent::PrivacyChanged { session, enabled });
+            }
+        });
+    }
+
     fn disconnect(&self, session: SessionId) {
         self.inner.state().tunnels.remove(&session);
         let removed = self.inner.state().sessions.remove(&session);
@@ -1169,6 +1184,49 @@ mod tests {
             backend.send_chat(SessionId(424242), "x"),
             Err(ChatSendError::Unavailable)
         );
+    }
+
+    #[test]
+    fn fake_host_answers_privacy_requests() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (backend, mut rx) = FakeBackend::start(rt.handle(), Arc::new(|| {}));
+        let attempt = backend.connect(
+            ConnectTarget::Address("192.168.1.30:47400".parse().unwrap()),
+            Some("123456".into()),
+        );
+        let next_privacy = |rx: &mut EventReceiver| {
+            rt.block_on(async {
+                loop {
+                    if let BackendEvent::PrivacyChanged { enabled, .. } = rx.recv().await.unwrap() {
+                        return enabled;
+                    }
+                }
+            })
+        };
+        let session = rt.block_on(async {
+            loop {
+                if let BackendEvent::SessionStarted {
+                    attempt: a,
+                    session,
+                    ..
+                } = rx.recv().await.unwrap()
+                {
+                    if a == attempt {
+                        return session;
+                    }
+                }
+            }
+        });
+        backend.set_privacy_mode(session, true);
+        assert!(next_privacy(&mut rx));
+        backend.set_privacy_mode(session, false);
+        assert!(!next_privacy(&mut rx));
+        // Unknown sessions are ignored.
+        backend.set_privacy_mode(SessionId(9999), true);
+        backend.disconnect(session);
     }
 
     #[test]

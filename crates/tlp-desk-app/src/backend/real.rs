@@ -30,8 +30,9 @@ use tlp_desk_files::fs::FsConfig;
 use tlp_desk_files::{FileTransfer, FilesError, TransferConfig, TransferSnapshot, TransferState};
 use tlp_desk_host::{
     CancelReason, EndReason as HostEnd, Host, HostConfig, HostEvent, HostEvents, HostTunnels,
-    RequestId as HostRequestId, SessionId as HostSessionId, SystemPower, TunnelHostConfig,
-    UnattendedFeature, WhiteboardHost, WindowsPower, DEFAULT_PERMISSIONS, TUNNEL_FEATURE,
+    PrivacyFeature, RequestId as HostRequestId, SessionId as HostSessionId, SystemPower,
+    TunnelHostConfig, UnattendedFeature, WhiteboardHost, WindowsPower, DEFAULT_PERMISSIONS,
+    TUNNEL_FEATURE,
 };
 use tlp_desk_net::{
     default_device_name, AwaitingAcceptFn, Discovery, DiscoveryConfig, Endpoint, EndpointConfig,
@@ -39,9 +40,10 @@ use tlp_desk_net::{
 };
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 use tlp_desk_viewer::{
-    AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd, ForwardSpec,
-    KnownHostsStore, PixelFormat, ReconnectTickets, TunnelId, TunnelViewerConfig, Viewer,
-    ViewerConfig, ViewerError, ViewerEvent, ViewerEvents, ViewerSession, ViewerTunnels,
+    privacy_request, AuthMethod, ConnectTarget as ViewerTarget, EndReason as ViewerEnd,
+    ForwardSpec, KnownHostsStore, PixelFormat, PrivacyViewerFeature, ReconnectTickets, TunnelId,
+    TunnelViewerConfig, Viewer, ViewerConfig, ViewerError, ViewerEvent, ViewerEvents,
+    ViewerSession, ViewerTunnels,
 };
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
@@ -53,6 +55,7 @@ use super::files::{
     TransferStatus, TransferView,
 };
 use super::files_bridge::{EngineStarter, FilesBridge};
+use super::privacy;
 use super::{
     tunnels, whiteboard, AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId,
     DiscoveredDevice, EndReason, EventReceiver, EventSender, FrameSlot, HostProblem, LocalInfo,
@@ -454,12 +457,15 @@ impl RealBackend {
         if let Some((ep, true)) = &endpoint {
             let mut host_cfg = HostConfig {
                 device_name: device_name.clone(),
-                features: audio.host_features(super::device_info::with_host_feature(
-                    super::clipboard::register(
-                        fsb.register(cfg.host.features.clone().with(files.clone())),
-                        &clipboard,
-                    ),
-                )),
+                // Privacy mode (TLP-privacy): only viewers granted PRIVACY_MODE can use it.
+                features: audio
+                    .host_features(super::device_info::with_host_feature(
+                        super::clipboard::register(
+                            fsb.register(cfg.host.features.clone().with(files.clone())),
+                            &clipboard,
+                        ),
+                    ))
+                    .with(Arc::new(PrivacyFeature::new(privacy::text_fn()))),
                 ..cfg.host.clone()
             };
             host_cfg.features.push(host_tunnels.clone());
@@ -529,16 +535,18 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
-                features: audio.viewer_features(super::device_info::with_viewer_feature(
-                    super::clipboard::register(
-                        fsb.register(
-                            FeatureSet::new()
-                                .with(files.clone())
-                                .with(whiteboard::viewer_feature()),
+                features: audio
+                    .viewer_features(super::device_info::with_viewer_feature(
+                        super::clipboard::register(
+                            fsb.register(
+                                FeatureSet::new()
+                                    .with(files.clone())
+                                    .with(whiteboard::viewer_feature()),
+                            ),
+                            &clipboard,
                         ),
-                        &clipboard,
-                    ),
-                )),
+                    ))
+                    .with(Arc::new(PrivacyViewerFeature)),
                 ..ViewerConfig::default()
             };
             vcfg.features.push(tunnels.clone());
@@ -858,6 +866,10 @@ impl Inner {
                     }
                     tracing::debug!(session = id.0, feature = event.feature, "feature event");
                     let session = self.host_session_of(id);
+                    if let Some(ev) = session.and_then(|s| privacy::host_event(s, &event)) {
+                        self.emit(ev);
+                        continue;
+                    }
                     if let Some(ev) = session.and_then(|s| super::clipboard::map(s, &event)) {
                         self.emit(ev);
                     }
@@ -1212,6 +1224,10 @@ impl Inner {
                         feature = event.feature,
                         "feature event"
                     );
+                    if let Some(ev) = privacy::viewer_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
                     if let Some(ev) = super::clipboard::map(session, &event) {
                         self.emit(ev);
                     }
@@ -1377,6 +1393,13 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn set_privacy_mode(&self, session: SessionId, enabled: bool) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            s.send_message(privacy_request(enabled));
         }
     }
 

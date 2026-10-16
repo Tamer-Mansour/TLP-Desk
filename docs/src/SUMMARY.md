@@ -27,6 +27,7 @@
   - [Settings](user-guide/en/settings.md)
   - [The connection log](user-guide/en/connection-log.md)
   - [When the host key has changed](user-guide/en/host-key-changed.md)
+  - [Privacy mode](user-guide/en/privacy-mode.md)
   - [Security and privacy](user-guide/en/security-privacy.md)
   - [Command line](user-guide/en/command-line.md)
   - [Troubleshooting](user-guide/en/troubleshooting.md)
@@ -35,7 +36,6 @@
   - [Coming soon](user-guide/en/coming-soon/index.md)
     - [Address book](user-guide/en/coming-soon/address-book.md)
     - [Ctrl+Alt+Del and lock](user-guide/en/coming-soon/ctrl-alt-del.md)
-    - [Privacy mode](user-guide/en/coming-soon/privacy-mode.md)
     - [Wake-on-LAN](user-guide/en/coming-soon/wake-on-lan.md)
 
 # دليل المستخدم (العربية)
@@ -63,6 +63,7 @@
   - [الإعدادات](user-guide/ar/settings.md)
   - [سجل الاتصالات](user-guide/ar/connection-log.md)
   - [عند تغيّر مفتاح الجهاز المضيف](user-guide/ar/host-key-changed.md)
+  - [وضع الخصوصية](user-guide/ar/privacy-mode.md)
   - [الأمان والخصوصية](user-guide/ar/security-privacy.md)
   - [سطر الأوامر](user-guide/ar/command-line.md)
   - [حل المشكلات](user-guide/ar/troubleshooting.md)
@@ -71,7 +72,6 @@
   - [قريبًا](user-guide/ar/coming-soon/index.md)
     - [دفتر العناوين](user-guide/ar/coming-soon/address-book.md)
     - [Ctrl+Alt+Del والقفل](user-guide/ar/coming-soon/ctrl-alt-del.md)
-    - [وضع الخصوصية](user-guide/ar/coming-soon/privacy-mode.md)
     - [التشغيل عبر الشبكة (Wake-on-LAN)](user-guide/ar/coming-soon/wake-on-lan.md)
 
 # Security

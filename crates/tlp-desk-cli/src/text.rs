@@ -10,7 +10,10 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use tlp_desk_crypto::{DeviceId, Fingerprint};
-use tlp_desk_host::{CancelReason, ConnectedViewer, EndReason as HostEnd, IncomingRequest};
+use tlp_desk_host::{
+    CancelReason, ConnectedViewer, EndReason as HostEnd, IncomingRequest, PrivacyScreenText,
+    PrivacyStatus, PrivacyViewer, ScreenLine,
+};
 use tlp_desk_net::{AuthKind, DiscoveredDevice, PeerInfo};
 use tlp_desk_proto::{Permissions, RejectReason};
 use tlp_desk_viewer::{EndReason as ViewerEnd, MonitorDesc, ViewerStats};
@@ -451,6 +454,79 @@ pub fn selecting_monitor(index: u32) -> String {
         format!("Switching to monitor {index}..."),
         format!("جارٍ التبديل إلى الشاشة {index}..."),
     )
+}
+
+pub fn privacy_allowed() -> &'static str {
+    t(
+        "Privacy mode is allowed: viewers may blank this PC's screen and block its keyboard/mouse.\n\
+         To end it here: hold Ctrl+Alt+Shift+P for 3 seconds, or press Ctrl+Alt+Del.",
+        "وضع الخصوصية مسموح: يمكن للمشاهدين جعل شاشة هذا الحاسوب سوداء وحجب لوحة مفاتيحه وفأرته.\n\
+         لإنهائه من هنا: اضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ، أو اضغط Ctrl+Alt+Del.",
+    )
+}
+
+/// The host's black privacy screen. Shown to whoever sits at the host, so it is always in
+/// Arabic and English, whatever `--lang` says (same wording as the GUI's i18n table).
+pub fn privacy_screen(viewers: &[PrivacyViewer]) -> PrivacyScreenText {
+    let mut lines = vec![
+        ScreenLine::title("هذا الحاسوب قيد الاستخدام عن بُعد عبر TLP-Desk"),
+        ScreenLine::title("This PC is being used remotely with TLP-Desk"),
+    ];
+    for v in viewers {
+        lines.push(ScreenLine::body(format!(
+            "متصل: {} ({})",
+            v.name, v.device_id
+        )));
+        lines.push(ScreenLine::body(format!(
+            "Connected: {} ({})",
+            v.name, v.device_id
+        )));
+    }
+    lines.push(ScreenLine::body(
+        "لإنهاء وضع الخصوصية من هنا، اضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ أو اضغط Ctrl+Alt+Del.",
+    ));
+    lines.push(ScreenLine::body(
+        "To end privacy mode here, hold Ctrl+Alt+Shift+P for 3 seconds or press Ctrl+Alt+Del.",
+    ));
+    PrivacyScreenText { lines }
+}
+
+/// Host side: privacy mode changed for a viewer.
+pub fn host_privacy(peer: &str, status: &PrivacyStatus) -> String {
+    let cause = format!("{:?}", status.cause);
+    if status.active {
+        t(
+            format!("PRIVACY MODE ON ({cause}; viewer {peer})"),
+            format!("وضع الخصوصية مفعّل ({cause}؛ المشاهد {peer})"),
+        )
+    } else {
+        t(
+            format!("PRIVACY MODE OFF ({cause}; viewer {peer})"),
+            format!("وضع الخصوصية متوقف ({cause}؛ المشاهد {peer})"),
+        )
+    }
+}
+
+pub fn requesting_privacy() -> &'static str {
+    t(
+        "Asking the host to turn privacy mode on...",
+        "جارٍ طلب تشغيل وضع الخصوصية من المضيف...",
+    )
+}
+
+/// Viewer side: the host's actual privacy-mode state.
+pub fn viewer_privacy(enabled: bool) -> &'static str {
+    if enabled {
+        t(
+            "Privacy mode is ON: the host screen is black and its keyboard/mouse are blocked.",
+            "وضع الخصوصية مفعّل: شاشة المضيف سوداء ولوحة مفاتيحه وفأرته محجوبة.",
+        )
+    } else {
+        t(
+            "Privacy mode is OFF (turned off, refused, or ended on the host).",
+            "وضع الخصوصية متوقف (أُوقف، أو رُفض، أو أُنهي على المضيف).",
+        )
+    }
 }
 
 pub fn wol_sent(mac: &str, to: &str) -> String {
@@ -1100,5 +1176,33 @@ mod tests {
             assert_eq!(other, "Stopping.");
             assert_eq!(stopping(), "جارٍ الإيقاف.");
         });
+    }
+
+    #[test]
+    fn privacy_screen_is_bilingual_and_names_viewers() {
+        // The same in both CLI languages: it is read by the person at the host.
+        for lang in [Lang::En, Lang::Ar] {
+            let t = with_lang(lang, || {
+                privacy_screen(&[PrivacyViewer {
+                    name: "مكتب-Office".into(),
+                    device_id: "123 456 789".into(),
+                }])
+            });
+            assert!(t.lines[0].large && t.lines[0].is_rtl());
+            assert!(t.lines[1].large && !t.lines[1].is_rtl());
+            assert!(t
+                .lines
+                .iter()
+                .any(|l| l.text == "متصل: مكتب-Office (123 456 789)"));
+            assert!(t
+                .lines
+                .iter()
+                .any(|l| l.text == "Connected: مكتب-Office (123 456 789)"));
+            assert_eq!(t.sanitized(), t, "fits the privacy screen limits");
+        }
+        assert_ne!(
+            with_lang(Lang::En, || viewer_privacy(true)),
+            with_lang(Lang::Ar, || viewer_privacy(true))
+        );
     }
 }

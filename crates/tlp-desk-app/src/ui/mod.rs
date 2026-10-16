@@ -12,6 +12,7 @@ pub mod icons;
 pub(crate) mod key_forward;
 pub mod perf;
 pub mod playback;
+pub mod privacy;
 pub mod recordings;
 pub mod service;
 pub mod session;

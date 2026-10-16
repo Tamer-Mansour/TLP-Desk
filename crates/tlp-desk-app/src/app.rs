@@ -113,6 +113,8 @@ pub struct App {
     hwnd: Option<isize>,
     pub incoming: VecDeque<(RequestId, PeerInfo)>,
     pub host_sessions: Vec<(SessionId, PeerInfo)>,
+    /// A viewer has blanked this device's screen (privacy mode).
+    pub host_privacy: bool,
     /// Port forwarding state per incoming session (TLP-tunnel).
     pub host_tunnels: HashMap<SessionId, HostTunnelState>,
     /// Host side: chat with each connected viewer (window opens when the viewer writes).
@@ -189,6 +191,7 @@ impl App {
             hwnd: keygrab::window_handle(cc),
             incoming: VecDeque::new(),
             host_sessions: Vec::new(),
+            host_privacy: false,
             host_tunnels: HashMap::new(),
             host_chats: HashMap::new(),
             host_input_blocked: None,
@@ -413,6 +416,9 @@ impl App {
                 } => {
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
                         s.permissions = permissions;
+                        if !permissions.contains(tlp_desk_proto::Permissions::PRIVACY_MODE) {
+                            s.privacy.permission_lost();
+                        }
                     }
                 }
                 BackendEvent::Stats { session, stats } => {
@@ -439,6 +445,10 @@ impl App {
                 }
                 BackendEvent::SessionEnded { session, reason } => {
                     self.host_sessions.retain(|(id, _)| *id != session);
+                    if self.host_sessions.is_empty() {
+                        // Privacy mode never outlives the last session.
+                        self.host_privacy = false;
+                    }
                     self.host_tunnels.remove(&session);
                     self.host_chats.remove(&session);
                     if self.session.as_ref().is_some_and(|s| s.id == session) {
@@ -487,6 +497,13 @@ impl App {
                     }
                 }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- privacy mode (TLP-privacy) ---
+                BackendEvent::PrivacyChanged { session, enabled } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.privacy.on_state(enabled, std::time::Instant::now());
+                    }
+                }
+                BackendEvent::HostPrivacyChanged { active, .. } => self.host_privacy = active,
                 // --- service (TLP-service) ---
                 BackendEvent::RemoteDesktopState { session, state } => {
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
@@ -702,6 +719,13 @@ impl App {
                         let text = tx.f(S::HostBanner, &[("name", &peer.name)]);
                         icons::icon(ui, tx, Icon::ViewOnly, 18.0, egui::Color32::WHITE);
                         ui.label(RichText::new(text).color(egui::Color32::WHITE).strong());
+                        if self.host_privacy {
+                            ui.separator();
+                            icons::icon(ui, tx, Icon::Privacy, 18.0, egui::Color32::WHITE);
+                            ui.label(
+                                RichText::new(tx.t(S::PrivacyHostOn)).color(egui::Color32::WHITE),
+                            );
+                        }
                         self.host_clipboard.indicator(ui, tx, *session);
                         theme::row_end(ui, tx.rtl(), |ui| {
                             let end_button =

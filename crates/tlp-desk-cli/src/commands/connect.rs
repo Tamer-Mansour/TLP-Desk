@@ -1,6 +1,7 @@
 //! `connect`: connect to a host as a viewer and report fps / bitrate / RTT every second.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -8,7 +9,10 @@ use clap::Args;
 use serde_json::{json, Value};
 use tlp_desk_net::FeatureSet;
 use tlp_desk_proto::InputEvent;
-use tlp_desk_viewer::{DecodedFrame, MonitorDesc, ViewerEvent, ViewerStats};
+use tlp_desk_viewer::{
+    privacy_request, DecodedFrame, MonitorDesc, PrivacyState, PrivacyViewerFeature, ViewerEvent,
+    ViewerStats,
+};
 
 use super::common::{dial, peer_json, Ctx, DialArgs};
 use crate::text;
@@ -31,6 +35,10 @@ pub struct ConnectArgs {
     /// whole session (needs mouse permission).
     #[arg(long)]
     pub move_pointer: bool,
+    /// Turn on privacy mode on the host for the session (needs the host's permission, e.g.
+    /// `serve --allow-privacy`).
+    #[arg(long)]
+    pub privacy: bool,
     /// Testing: after a short delay type this text into the host's focused window (US key
     /// positions; a backslash-n escape is not interpreted, pass a real newline for Enter;
     /// needs keyboard permission).
@@ -44,7 +52,9 @@ pub struct ConnectArgs {
 /// Runs `connect`.
 pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
     let out = ctx.out;
-    let mut dialed = dial(ctx, &args.dial, FeatureSet::new()).await?;
+    // FEATURE HOOK: viewer-side session features of `connect`.
+    let features = FeatureSet::new().with(Arc::new(PrivacyViewerFeature));
+    let mut dialed = dial(ctx, &args.dial, features).await?;
     let session = &dialed.session;
     let events = &mut dialed.events;
     out.event(
@@ -56,6 +66,10 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
         }),
     );
 
+    if args.privacy {
+        out.progress(text::requesting_privacy());
+        session.send_message(privacy_request(true));
+    }
     let start = Instant::now();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(args.seconds);
     let mut last: Option<DecodedFrame> = None;
@@ -123,7 +137,14 @@ pub async fn run(ctx: &Ctx, args: &ConnectArgs) -> Result<()> {
                     &json!({ "type": "permissions", "permissions": text::permission_names(p) }),
                 ),
                 // FEATURE HOOK: CLI commands print their feature events here.
-                Some(ViewerEvent::Feature(_)) => {}
+                Some(ViewerEvent::Feature(event)) => {
+                    if let Some(state) = event.payload::<PrivacyState>() {
+                        out.event(
+                            text::viewer_privacy(state.enabled),
+                            &json!({ "type": "privacy", "enabled": state.enabled }),
+                        );
+                    }
+                }
                 Some(ViewerEvent::Ended(r)) => {
                     ended = Some(r);
                     break;

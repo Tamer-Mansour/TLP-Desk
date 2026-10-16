@@ -29,6 +29,9 @@
 //!   [`HostConfig::features`]. Each session starts a `FeatureDispatch`; control messages the
 //!   core does not handle go to the feature that claims them, after the permission check
 //!   `Message::required_permissions`. Features report to the UI with [`HostEvent::Feature`].
+//! * **Privacy mode**: register a [`PrivacyFeature`] to let viewers with `PRIVACY_MODE` blank
+//!   this PC's screens and block its local input (auto-off on session end, revoke, emergency
+//!   exit).
 //! * **Monitors**: the viewer gets `Message::MonitorList` (after accept, on hot-plug and on
 //!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`,
 //!   or stream the whole virtual desktop as one picture with `Message::SelectAllMonitors`
@@ -55,6 +58,7 @@ mod input;
 mod live;
 mod pipeline;
 mod priority;
+mod privacy;
 pub mod service;
 mod tunnel;
 mod unattended;
@@ -91,6 +95,11 @@ pub use device_info::{
     SystemInfoSource, DEVICE_INFO_FEATURE,
 };
 pub use live::LiveOptions;
+pub use privacy::{
+    PrivacyCause, PrivacyFeature, PrivacyStatus, PrivacyTextFn, PrivacyViewer, ShieldFactory,
+    FEATURE_NAME as PRIVACY_FEATURE,
+};
+pub use tlp_desk_input::{PrivacyScreenText, ScreenLine};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 pub use unattended::{SystemPower, UnattendedEvent, UnattendedFeature, WindowsPower};
 

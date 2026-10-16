@@ -27,6 +27,7 @@ pub mod fake;
 pub mod files;
 pub mod files_bridge;
 pub mod files_fake;
+pub mod privacy;
 pub mod real;
 pub mod service;
 pub mod unattended;
@@ -432,7 +433,12 @@ pub enum BackendEvent {
     ServiceHosting(bool),
 
     // --- privacy mode (TLP-privacy) ---
-
+    /// Viewer side: the host's actual privacy-mode state (answer to
+    /// [`Backend::set_privacy_mode`], or a change on the host: emergency exit, revoked
+    /// permission, lock screen).
+    PrivacyChanged { session: SessionId, enabled: bool },
+    /// Host side: this device's screen is (no longer) blanked for a viewer.
+    HostPrivacyChanged { session: SessionId, active: bool },
     // --- settings / ux: address book, tray, banner (TLP-ux) ---
 
     // --- perf: quality presets, latency overlay, all monitors (TLP-perf) ---
@@ -674,6 +680,15 @@ pub trait Backend: Send + Sync {
     // --- service (TLP-service) ---
 
     // --- privacy mode (TLP-privacy) ---
+    /// Viewer side: ask the host to blank its screen and block its local input (or undo it).
+    /// Needs `PRIVACY_MODE`; the actual state arrives as [`BackendEvent::PrivacyChanged`].
+    fn set_privacy_mode(&self, session: SessionId, enabled: bool) {
+        tracing::debug!(
+            session = session.0,
+            enabled,
+            "privacy mode not supported by this backend"
+        );
+    }
 
     // --- settings / ux (TLP-ux) ---
     /// Apply host settings now (TLP-settings-tray): the allow-list (empty while incoming

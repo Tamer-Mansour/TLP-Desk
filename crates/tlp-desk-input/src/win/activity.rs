@@ -21,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PM_NOREMOVE, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_QUIT, WM_USER,
 };
 
-use crate::activity::{ActivityStamp, LocalActivity};
+use crate::activity::{counts_as_local, ActivityStamp, LocalActivity};
 use crate::InputError;
 
 thread_local! {
@@ -36,6 +36,8 @@ thread_local! {
 /// The hooks never block or swallow anything: they store one atomic timestamp and pass the
 /// event on with `CallNextHookEx`. Events carrying `LLMHF_INJECTED` / `LLKHF_INJECTED` (or the
 /// lower-integrity variants) — i.e. `SendInput` from this or any other program — are ignored.
+/// While privacy mode blocks the local keyboard and mouse ([`crate::local_input_blocked`]),
+/// physical events are ignored too: local priority is suspended during privacy mode.
 ///
 /// Dropping the monitor removes both hooks and joins the thread.
 pub struct LocalActivityMonitor {
@@ -156,14 +158,17 @@ fn hook_thread(stamp: Arc<ActivityStamp>, ready: SyncSender<Result<u32, String>>
     STAMP.with(|s| s.borrow_mut().take());
 }
 
+/// Stamps one hook event. Injected events, and physical ones that privacy mode swallows,
+/// do not count (see [`counts_as_local`]).
 fn record(keyboard: bool, injected: bool) {
     let now = Instant::now();
+    let ignored = !counts_as_local(injected);
     STAMP.with(|s| {
         if let Some(s) = s.borrow().as_ref() {
             if keyboard {
-                s.record_keyboard(injected, now);
+                s.record_keyboard(ignored, now);
             } else {
-                s.record_pointer(injected, now);
+                s.record_pointer(ignored, now);
             }
         }
     });

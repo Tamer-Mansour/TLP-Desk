@@ -105,6 +105,14 @@ impl ActivityStamp {
     }
 }
 
+/// Whether a hook event counts as the host user's own activity: physical (not injected), and
+/// not swallowed by privacy mode. While privacy mode blocks the local keyboard and mouse,
+/// local input priority is suspended: the blocked events reach nobody, so they must not take
+/// control away from the viewer either.
+pub(crate) fn counts_as_local(injected: bool) -> bool {
+    !injected && !crate::privacy::local_input_blocked()
+}
+
 impl LocalActivity for ActivityStamp {
     fn last_physical_input(&self) -> Option<Instant> {
         self.last()
@@ -135,6 +143,26 @@ mod tests {
         // A later injected event does not move the stamp.
         s.record(true, t + Duration::from_secs(1));
         assert_eq!(s.last_physical_input(), Some(t));
+    }
+
+    #[test]
+    fn privacy_blocking_suspends_local_priority() {
+        let _serial = crate::privacy::TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(counts_as_local(false));
+        assert!(!counts_as_local(true));
+        let guard = crate::privacy::BlockingGuard::new();
+        assert!(
+            !counts_as_local(false),
+            "swallowed input must not take over"
+        );
+        assert!(!counts_as_local(true));
+        drop(guard);
+        assert!(
+            counts_as_local(false),
+            "priority resumes when privacy mode ends"
+        );
     }
 
     #[test]

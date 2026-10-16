@@ -16,6 +16,7 @@
 //!   are refused before any packet is sent.
 //! * **Features.** Register feature modules in [`ViewerConfig::features`]; each session starts
 //!   them and routes the host's feature messages to them ([`ViewerEvent::Feature`] for the UI).
+//!   Privacy mode: [`PrivacyViewerFeature`] + [`privacy_request`].
 //! * **Restart and reconnect.** [`ReconnectTickets`] keeps the ticket a host sends before it
 //!   restarts; [`Viewer::reconnect_with_ticket`] gets back in once the host is up again.
 //! * **Performance.** Each session sends `ViewerFeedback` ~4x/s for the host's adaptive
@@ -32,6 +33,7 @@
 mod device_info;
 mod frame;
 mod perf;
+mod privacy;
 mod reconnect;
 pub mod recording;
 mod session;
@@ -53,6 +55,7 @@ pub use device_info::{
 };
 pub use frame::{DecodedFrame, FrameSlot, PixelFormat};
 pub use perf::LatencyClock;
+pub use privacy::{privacy_request, PrivacyState, PrivacyViewerFeature, PRIVACY_FEATURE};
 pub use reconnect::{
     AttemptFn, HeldTicket, ReconnectPolicy, ReconnectTickets, TicketReceived, RECONNECT_FEATURE,
 };

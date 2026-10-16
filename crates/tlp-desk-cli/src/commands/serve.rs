@@ -11,8 +11,8 @@ use tlp_desk_files::clipfiles::{ClipFilesConfig, ClipFilesFeature};
 use tlp_desk_files::fs::{FsConfig, FsFeature};
 use tlp_desk_files::{FileTransfer, TransferConfig, TransferEvent};
 use tlp_desk_host::{
-    DeviceInfoFeature, Host, HostConfig, HostEvent, HostTunnelEvent, HostTunnels, RequestId,
-    TunnelHostConfig, DEFAULT_PERMISSIONS, DEVICE_INFO_FEATURE,
+    DeviceInfoFeature, Host, HostConfig, HostEvent, HostTunnelEvent, HostTunnels, PrivacyFeature,
+    PrivacyStatus, RequestId, TunnelHostConfig, DEFAULT_PERMISSIONS, DEVICE_INFO_FEATURE,
 };
 use tlp_desk_net::{ChatEvent, ChatFeature, Endpoint, EndpointConfig, FeatureEvent, FeatureSet};
 use tlp_desk_proto::Permissions;
@@ -56,6 +56,10 @@ pub struct ServeArgs {
     /// Do not show the green marker at the pointer while a viewer moves it.
     #[arg(long)]
     pub no_pointer_marker: bool,
+    /// Let viewers turn on privacy mode (black screen + blocked local keyboard/mouse here).
+    /// Hold Ctrl+Alt+Shift+P for 3 s, or press Ctrl+Alt+Del, to end it locally.
+    #[arg(long)]
+    pub allow_privacy: bool,
     /// Let viewers forward TCP ports to services on this PC and its LAN (TUNNEL permission;
     /// off by default).
     #[arg(long)]
@@ -72,16 +76,21 @@ pub struct ServeArgs {
 impl ServeArgs {
     /// The host configuration these flags select.
     pub fn host_config(&self) -> HostConfig {
+        let base = if self.view_only {
+            Permissions::VIEW
+        } else {
+            DEFAULT_PERMISSIONS.union(Permissions::CHAT)
+        };
         HostConfig {
             local_input_grace: Duration::from_millis(self.local_grace_ms),
             remote_pointer_marker: !self.no_pointer_marker,
             monitor: self.monitor,
             fps: self.fps,
             allow_one_time_code: self.code,
-            default_permissions: if self.view_only {
-                Permissions::VIEW
+            default_permissions: if self.allow_privacy {
+                base | Permissions::PRIVACY_MODE
             } else {
-                DEFAULT_PERMISSIONS.union(Permissions::CHAT)
+                base
             }
             .union(if self.clipboard {
                 Permissions::CLIPBOARD
@@ -124,7 +133,9 @@ fn host_features(args: &ServeArgs) -> FeatureSet {
         // Port forwarding; served only to sessions holding TUNNEL.
         .with(HostTunnels::new(TunnelHostConfig::default()))
         // Remote device info panel / `info` command; served only to sessions holding VIEW.
-        .with(Arc::new(DeviceInfoFeature::system()));
+        .with(Arc::new(DeviceInfoFeature::system()))
+        // Privacy mode; works only for viewers granted PRIVACY_MODE (`--allow-privacy`).
+        .with(Arc::new(PrivacyFeature::new(Arc::new(text::privacy_screen))));
     if args.clipboard {
         // Text, HTML and images; served only to sessions holding CLIPBOARD.
         set.push(tlp_desk_files::ClipboardFeature::new(
@@ -262,6 +273,9 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
     if auto_accept {
         eprintln!("{}", text::auto_accept());
     }
+    if args.allow_privacy {
+        out.progress(text::privacy_allowed());
+    }
     if args.allow_tunnels {
         eprintln!("{}", text::tunnels_allowed());
     }
@@ -338,7 +352,22 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
                         &json!({ "type": "device_info_served", "session": id.0 }),
                     ),
                     HostEvent::Feature { id, event } => {
-                        if let Some(t) = event.payload::<HostTunnelEvent>() {
+                        if let Some(status) = event.payload::<PrivacyStatus>() {
+                            let peer = host
+                                .sessions()
+                                .into_iter()
+                                .find(|v| v.id == id)
+                                .map_or_else(|| id.0.to_string(), |v| id_str(v.peer.device_id));
+                            out.event(
+                                text::host_privacy(&peer, status),
+                                &json!({
+                                    "type": "privacy",
+                                    "session": id.0,
+                                    "active": status.active,
+                                    "cause": format!("{:?}", status.cause),
+                                }),
+                            );
+                        } else if let Some(t) = event.payload::<HostTunnelEvent>() {
                             tunnel_event(out, id, t, &mut tunnel_shape);
                         } else if let Some((line, value)) = super::clip_send::event_line(&event) {
                             out.event(line, &value);
