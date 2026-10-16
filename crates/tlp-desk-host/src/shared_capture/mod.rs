@@ -8,9 +8,10 @@
 //!
 //! * the hub thread owns the real capturer: it waits for frames, polls the cursor and keeps
 //!   only the newest frame (newest wins, like the pipeline's own mailbox);
-//! * every handle hands out the newest frame it has not seen yet. With one subscriber the
-//!   frame is moved out (no copy); with several each gets its own copy (the encoder draws the
-//!   cursor into it), which is far cheaper than a second GPU capture + readback;
+//! * every handle hands out a copy of the newest frame it has not seen yet (the encoder draws
+//!   the cursor into it). The hub keeps the newest frame, so a session that joins a still
+//!   screen gets a picture at once. A copy is far cheaper than a second GPU capture and
+//!   readback; with several sessions the hub also drops still frames once for all of them;
 //! * cursor shapes are tracked per handle, so each session still receives a changed shape
 //!   exactly once (the [`ScreenCapturer::cursor`] contract);
 //! * a lost surface (desktop switch, mode change) or a capturer that keeps failing ends the
@@ -101,9 +102,6 @@ struct HubState {
     /// Newest frame and its generation (0 = none yet).
     frame: Option<Arc<BgraFrame>>,
     frame_gen: u64,
-    /// Subscribers that have not taken the newest frame yet; the last one takes it without
-    /// a copy.
-    takers_left: usize,
     /// Latest cursor position/visibility.
     cursor: Option<(i32, i32, bool)>,
     /// Latest cursor shape and its generation (0 = none yet).
@@ -113,9 +111,6 @@ struct HubState {
     ended: Option<Ended>,
     /// Buffers handed back by the pipelines, for the real capturer to reuse.
     spare: Vec<BgraFrame>,
-    /// A session joined while no frame was held (the only subscriber had taken it): the
-    /// capturer is reopened so the newcomer gets a first picture of a still screen.
-    reopen: bool,
 }
 
 struct Hub {
@@ -166,7 +161,7 @@ impl Hub {
                     return;
                 }
                 tracing::info!(monitor = index, "shared capturer started");
-                hub.run(&mut cap, || factory(index, options));
+                hub.run(cap.as_mut());
                 tracing::info!(monitor = index, "shared capturer stopped");
             })
             .map_err(|e| CaptureError::Platform(format!("cannot spawn capture thread: {e}")))?;
@@ -174,37 +169,27 @@ impl Hub {
             .unwrap_or_else(|_| Err(CaptureError::Platform("capture thread ended".into())))
     }
 
-    fn run(
-        &self,
-        cap: &mut Box<dyn ScreenCapturer>,
-        reopen: impl Fn() -> Result<Box<dyn ScreenCapturer>, CaptureError>,
-    ) {
+    fn run(&self, cap: &mut dyn ScreenCapturer) {
         let mut errors = 0u32;
-        // Still frames are dropped once here instead of once per session.
+        // With several sessions, still frames are dropped once here instead of once per
+        // session (and are not copied for each). A single session does its own check.
         let mut dirty = DirtyTracker::default();
         loop {
-            let (spare, wants_reopen) = {
+            let (spare, shared) = {
                 let mut s = lock(&self.state);
                 if s.subscribers == 0 {
                     return;
                 }
-                (std::mem::take(&mut s.spare), std::mem::take(&mut s.reopen))
+                (std::mem::take(&mut s.spare), s.subscribers > 1)
             };
-            if wants_reopen {
-                match reopen() {
-                    Ok(c) => {
-                        tracing::debug!("shared capturer reopened for a joining session");
-                        *cap = c;
-                        dirty.reset();
-                    }
-                    Err(e) => tracing::warn!(%e, "cannot reopen the shared capturer"),
-                }
+            if !shared {
+                dirty.reset();
             }
             for f in spare {
                 cap.recycle(f);
             }
             match cap.next_frame(HUB_WAIT) {
-                Ok(Some(frame)) if !dirty.update(&frame).is_changed() => {
+                Ok(Some(frame)) if shared && !dirty.update(&frame).is_changed() => {
                     errors = 0;
                     cap.recycle(frame);
                 }
@@ -213,7 +198,6 @@ impl Hub {
                     let old = {
                         let mut s = lock(&self.state);
                         s.frame_gen = s.frame_gen.wrapping_add(1);
-                        s.takers_left = s.subscribers;
                         s.frame.replace(Arc::new(frame))
                     };
                     self.cv.notify_all();
@@ -277,11 +261,7 @@ impl SharedCapturer {
     /// A further session joining a running hub.
     fn subscribe(hub: Arc<Hub>) -> Self {
         {
-            let mut s = lock(&hub.state);
-            s.subscribers += 1;
-            if s.frame.is_none() && s.frame_gen != 0 {
-                s.reopen = true;
-            }
+            lock(&hub.state).subscribers += 1;
         }
         Self::first(hub)
     }
@@ -309,10 +289,6 @@ impl ScreenCapturer for SharedCapturer {
             if s.frame_gen != self.seen_frame {
                 if let Some(frame) = s.frame.clone() {
                     self.seen_frame = s.frame_gen;
-                    s.takers_left = s.takers_left.saturating_sub(1);
-                    if s.takers_left == 0 {
-                        s.frame = None;
-                    }
                     let spare = s.spare.pop();
                     drop(s);
                     return Ok(Some(take_or_copy(frame, spare)));
@@ -569,18 +545,14 @@ mod tests {
     fn a_session_joining_a_still_screen_gets_a_first_picture() {
         let r = rig_with(None, true);
         let mut a = (r.factory)(0, CaptureOptions::default()).unwrap();
-        // The only subscriber took the newest frame (no copy kept).
         next(&mut a);
+        // The hub keeps the newest picture: a newcomer gets it at once, no second capturer.
         let mut b = (r.factory)(0, CaptureOptions::default()).unwrap();
         next(&mut b);
-        assert_eq!(
-            r.opened.load(Ordering::SeqCst),
-            2,
-            "reopened for the newcomer"
-        );
-        // The reopened picture reaches the first session too, then the still screen sends
-        // nothing more.
-        next(&mut a);
+        assert_eq!(r.opened.load(Ordering::SeqCst), 1);
+        // With two sessions, still frames are dropped in the hub.
+        std::thread::sleep(Duration::from_millis(30));
+        while a.next_frame(Duration::ZERO).unwrap().is_some() {}
         assert!(a.next_frame(Duration::from_millis(50)).unwrap().is_none());
     }
 
