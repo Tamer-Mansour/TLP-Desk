@@ -89,6 +89,10 @@ free route once GitHub Actions runs again. In every case, offer **winget** in th
    # $env:TLP_SIGN_CERT_STORE = 'machine'   # if it is in LocalMachine\My
    ```
 
+   `signtool sign /f` imports the PFX's private key into a new key file in your profile
+   (`%APPDATA%\Microsoft\Crypto\Keys`) on every call and never deletes it; `sign.ps1` removes the
+   copies its own run created. Do not sign with a PFX from two builds at the same time.
+
    Optional for every method: `TLP_SIGN_TIMESTAMP_URL` (default DigiCert, then Sectigo; Microsoft's
    server for Artifact Signing) and `TLP_SIGN_REQUIRED=1` (fail instead of building unsigned).
 3. Build as usual: `installer\build-setup.ps1` and `installer\portable.ps1`. The log shows

@@ -226,6 +226,27 @@ function Get-SignerArgs([string]$Mode, [string]$TempDir) {
     throw "unknown signing mode $Mode"
 }
 
+# `signtool sign /f <pfx>` imports the PFX's private key into a persisted CNG key file in the
+# user profile on every call and leaves it there. List the key files signtool created so that
+# Remove-SigntoolKeyCopies can delete the ones this run added (and nothing else).
+function Get-SigntoolKeyFiles {
+    $dir = Join-Path $env:APPDATA 'Microsoft\Crypto\Keys'
+    if (-not (Test-Path -LiteralPath $dir)) { return @() }
+    return @(Get-ChildItem -LiteralPath $dir -File -Force -ErrorAction SilentlyContinue |
+            Where-Object {
+                try {
+                    # The key file records its creator process as UTF-16 text.
+                    [Text.Encoding]::Unicode.GetString([IO.File]::ReadAllBytes($_.FullName)) -match '\\signtool\.exe'
+                } catch { $false }
+            } | ForEach-Object { $_.FullName })
+}
+
+function Remove-SigntoolKeyCopies([string[]]$Before) {
+    $new = @(Get-SigntoolKeyFiles | Where-Object { $Before -notcontains $_ })
+    foreach ($f in $new) { Remove-Item -Force -LiteralPath $f -ErrorAction SilentlyContinue }
+    if ($new.Count -gt 0) { Write-Host "    removed $($new.Count) temporary private-key copy(ies) left by signtool /f" }
+}
+
 # Fallback when the client tools are not installed: the ArtifactSigning PowerShell module
 # (Install-Module ArtifactSigning), or its predecessor TrustedSigning.
 function Invoke-AtsModule([string[]]$Files, [string[]]$TimestampUrls) {
@@ -286,6 +307,8 @@ if ($timestamps -contains 'none') {
 $signTool = Find-SignTool
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("tlp-sign-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $temp | Out-Null
+$keysBefore = @()
+if ($mode -eq 'pfx') { $keysBefore = @(Get-SigntoolKeyFiles) }
 try {
     $signer = Get-SignerArgs $mode $temp
     if ($null -eq $signer) {
@@ -320,4 +343,5 @@ try {
     foreach ($file in $files) { Test-Signature $signTool $file }
 } finally {
     Remove-Item -Recurse -Force -LiteralPath $temp -ErrorAction SilentlyContinue
+    if ($mode -eq 'pfx') { Remove-SigntoolKeyCopies $keysBefore }
 }
