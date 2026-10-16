@@ -8,6 +8,10 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-10-16
+
+In-app updates: a LAN notice when a peer runs a newer version, an opt-in GitHub update check with signed-manifest verification (minisign), and the Download & install flow.
+
 ### Added
 
 - **In-app updates.** Settings → Updates has **Check for updates now**, **Check daily** (off by
