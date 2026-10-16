@@ -55,6 +55,13 @@ RestartApplications=no
 ; Language: preselected from the Windows UI language; the dialog lets the user change it.
 LanguageDetectionMethod=uilanguage
 ShowLanguageDialog=yes
+#ifdef SignSetup
+; Code signing: build-setup.ps1 defines SignSetup and the "tlpsign" Sign Tool (ISCC /Stlpsign=...,
+; which runs installer\sign.ps1) only when a certificate is configured, so unsigned builds work.
+; Signs this setup.exe and the uninstaller embedded in it (see docs\src\dev\code-signing.md).
+SignTool=tlpsign $f
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"

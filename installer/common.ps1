@@ -4,8 +4,20 @@
 $ErrorActionPreference = 'Stop'
 $script:Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $script:Dist = Join-Path $script:Root 'dist'
+$script:SignScript = Join-Path $PSScriptRoot 'sign.ps1'
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $script:Utf8Bom = New-Object System.Text.UTF8Encoding $true
+
+# 'ats', 'pfx', 'thumbprint' or 'none': which certificate installer\sign.ps1 would use.
+function Get-SigningMode {
+    return (& $script:SignScript -Probe)
+}
+
+# Signs $Files in place with installer\sign.ps1; with no certificate configured it only prints
+# the bilingual "unsigned" warning (or fails when TLP_SIGN_REQUIRED=1).
+function Invoke-CodeSign([string[]]$Files) {
+    & $script:SignScript @Files
+}
 
 function Add-ToolPaths {
     # NASM gives openh264 its assembly fast paths; cargo may not be on PATH in a fresh shell.
@@ -32,7 +44,8 @@ function Get-WorkspaceVersion {
     return $Matches[1]
 }
 
-# Copies TLP-Desk.exe, TLP-Desk-cli.exe, README.txt (from $ReadmeSource) and licenses\ into $Stage.
+# Copies TLP-Desk.exe, TLP-Desk-cli.exe (signed when a certificate is configured), README.txt
+# (from $ReadmeSource) and licenses\ into $Stage.
 function New-PayloadStage([string]$Stage, [string]$ReadmeSource) {
     # egui's built-in fonts are embedded in the exe: ship their licenses too.
     $lock = Get-Content (Join-Path $script:Root 'Cargo.lock') -Raw
@@ -50,6 +63,8 @@ function New-PayloadStage([string]$Stage, [string]$ReadmeSource) {
     $target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $script:Root 'target' }
     Copy-Item (Join-Path $target 'release\TLP-Desk.exe') $Stage
     Copy-Item (Join-Path $target 'release\TLP-Desk-cli.exe') $Stage
+    # Sign the staged copies (setup and portable zip alike); target\ keeps cargo's own output.
+    Invoke-CodeSign @((Join-Path $Stage 'TLP-Desk.exe'), (Join-Path $Stage 'TLP-Desk-cli.exe'))
     # README as UTF-8 with BOM so every Notepad version shows the Arabic text.
     $readme = Get-Content $ReadmeSource -Raw -Encoding UTF8
     [System.IO.File]::WriteAllText((Join-Path $Stage 'README.txt'), $readme, $script:Utf8Bom)
