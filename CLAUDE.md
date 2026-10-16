@@ -53,6 +53,7 @@ crates/
   tlp-desk-viewer    # viewer session logic, frame pipeline, input capture
   tlp-desk-app       # the single GUI binary (egui/eframe + wgpu), tray icon, settings
   tlp-desk-cli       # headless CLI (list devices, connect, send file) for scripts/agents
+  tlp-desk-android   # Android viewer (cdylib, NativeActivity + egui touch UI); viewer only, no host
   tlp-desk-testkit   # dev-only (publish = false): fakes + host/viewer pair harness for tests
 installer/           # Inno Setup setup.exe + portable zip build scripts
 docs/                # protocol.md, security.md, user-guide (Arabic + English)
