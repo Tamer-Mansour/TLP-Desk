@@ -395,12 +395,14 @@ impl ViewerSession {
                 backend.send_files(self.id, dropped);
             }
         }
-        for action in self.transfers.ui(ui, tx, allowed) {
+        let peer = (self.peer.name.clone(), self.peer.device_id.0);
+        for action in self
+            .transfers
+            .ui(ui, tx, allowed, backend, (&peer.0, peer.1))
+        {
             match action {
                 transfers::Action::Send(paths) => backend.send_files(self.id, paths),
-                transfers::Action::Cancel(id) => backend.cancel_transfer(self.id, id),
-                transfers::Action::Retry(id) => backend.retry_transfer(self.id, id),
-                transfers::Action::OpenFolder(dir) => transfers::open_folder(&dir),
+                transfers::Action::Queue(a) => apply_queue_action(backend, self.id, a),
             }
         }
     }
@@ -1625,5 +1627,30 @@ mod tests {
         assert_eq!(input_map::normalize_pointer(pos2(500.0, 100.0), r), None);
         let (x, y) = input_map::normalize_pointer(r.center(), r).unwrap();
         assert!(x.abs_diff(32768) <= 1 && y.abs_diff(32768) <= 1, "{x},{y}");
+    }
+}
+
+/// Applies a request from a transfer queue (viewer panel or host window) to the backend.
+pub fn apply_queue_action(
+    backend: &dyn Backend,
+    session: crate::backend::SessionId,
+    action: super::transfer_queue::QueueAction,
+) {
+    use super::transfer_queue::{self as q, QueueAction as A};
+    match action {
+        A::Cancel(id) => backend.cancel_transfer(session, id),
+        A::Pause(id) => backend.pause_transfer(session, id),
+        A::Resume(id) => backend.retry_transfer(session, id),
+        A::OpenFolder(dir) => transfers::open_folder(&dir),
+        A::OpenFile(file) => q::open_file(&file),
+        A::ShowInFolder(file) => q::show_in_folder(&file),
+        A::ClearHistory => backend.clear_transfer_history(),
+        A::Repeat(r) => {
+            if r.sent {
+                backend.send_files(session, r.local_paths.iter().map(Into::into).collect());
+            } else if let Some(dest) = r.local_dest {
+                backend.download_files(session, r.remote_paths, dest.into());
+            }
+        }
     }
 }
