@@ -8,7 +8,6 @@
 
 | الميزة | المرحلة |
 |---|---|
-| [الصوت من الحاسوب البعيد](audio.md) | M2 |
 | [دفتر العناوين](address-book.md) | M2 |
 | [الوصول غير المراقَب](unattended-access.md) | M3 |
 | [Ctrl+Alt+Del والقفل](ctrl-alt-del.md) | M3 |

@@ -96,6 +96,13 @@ impl App {
                             &mut self.settings,
                             self.backend.as_ref(),
                         );
+                        ui.add_space(12.0);
+                        crate::ui::audio::settings_card(
+                            ui,
+                            tx,
+                            &mut self.settings,
+                            self.backend.as_ref(),
+                        );
                     });
                 });
             });

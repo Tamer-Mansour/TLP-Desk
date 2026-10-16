@@ -52,6 +52,10 @@ pub struct Settings {
     /// New sessions start with clipboard sync off (default: on, so stored as an opt-out).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub clipboard_sync_off: bool,
+    /// New viewer sessions start with the remote computer's sound off. Default `false`: sound
+    /// is requested, and plays only if the host grants the `AUDIO` permission.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mute_remote_audio: bool,
 }
 
 impl Default for Settings {
@@ -65,6 +69,7 @@ impl Default for Settings {
             quality: QualityChoice::default(),
             startup: StartupSettings::default(),
             clipboard_sync_off: false,
+            mute_remote_audio: false,
         }
     }
 }
@@ -327,5 +332,17 @@ mod tests {
             serde_json::to_string(&QualityChoice::Speed).unwrap(),
             r#""speed""#
         );
+    }
+
+    #[test]
+    fn remote_sound_is_on_by_default_and_the_mute_setting_persists() {
+        assert!(!Settings::default().mute_remote_audio);
+        let muted = Settings {
+            mute_remote_audio: true,
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&muted).unwrap();
+        assert!(json.contains(r#""mute_remote_audio":true"#), "{json}");
+        assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), muted);
     }
 }

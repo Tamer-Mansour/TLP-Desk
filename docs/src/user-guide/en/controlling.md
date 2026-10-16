@@ -70,7 +70,7 @@ the movement is yours (you do not see this marker).
 - Windows that run **as administrator** on the remote PC, **UAC prompts**, the **lock screen** and
   the **sign-in screen** cannot be controlled (and UAC prompts or the lock screen may not be visible)
   — this needs the [unattended access service](coming-soon/unattended-access.md).
-- Chat and sound are [coming soon](coming-soon/index.md).
+- Session recordings do not contain [sound](audio.md) yet.
 
 ## Sending files
 

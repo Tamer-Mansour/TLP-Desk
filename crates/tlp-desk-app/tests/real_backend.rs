@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tlp_desk_app::backend::audio::AudioDevices;
 use tlp_desk_app::backend::real::{RealBackend, RealConfig};
 use tlp_desk_app::backend::{
     Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, EndReason, EventReceiver,
@@ -112,6 +113,8 @@ fn config(dir: &std::path::Path, recorded: Recorded, port: u16) -> RealConfig {
             ..HostConfig::default()
         },
         fallback_discovery: false,
+        // Never record or play real sound in tests.
+        audio: AudioDevices::fake(),
         clipboard: None,
         transfer: TransferConfig {
             default_upload_dir: Some(dir.join("received")),
@@ -803,4 +806,113 @@ fn files_are_sent_through_the_backend_with_progress() {
         _ => None,
     });
     viewer.backend.disconnect(session);
+}
+
+// --- audio (TLP-audio) ---
+
+fn audio_state(
+    session: SessionId,
+    want: impl Fn(&tlp_desk_app::backend::audio::AudioState) -> bool,
+) -> impl FnMut(&BackendEvent) -> Option<()> {
+    move |e| match e {
+        BackendEvent::AudioState { session: s, state } if *s == session && want(state) => Some(()),
+        _ => None,
+    }
+}
+
+/// Fake sound devices: the host "plays" a tone, the viewer's speaker records it.
+#[test]
+fn remote_sound_follows_the_permission_and_the_toolbar_toggle() {
+    use tlp_desk_audio::device::fake::{FakeCapture, FakePlayback, FakeSignal};
+    use tlp_desk_proto::Permissions;
+
+    let rt = Runtime::new().unwrap();
+    let capture = FakeCapture::new(
+        48_000,
+        2,
+        FakeSignal::Tone {
+            freq: 440.0,
+            amplitude: 0.5,
+        },
+    );
+    let speaker = FakePlayback::new(48_000, 2);
+    let start_with = |grant_audio: bool| {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(dir.path(), Arc::default(), 0);
+        if grant_audio {
+            cfg.host.default_permissions = tlp_desk_host::DEFAULT_PERMISSIONS | Permissions::AUDIO;
+        }
+        cfg.audio = AudioDevices {
+            capture: Arc::new(capture.clone()),
+            playback: Arc::new(speaker.clone()),
+        };
+        let (backend, rx) = RealBackend::start_concrete(rt.handle(), Arc::new(|| {}), cfg);
+        Peer {
+            backend,
+            events: Events::new(rx),
+            _dir: dir,
+        }
+    };
+
+    // Default host permissions do not include AUDIO: the toolbar shows it as not allowed and
+    // nothing is captured.
+    let strict = start_with(false);
+    let mut viewer = start_with(false);
+    let code = strict.backend.local_info().one_time_code;
+    viewer.backend.connect(
+        ConnectTarget::Address(strict.backend.local_addr().unwrap()),
+        Some(code),
+    );
+    let (session, _) = viewer.events.wait(&rt, "session", started);
+    viewer.events.wait(
+        &rt,
+        "audio not permitted",
+        audio_state(session, |s| !s.permitted && s.enabled && !s.playing),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(capture.starts(), 0);
+    viewer.backend.disconnect(session);
+
+    // A host that grants AUDIO: sound plays, the toggle stops and restarts it.
+    let open = start_with(true);
+    let code = open.backend.local_info().one_time_code;
+    viewer.backend.connect(
+        ConnectTarget::Address(open.backend.local_addr().unwrap()),
+        Some(code),
+    );
+    let (session, _) = viewer.events.wait(&rt, "second session", started);
+    viewer.events.wait(
+        &rt,
+        "audio playing",
+        audio_state(session, |s| s.permitted && s.playing),
+    );
+    let deadline = Instant::now() + WAIT;
+    while speaker.recorded().iter().filter(|s| s.abs() > 0.1).count() < 9_600 {
+        assert!(Instant::now() < deadline, "no sound reached the speaker");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    viewer.backend.set_audio_volume(session, 0.5);
+    viewer.events.wait(
+        &rt,
+        "volume",
+        audio_state(session, |s| (s.volume - 0.5).abs() < 1e-6),
+    );
+    viewer.backend.set_audio_enabled(session, false);
+    viewer.events.wait(
+        &rt,
+        "audio off",
+        audio_state(session, |s| !s.enabled && !s.playing),
+    );
+    let deadline = Instant::now() + WAIT;
+    while capture.is_running() {
+        assert!(Instant::now() < deadline, "host kept capturing");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    viewer.backend.set_audio_enabled(session, true);
+    viewer.events.wait(
+        &rt,
+        "audio back on",
+        audio_state(session, |s| s.enabled && s.playing),
+    );
+    assert!(capture.is_running());
 }

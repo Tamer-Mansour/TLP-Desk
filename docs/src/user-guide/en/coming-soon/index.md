@@ -7,7 +7,6 @@ until it arrives.
 
 | Feature | Milestone |
 |---|---|
-| [Sound from the remote PC](audio.md) | M2 |
 | [Address book](address-book.md) | M2 |
 | [Unattended access](unattended-access.md) | M3 |
 | [Ctrl+Alt+Del and lock](ctrl-alt-del.md) | M3 |

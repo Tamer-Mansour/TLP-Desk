@@ -18,6 +18,7 @@ use crate::i18n::{format::to_western_digits, Lang, Tx, S};
 use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
 use crate::ui::address_book::AddressBookUi;
+use crate::ui::audio::AudioControls;
 use crate::ui::chat::{self as chat_ui, ChatState};
 use crate::ui::icons::{self, Icon};
 use crate::ui::recordings::{self, RecordState, RecordingsUi};
@@ -200,6 +201,8 @@ impl App {
         }
         app.backend
             .set_clipboard_default(!app.settings.clipboard_sync_off);
+        app.backend
+            .set_audio_on_connect(!app.settings.mute_remote_audio);
         if let Some(code) = opts.code {
             app.code = code;
         }
@@ -347,6 +350,7 @@ impl App {
                         view.quality = self.settings.quality;
                         self.backend
                             .request_quality(session, self.settings.quality.to_proto());
+                        view.audio = AudioControls::new(!self.settings.mute_remote_audio);
                         if let Some(grab) =
                             SystemKeyGrab::start(Arc::downgrade(&self.backend), session, self.hwnd)
                         {
@@ -459,6 +463,17 @@ impl App {
                     if self.host_sessions.iter().any(|(id, _)| *id == session) {
                         self.host_tunnels
                             .insert(session, HostTunnelState { allowed, tunnels });
+                    }
+                }
+                // --- audio (TLP-audio) ---
+                BackendEvent::AudioState { session, state } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.audio.apply(state);
+                    }
+                }
+                BackendEvent::AudioDeviceFailed { session } => {
+                    if self.session.as_ref().is_some_and(|s| s.id == session) {
+                        self.notice = Some(self.tx.t(S::AudioDeviceFailed).into());
                     }
                 }
                 // whiteboard (TLP-whiteboard)

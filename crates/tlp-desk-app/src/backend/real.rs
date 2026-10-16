@@ -42,6 +42,7 @@ use tlp_desk_viewer::{
 use tokio::runtime::Handle;
 use tokio::task::AbortHandle;
 
+use super::audio::{AudioBridge, AudioDevices};
 use super::chat::{self, ChatBridge, ChatLine, ChatSendError};
 use super::files::{
     FsOp, FsRequestId, FsSide, TransferDir, TransferId, TransferRequest, TransferStartError,
@@ -77,6 +78,9 @@ pub struct RealConfig {
     pub host: HostConfig,
     /// Start a browse-only discovery when the host (and its discovery) is unavailable.
     pub fallback_discovery: bool,
+    // --- audio (TLP-audio) ---
+    /// Sound devices (tests use [`AudioDevices::fake`]).
+    pub audio: AudioDevices,
     /// User settings for incoming connections (`None` = the `host` template as is).
     pub host_settings: Option<HostSettings>,
     /// Folder of the connection log (`None` = do not log; tests never write the real one).
@@ -105,6 +109,7 @@ impl Default for RealConfig {
                 ..HostConfig::default()
             },
             fallback_discovery: true,
+            audio: AudioDevices::default(),
             host_settings: None,
             connection_log: None,
             clipboard: None,
@@ -141,6 +146,7 @@ struct Inner {
     /// File transfer engine shared by host and viewer sessions (lane files-transfer).
     files: Arc<FileTransfer>,
     state: Mutex<State>,
+    audio: AudioBridge,
     /// Connection log (TLP-settings-tray).
     log: Recorder,
     /// Port forwarding (TLP-tunnel): viewer rules and tunnels into this device.
@@ -394,6 +400,7 @@ impl RealBackend {
             }
         }
 
+        let audio = AudioBridge::new(&cfg.audio);
         let host_tunnels = HostTunnels::new(TunnelHostConfig::default());
         let tunnels = ViewerTunnels::new(TunnelViewerConfig::default());
         let chat = ChatBridge::default();
@@ -408,9 +415,11 @@ impl RealBackend {
         if let Some((ep, true)) = &endpoint {
             let mut host_cfg = HostConfig {
                 device_name: device_name.clone(),
-                features: super::device_info::with_host_feature(super::clipboard::register(
-                    fsb.register(cfg.host.features.clone().with(files.clone())),
-                    &clipboard,
+                features: audio.host_features(super::device_info::with_host_feature(
+                    super::clipboard::register(
+                        fsb.register(cfg.host.features.clone().with(files.clone())),
+                        &clipboard,
+                    ),
                 )),
                 ..cfg.host.clone()
             };
@@ -466,13 +475,15 @@ impl RealBackend {
                 pixel_format: PixelFormat::Rgba,
                 on_frame: Some(on_frame),
                 discovery: discovery.clone(),
-                features: super::device_info::with_viewer_feature(super::clipboard::register(
-                    fsb.register(
-                        FeatureSet::new()
-                            .with(files.clone())
-                            .with(whiteboard::viewer_feature()),
+                features: audio.viewer_features(super::device_info::with_viewer_feature(
+                    super::clipboard::register(
+                        fsb.register(
+                            FeatureSet::new()
+                                .with(files.clone())
+                                .with(whiteboard::viewer_feature()),
+                        ),
+                        &clipboard,
                     ),
-                    &clipboard,
                 )),
                 ..ViewerConfig::default()
             };
@@ -504,6 +515,7 @@ impl RealBackend {
             chat,
             files,
             state: Mutex::default(),
+            audio,
             log: Recorder::new(cfg.connection_log.clone().map(LogStore::new)),
             tunnels,
             host_tunnels,
@@ -1079,6 +1091,11 @@ impl Inner {
                     }
                 }
                 ViewerEvent::Feature(event) => {
+                    // --- audio (TLP-audio) ---
+                    if let Some(ev) = super::audio::viewer_event(session, &event) {
+                        self.emit(ev);
+                        continue;
+                    }
                     if let Some(op) = whiteboard::remote_op(&event) {
                         self.emit(BackendEvent::WhiteboardRemote { session, op });
                         continue;
@@ -1404,6 +1421,31 @@ impl Backend for RealBackend {
                 h.disconnect(id); // SessionEnded via pump_host
             }
         }
+    }
+
+    // --- audio (TLP-audio) ---
+    fn set_audio_enabled(&self, session: SessionId, enabled: bool) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .audio
+                .viewer()
+                .set_enabled(s.feature_key(), enabled);
+        }
+    }
+
+    fn set_audio_volume(&self, session: SessionId, volume: f32) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            self.inner
+                .audio
+                .viewer()
+                .set_volume(s.feature_key(), volume);
+        }
+    }
+
+    fn set_audio_on_connect(&self, enabled: bool) {
+        self.inner.audio.viewer().set_enabled_by_default(enabled);
     }
 
     // --- address book + Wake-on-LAN (TLP-addressbook) ---

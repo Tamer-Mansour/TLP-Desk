@@ -327,6 +327,14 @@ strings! {
     TimePm => "PM", "م";
 
     // --- audio ---
+    AudioMute => "Mute the remote sound", "كتم صوت الجهاز البعيد";
+    AudioUnmute => "Play the remote sound", "تشغيل صوت الجهاز البعيد";
+    AudioNotAllowed => "The other device does not share its sound.", "لا يشارك الجهاز الآخر صوته.";
+    AudioVolume => "Volume", "مستوى الصوت";
+    AudioDeviceFailed => "The remote sound cannot be played: no audio output device is available.", "تعذّر تشغيل صوت الجهاز البعيد: لا يتوفر جهاز لإخراج الصوت.";
+    AudioSettings => "Sound", "الصوت";
+    AudioOnConnect => "Play the remote computer's sound when connecting", "تشغيل صوت الجهاز البعيد عند الاتصال";
+    AudioOnConnectHint => "Sound plays only if the other device allows it. You can mute it at any time from the session toolbar.", "لا يُشغَّل الصوت إلا إذا سمح به الجهاز الآخر، ويمكنك كتمه في أي وقت من شريط أدوات الجلسة.";
 
     // --- service ---
 

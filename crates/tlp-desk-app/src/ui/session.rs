@@ -81,6 +81,8 @@ pub struct ViewerSession {
     pub files: FileBrowser,
     /// File transfer queue (lane files-transfer).
     pub transfers: TransferPanel,
+    /// The remote computer's sound (toolbar toggle and volume).
+    pub audio: super::audio::AudioControls,
 }
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
@@ -132,6 +134,7 @@ impl ViewerSession {
             clipboard: Default::default(),
             files: FileBrowser::new(id),
             transfers: TransferPanel::new(),
+            audio: Default::default(),
         }
     }
 
@@ -449,6 +452,14 @@ impl ViewerSession {
                     if chat::chat_toggle(ui, tx, &self.chat) {
                         self.chat.set_open(!self.chat.is_open());
                     }
+                    super::audio::toolbar(
+                        ui,
+                        tx,
+                        backend,
+                        self.id,
+                        self.permissions,
+                        &mut self.audio,
+                    );
                     if let Some(pick) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
                         self.release_all(backend);
