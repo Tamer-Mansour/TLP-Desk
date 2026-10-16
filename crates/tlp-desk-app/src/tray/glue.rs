@@ -86,6 +86,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn tray_tooltip(&self) -> String {
         let id = self.local.device_id.to_string();
         tooltip(

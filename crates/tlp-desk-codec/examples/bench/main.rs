@@ -403,6 +403,8 @@ fn make_encoder(args: &Args, config: EncoderConfig) -> (Box<dyn VideoEncoder>, (
             if args.adapter != "auto" {
                 std::env::set_var(tlp_desk_codec::ADAPTER_ENV, &args.adapter);
             }
+            // Off Windows the struct has no other fields, so the update looks redundant.
+            #[allow(clippy::needless_update)]
             let options = EncoderOptions {
                 preference: EncoderPreference::Auto,
                 ..EncoderOptions::from_env()

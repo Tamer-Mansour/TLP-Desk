@@ -135,9 +135,13 @@ impl Default for StartupSettings {
 /// same folder older builds created as `tlp-desk` (existing settings are kept).
 pub const APP_DIR: &str = "TLP-Desk";
 
-/// `%APPDATA%\TLP-Desk`, the per-user data folder (`None` if `APPDATA` is not set).
-///
-/// On macOS this is `~/Library/Application Support/TLP-Desk`.
+/// Settings folder name under `$XDG_CONFIG_HOME` on Linux and other Unixes (case-sensitive
+/// file systems; matches the lowercase `tlp-desk` identity folder of `tlp-desk-crypto`).
+pub const UNIX_APP_DIR: &str = "tlp-desk";
+
+/// The per-user data folder (`None` if the environment gives no home): `%APPDATA%\TLP-Desk` on
+/// Windows, `~/Library/Application Support/TLP-Desk` on macOS, `$XDG_CONFIG_HOME/tlp-desk` or
+/// `~/.config/tlp-desk` elsewhere.
 pub fn app_data_dir() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -146,9 +150,36 @@ pub fn app_data_dir() -> Option<PathBuf> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let base = std::env::var_os("APPDATA").map(PathBuf::from)?;
-        Some(base.join(APP_DIR))
+        app_data_dir_in(
+            cfg!(windows),
+            std::env::var_os("APPDATA"),
+            std::env::var_os("XDG_CONFIG_HOME"),
+            std::env::var_os("HOME"),
+        )
     }
+}
+
+/// [`app_data_dir`] with the environment passed in, so every platform's rule is unit tested
+/// everywhere. Per the XDG base directory spec a relative `XDG_CONFIG_HOME` is ignored.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn app_data_dir_in(
+    windows: bool,
+    appdata: Option<std::ffi::OsString>,
+    xdg_config_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    if windows {
+        return appdata.map(|b| PathBuf::from(b).join(APP_DIR));
+    }
+    let base = xdg_config_home
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| {
+            home.filter(|h| !h.is_empty())
+                .map(|h| PathBuf::from(h).join(".config"))
+        })?;
+    Some(base.join(UNIX_APP_DIR))
 }
 
 /// The macOS per-user data folder for a home directory.
@@ -368,5 +399,35 @@ mod tests {
         let json = serde_json::to_string(&muted).unwrap();
         assert!(json.contains(r#""mute_remote_audio":true"#), "{json}");
         assert_eq!(serde_json::from_str::<Settings>(&json).unwrap(), muted);
+    }
+
+    #[test]
+    fn data_dir_follows_each_platforms_convention() {
+        use std::ffi::OsString;
+        let os = |s: &str| Some(OsString::from(s));
+        assert_eq!(
+            app_data_dir_in(true, os(r"C:\Users\أحمد\AppData\Roaming"), None, None),
+            Some(PathBuf::from(r"C:\Users\أحمد\AppData\Roaming").join("TLP-Desk"))
+        );
+        assert_eq!(app_data_dir_in(true, None, os("/x"), os("/h")), None);
+        // Absolute paths for the host OS (a leading `/` alone is relative on Windows).
+        let cfg = std::env::temp_dir().join("cfg");
+        let home = std::env::temp_dir().join("أحمد");
+        let os_path = |p: &PathBuf| Some(p.clone().into_os_string());
+        assert_eq!(
+            app_data_dir_in(false, None, os_path(&cfg), os("/home/u")),
+            Some(cfg.join("tlp-desk"))
+        );
+        assert_eq!(
+            app_data_dir_in(false, None, None, os_path(&home)),
+            Some(home.join(".config").join("tlp-desk"))
+        );
+        // A relative XDG_CONFIG_HOME is ignored; no home at all means no folder.
+        assert_eq!(
+            app_data_dir_in(false, None, os("rel"), os_path(&home)),
+            Some(home.join(".config").join("tlp-desk"))
+        );
+        assert_eq!(app_data_dir_in(false, None, None, os("")), None);
+        assert_eq!(app_data_dir_in(false, None, None, None), None);
     }
 }

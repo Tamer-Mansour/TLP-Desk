@@ -68,7 +68,8 @@ impl Store {
         Self { path: path.into() }
     }
 
-    /// `%APPDATA%\TLP-Desk\address_book.json`, or `None` without `APPDATA`.
+    /// `address_book.json` in the per-user data folder ([`crate::settings::app_data_dir`]), or
+    /// `None` when the environment has no such folder.
     pub fn default_location() -> Option<Self> {
         Some(Self::at(crate::settings::app_data_dir()?.join(FILE_NAME)))
     }

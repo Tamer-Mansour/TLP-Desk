@@ -1,29 +1,38 @@
 //! Non-Windows placeholders so the workspace builds everywhere.
 
+#[cfg(not(target_os = "linux"))]
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
+#[cfg(not(target_os = "linux"))]
 use crate::keys::ScanKey;
-use crate::{InputError, InputEvent, MonitorRect};
+use crate::InputError;
+#[cfg(not(target_os = "linux"))]
+use crate::{InputEvent, MonitorRect};
 
 /// No-op off Windows.
+#[cfg(not(target_os = "linux"))]
 pub fn ensure_dpi_aware() -> Result<(), InputError> {
     Ok(())
 }
 
+#[cfg(not(target_os = "linux"))]
 pub fn virtual_desktop_rect() -> Option<MonitorRect> {
     None
 }
 
+#[cfg(not(target_os = "linux"))]
 pub fn vk_to_scancode(_vk: u16) -> Option<ScanKey> {
     None
 }
 
 /// Keyboard grab placeholder; [`KeyboardGrab::start`] returns [`InputError::Unsupported`].
+#[cfg(not(target_os = "linux"))]
 pub struct KeyboardGrab {
     _private: (),
 }
 
+#[cfg(not(target_os = "linux"))]
 impl KeyboardGrab {
     pub fn start() -> Result<(KeyboardGrab, Receiver<InputEvent>), InputError> {
         Err(InputError::Unsupported)

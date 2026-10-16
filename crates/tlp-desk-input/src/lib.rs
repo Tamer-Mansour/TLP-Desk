@@ -39,6 +39,7 @@
 pub use tlp_desk_proto::{InputEvent, MouseButton};
 
 mod activity;
+mod evdev;
 mod grab_logic;
 mod keys;
 pub mod macos;
@@ -52,6 +53,9 @@ pub mod whiteboard;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod win;
+
+#[cfg(target_os = "linux")]
+mod linux;
 
 #[cfg(not(windows))]
 mod stub;
@@ -71,13 +75,19 @@ pub use win::{
     RemotePointerMarker, WindowsInjector,
 };
 
+#[cfg(not(any(windows, target_os = "linux")))]
+pub use stub::{ensure_dpi_aware, virtual_desktop_rect, vk_to_scancode, KeyboardGrab};
+
 #[cfg(target_os = "macos")]
 pub use macos::MacInjector;
 
 #[cfg(not(windows))]
-pub use stub::{
-    ensure_dpi_aware, virtual_desktop_rect, vk_to_scancode, KeyboardGrab, LocalActivityMonitor,
-    RemotePointerMarker,
+pub use stub::{LocalActivityMonitor, RemotePointerMarker};
+
+#[cfg(target_os = "linux")]
+pub use linux::{
+    ensure_dpi_aware, virtual_desktop_rect, vk_to_scancode, x11_display_available, KeyboardGrab,
+    LinuxInjector,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -149,11 +159,15 @@ pub fn injector_for_monitor(monitor: MonitorRect) -> Result<Box<dyn InputInjecto
     {
         Ok(Box::new(WindowsInjector::new(monitor)?))
     }
+    #[cfg(target_os = "linux")]
+    {
+        Ok(Box::new(LinuxInjector::new(monitor)?))
+    }
     #[cfg(target_os = "macos")]
     {
         Ok(Box::new(MacInjector::new(monitor)?))
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = monitor;
         Err(InputError::Unsupported)
