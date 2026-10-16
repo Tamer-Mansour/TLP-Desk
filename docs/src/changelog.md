@@ -8,7 +8,13 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-10-16
+
+Streaming quality and AnyDesk-style file transfer.
+
 ### Added
+
+- **Quality first: lower the resolution, never smear the picture.** The encoder has a quality floor (QP 12-32 on OpenH264, best-effort QP bounds on Media Foundation hardware encoders), and when the link gets tight the host steps the resolution down (1920x1200 -> 1600x1000 -> 1280x800 -> 1024x640) and the frame rate (60 -> 45 -> 30) instead of letting the picture turn blocky; it climbs back with hysteresis. Higher default bitrate (about 15 Mbps for 1080p60). The stats overlay shows the effective resolution and an approximate quantiser. See [Performance notes](dev/performance.md).
 
 - **Sharper text.** When the screen stops changing, the host sends one near-lossless refresh picture (QP 14) so text turns crisp after scrolling or typing; the GPU downscaler uses a Lanczos-2 filter for non-2x ratios; the viewer snaps the picture to physical pixels, shows 1:1 views with exact pixels and re-scales a still, shrunk picture with a sharp filter. See [Performance notes](dev/performance.md#sharpness).
 
