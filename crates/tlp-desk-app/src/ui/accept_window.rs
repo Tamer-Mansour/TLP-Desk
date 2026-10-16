@@ -276,9 +276,9 @@ impl AcceptCard {
                 .corner_radius(CornerRadius::same(255))
                 .inner_margin(Margin::symmetric(10, 3))
                 .show(ui, |ui| {
+                    ui.spacing_mut().interact_size.y = 18.0;
                     theme::row(ui, tx.rtl(), |ui| {
                         ui.spacing_mut().item_spacing.x = 5.0;
-                        ui.spacing_mut().interact_size.y = 18.0;
                         ui.add(icon.image(13.0, accent));
                         ui.label(RichText::new(tx.t(key)).small().color(accent).strong());
                     });
@@ -318,7 +318,12 @@ impl AcceptCard {
                         Stroke::new(1.0, weak.gamma_multiply(0.5)),
                     )
                 };
-                let icon = if on { Icon::Check } else { Icon::Plus };
+                // Viewing is what a session is: always on, shown with a lock.
+                let icon = match (locked, on) {
+                    (true, _) => Icon::Lock,
+                    (false, true) => Icon::Check,
+                    (false, false) => Icon::Plus,
+                };
                 let text = RichText::new(tx.t(key)).size(13.0).color(fg);
                 let image = icon.image(13.0, fg);
                 let button = if tx.rtl() {
@@ -330,8 +335,8 @@ impl AcceptCard {
                 .stroke(stroke)
                 .corner_radius(CornerRadius::same(255))
                 .min_size(Vec2::new(0.0, 26.0));
-                let resp = ui.add_enabled(!locked, button);
-                if resp.clicked() {
+                let resp = ui.add(button);
+                if resp.clicked() && !locked {
                     self.permissions = if on {
                         self.permissions.difference(bit)
                     } else {
