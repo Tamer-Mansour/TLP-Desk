@@ -17,11 +17,37 @@ tlp-desk-capture.workspace = true
 tlp-desk-codec.workspace = true
 tlp-desk-input.workspace = true
 thiserror.workspace = true
-tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+serde.workspace = true
+postcard.workspace = true
+# Device info (OS, CPU, RAM, disks, uptime). MIT; only the system + disk parts are compiled.
+sysinfo = { version = "0.36", default-features = false, features = ["system", "disk"] }
+# rt-multi-thread: the Windows service runs its own runtime (service::windows::run).
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }
 tracing = "0.1"
+
+# Unattended access (service module): SCM integration, session agent launch, secure desktop,
+# SendSAS. Platform code lives in `src/service/windows/`.
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Environment",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_Shutdown",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tlp-desk-viewer.workspace = true
 tlp-desk-testkit.workspace = true
+tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -26,6 +26,9 @@ pub enum AuthMethod {
     OneTimeCode(String),
     /// The host's permanent unattended-access password.
     Password(String),
+    /// A single-use reconnect ticket the host sent earlier (`Message::ReconnectTicket`), e.g.
+    /// to get back in after the host restarted. Only works from the same viewer identity.
+    ReconnectTicket(Vec<u8>),
 }
 
 impl std::fmt::Debug for AuthMethod {
@@ -35,6 +38,7 @@ impl std::fmt::Debug for AuthMethod {
             AuthMethod::AcceptPrompt => "AcceptPrompt",
             AuthMethod::OneTimeCode(_) => "OneTimeCode(..)",
             AuthMethod::Password(_) => "Password(..)",
+            AuthMethod::ReconnectTicket(_) => "ReconnectTicket(..)",
         })
     }
 }
@@ -50,6 +54,8 @@ pub enum AuthKind {
     AcceptPrompt,
     OneTimeCode,
     Password,
+    /// A reconnect ticket (see [`PendingSession::redeem_ticket`]).
+    ReconnectTicket,
 }
 
 /// Endpoint settings.
@@ -333,7 +339,17 @@ impl Endpoint {
             name: sanitize_peer_name(&hello.device_name),
         };
 
+        // Only a human answering a prompt may take long; everything else is bounded.
+        let human_decides = matches!(auth, AuthMethod::AcceptPrompt);
         let pake = match auth {
+            AuthMethod::ReconnectTicket(token) => {
+                write_msg(
+                    &mut send,
+                    &Message::AuthRequest(AuthRequest::ReconnectTicket { token }),
+                )
+                .await?;
+                None
+            }
             AuthMethod::AcceptPrompt => {
                 write_msg(&mut send, &Message::AuthRequest(AuthRequest::AcceptPrompt)).await?;
                 if let Some(f) = &on_awaiting_accept {
@@ -401,7 +417,12 @@ impl Endpoint {
         }
 
         // Accept prompt: wait for the human, no timeout (drop the future to cancel).
-        let permissions = match rx.next().await? {
+        let answer = if human_decides {
+            rx.next().await?
+        } else {
+            timeout(t, rx.next()).await??
+        };
+        let permissions = match answer {
             Message::AuthResult(AuthResult::Accepted { permissions }) => permissions,
             Message::AuthResult(AuthResult::Rejected { reason }) => {
                 return Err(NetError::Rejected(reason))
@@ -569,6 +590,7 @@ async fn host_handshake(
         return Ok(None);
     }
     write_msg(&mut send, &shared.hello(Role::Host)).await?;
+    // `payload`: the SPAKE2 message, or the reconnect ticket token.
     let request = match rx.next().await {
         Ok(m) => m,
         Err(e) => {
@@ -576,7 +598,7 @@ async fn host_handshake(
             return Err(e);
         }
     };
-    let (kind, spake2_msg) = match request {
+    let (kind, payload) = match request {
         Message::AuthRequest(AuthRequest::AcceptPrompt) => (AuthKind::AcceptPrompt, Vec::new()),
         Message::AuthRequest(AuthRequest::OneTimeCode { spake2_msg }) => {
             (AuthKind::OneTimeCode, spake2_msg)
@@ -584,12 +606,9 @@ async fn host_handshake(
         Message::AuthRequest(AuthRequest::Password { spake2_msg }) => {
             (AuthKind::Password, spake2_msg)
         }
-        Message::AuthRequest(AuthRequest::ReconnectTicket { .. }) => {
-            // FEATURE HOOK (TLP-service): verify the single-use ticket (bound to `viewer_fp`,
-            // not expired) and authorize without a prompt. Until then: politely refused.
-            tracing::info!(peer = %addr, "reconnect ticket not supported yet; rejecting");
-            reject_and_close(&conn, &mut send, RejectReason::NotAllowed).await;
-            return Ok(None);
+        // Verified by the host app against its ticket store (`PendingSession::redeem_ticket`).
+        Message::AuthRequest(AuthRequest::ReconnectTicket { token }) => {
+            (AuthKind::ReconnectTicket, token)
         }
         other => {
             conn.close(CLOSE_PROTOCOL.into(), b"expected AuthRequest");
@@ -621,7 +640,7 @@ async fn host_handshake(
         rx,
         peer,
         kind,
-        spake2_msg,
+        payload,
         shared: shared.clone(),
     }))
 }
@@ -634,7 +653,8 @@ pub struct PendingSession {
     rx: FramedRecv,
     peer: PeerInfo,
     kind: AuthKind,
-    spake2_msg: Vec<u8>,
+    /// SPAKE2 message (code/password) or ticket token; never logged.
+    payload: Vec<u8>,
     shared: Arc<Shared>,
 }
 
@@ -709,6 +729,50 @@ impl PendingSession {
         self.verify(Secret::Password(verifier), permissions).await
     }
 
+    /// Checks the reconnect ticket the viewer presented (only for
+    /// [`AuthKind::ReconnectTicket`]). `check(token, viewer_fingerprint)` consults the host's
+    /// ticket store and returns the permissions to grant, or the reason to send back
+    /// (`WrongCredentials` = give up, `NotAllowed` = not yet / try again later). Every check
+    /// counts against the per-IP rate limit like a password attempt. On refusal this returns
+    /// [`NetError::AuthFailed`].
+    pub async fn redeem_ticket(
+        mut self,
+        check: impl FnOnce(&[u8], &Fingerprint) -> Result<Permissions, RejectReason>,
+    ) -> Result<Session, NetError> {
+        if self.kind != AuthKind::ReconnectTicket {
+            return Err(NetError::WrongAuthKind);
+        }
+        let ip = self.peer.addr.ip();
+        let attempt = self
+            .shared
+            .limiter
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .attempt(&ip, Instant::now());
+        if let Err(e) = attempt {
+            tracing::warn!(peer = %self.peer.addr, device_id = %self.peer.device_id, retry_after = ?e.retry_after, "reconnect ticket refused: rate limited");
+            reject_and_close(&self.conn, &mut self.send, RejectReason::RateLimited).await;
+            return Err(NetError::RateLimited);
+        }
+        let token = std::mem::take(&mut self.payload);
+        match check(&token, &self.peer.fingerprint) {
+            Ok(permissions) => {
+                self.shared
+                    .limiter
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .record_success(&ip);
+                tracing::info!(peer = %self.peer.addr, device_id = %self.peer.device_id, "reconnect ticket accepted");
+                self.finish_accept(permissions).await
+            }
+            Err(reason) => {
+                tracing::warn!(peer = %self.peer.addr, device_id = %self.peer.device_id, ?reason, "reconnect ticket refused");
+                reject_and_close(&self.conn, &mut self.send, reason).await;
+                Err(NetError::AuthFailed)
+            }
+        }
+    }
+
     async fn verify(
         mut self,
         secret: Secret<'_>,
@@ -738,7 +802,7 @@ impl PendingSession {
         };
         let (state, msg_b) = PakeSession::start(PakeRole::Host, &secret_bytes, ctx);
         let outcome: Result<Option<_>, NetError> = async {
-            let Ok(keys) = state.finish(&self.spake2_msg) else {
+            let Ok(keys) = state.finish(&self.payload) else {
                 return Ok(None);
             };
             write_msg(
@@ -813,6 +877,7 @@ impl PendingSession {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unreachable)]
     use super::*;
 
     /// A peer speaking another protocol version gets `Rejected(VersionMismatch)`.
@@ -915,10 +980,11 @@ mod tests {
         );
     }
 
-    /// Reconnect tickets are not accepted until the service lane implements them: the viewer
-    /// gets a clean `Rejected(NotAllowed)` and the host app never sees a pending session.
+    /// A reconnect ticket reaches the host app as a pending session of kind `ReconnectTicket`
+    /// with the viewer's proven fingerprint; the app's verdict decides. The token never shows in
+    /// `Debug` output.
     #[tokio::test(flavor = "multi_thread")]
-    async fn reconnect_ticket_is_refused_for_now() {
+    async fn reconnect_ticket_is_checked_by_the_host_app() {
         let host = Endpoint::bind(
             Arc::new(Identity::generate().unwrap()),
             EndpointConfig {
@@ -928,47 +994,72 @@ mod tests {
         )
         .unwrap();
         let addr = host.local_addr().unwrap();
-        let me = Identity::generate().unwrap();
-        let (cfg, _) = tls::client_config(&me, Pin::DeviceId(host.device_id())).unwrap();
-        let ep = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let conn = ep
-            .connect_with(cfg, addr, "tlp-desk")
-            .unwrap()
-            .await
-            .unwrap();
-        let (mut send, recv) = conn.open_bi().await.unwrap();
-        let mut rx = FramedRecv::new(recv);
-        let hello = Message::Hello(Hello {
-            protocol_version: PROTOCOL_VERSION,
-            device_id: me.device_id().as_u32(),
-            device_name: "rebooted viewer".into(),
-            role: Role::Viewer,
-        });
-        write_msg(&mut send, &hello).await.unwrap();
-        let host_hello = timeout(Duration::from_secs(10), rx.next())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(matches!(host_hello, Message::Hello(_)));
-        write_msg(
-            &mut send,
-            &Message::AuthRequest(AuthRequest::ReconnectTicket { token: vec![7; 32] }),
+        let viewer = Endpoint::bind(
+            Arc::new(Identity::generate().unwrap()),
+            EndpointConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                listen: false,
+                ..EndpointConfig::default()
+            },
         )
-        .await
         .unwrap();
-        let reply = timeout(Duration::from_secs(10), rx.next())
-            .await
-            .unwrap()
-            .unwrap();
+        let viewer_fp = viewer.fingerprint();
+        let good = vec![7u8; 32];
         assert_eq!(
-            reply,
-            Message::AuthResult(AuthResult::Rejected {
-                reason: RejectReason::NotAllowed
-            })
+            format!("{:?}", AuthMethod::ReconnectTicket(good.clone())),
+            "ReconnectTicket(..)"
         );
-        assert!(timeout(Duration::from_millis(200), host.accept())
-            .await
-            .is_err());
+        let host_side = async {
+            for want_ok in [false, true] {
+                let p = timeout(Duration::from_secs(10), host.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(p.auth_kind(), AuthKind::ReconnectTicket);
+                assert!(!format!("{p:?}").contains("7, 7, 7"));
+                let good = good.clone();
+                let res = p
+                    .redeem_ticket(move |token, fp| {
+                        assert_eq!(*fp, viewer_fp);
+                        if token == good.as_slice() {
+                            Ok(Permissions::VIEW)
+                        } else {
+                            Err(RejectReason::WrongCredentials)
+                        }
+                    })
+                    .await;
+                assert_eq!(res.is_ok(), want_ok);
+                if let Ok(s) = res {
+                    return s;
+                }
+            }
+            unreachable!()
+        };
+        let viewer_side = async {
+            let err = viewer
+                .connect(
+                    addr,
+                    Some(host.device_id()),
+                    AuthMethod::ReconnectTicket(vec![8; 32]),
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, NetError::Rejected(RejectReason::WrongCredentials)),
+                "{err}"
+            );
+            viewer
+                .connect(
+                    addr,
+                    Some(host.device_id()),
+                    AuthMethod::ReconnectTicket(good.clone()),
+                )
+                .await
+                .unwrap()
+        };
+        let (host_session, viewer_session) = tokio::join!(host_side, viewer_side);
+        assert_eq!(viewer_session.initial_permissions(), Permissions::VIEW);
+        assert_eq!(host_session.peer().fingerprint, viewer_fp);
     }
 
     #[test]

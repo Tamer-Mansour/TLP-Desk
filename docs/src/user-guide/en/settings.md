@@ -1,4 +1,6 @@
-# Settings: language, digits and name
+# Settings
+
+![The settings screen](../../media/settings-en-light.png)
 
 Open **Settings** from the top bar of the home screen. Click **Back** to return. Changes apply
 immediately and are remembered.
@@ -37,11 +39,59 @@ field says, **restart TLP-Desk** so other PCs see the new name.
 Keep in mind that the device name is visible to everyone on your network — do not put anything
 private in it.
 
+## Incoming connections
+
+![Incoming connections settings](../../media/settings-incoming-en-light.png)
+
+- **Accept incoming connections** — turn off to pause hosting: every viewer is refused before the
+  handshake. The tray menu has the same switch (**Pause incoming**).
+- **What connected devices may do** — one checkbox per permission (see the screen, mouse,
+  keyboard, clipboard, files, sound, chat, drawing, port forwarding, privacy mode, restart,
+  Ctrl+Alt+Del). They are the starting permissions of the **next** session; you can still take
+  any of them back during a session. By default sessions get view, mouse, keyboard, clipboard,
+  files, chat and drawing; **port forwarding is off** and is switched on per session from the
+  banner.
+- **Decline unanswered requests after** — how long the Accept prompt waits (10 s to 10 min).
+- **Allow connecting with the one-time code** — off means only the Accept prompt (or a password)
+  lets people in.
+- **Pause remote control after I use my own mouse or keyboard for** — local priority, 0 to 5
+  seconds (0 turns it off).
+- **Show where the remote pointer is on this screen** — the green marker with the viewer's name.
+
+## Allowed networks
+
+![Allowed networks, quality and start-up settings](../../media/settings-network-en-light.png)
+
+Only devices whose address is inside one of these ranges can connect. The default is the private
+ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and link-local addresses. Type an address or a
+range such as `192.168.1.0/24` and click **Add**. A range that includes public addresses is
+refused with a warning unless you click **Add anyway**. At least one range must remain; to refuse
+everyone, pause incoming connections instead. **Restore defaults** brings back the default list.
+Changes apply to the next connection attempt.
+
+## Picture quality
+
+**Speed**, **Balanced** or **Quality**: the preset used when you connect to another device. It is
+remembered and sent to the host as a quality request.
+
+## Start-up and notification area
+
+- **Start TLP-Desk when I sign in to Windows** — adds or removes a per-user entry
+  (`HKCU\...\Run`); no administrator rights are needed.
+- **Start hidden in the notification area** — the window starts minimised; hosting still works.
+- **Keep running in the notification area when I close the window** — closing the window
+  minimises it instead of quitting, so this PC stays reachable. Use **Quit** in the tray menu to
+  exit for real.
+
+The tray icon's tooltip shows your ID, and its menu has **Open**, **Copy ID**, **New one-time
+code**, **Pause incoming**, **Settings**, **Connection log** and **Quit**. When someone asks to
+connect while the window is minimised, it comes back to the front with the Accept prompt. While a
+viewer is connected and the window is minimised, a small always-on-top banner with their name and
+an **End session** button stays visible (see [The Accept prompt and the banner](accept-prompt.md)).
+
 ## Where settings are stored
 
-`%APPDATA%\TLP-Desk\settings.json` — a small text file with your language, digit style and device
-name. Your device's identity (and therefore its ID) is stored separately and is not affected by
-settings. Deleting `settings.json` resets these options to their defaults.
-
-More settings — default permissions, allowed network ranges, quality presets, start minimised to
-the tray — are planned (roadmap M2).
+`%APPDATA%\TLP-Desk\settings.json` — a small text file. Older files without the new sections keep
+working (missing values get their defaults), and out-of-range values are corrected on load. Your
+device's identity (and therefore its ID) is stored separately and is not affected by settings.
+Deleting `settings.json` resets everything to the defaults.

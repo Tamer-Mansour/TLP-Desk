@@ -16,10 +16,10 @@ use tlp_desk_testkit::probe::ProbeFeature;
 use tlp_desk_testkit::wait;
 use tlp_desk_viewer::{EndReason as ViewerEnd, ViewerEvent, ViewerSession};
 
-/// A message every session may send (needs `VIEW`): once the probe has it, everything sent
+/// A message every session may send (permission-free, not claimed by the core): once the probe has it, everything sent
 /// before it on the control stream has been through the host's permission gate.
 fn sentinel(n: u64) -> Message {
-    Message::LatencyProbe { t_viewer_us: n }
+    Message::TunnelOpened { id: n }
 }
 
 async fn start_with_probe() -> (TestPair, Arc<ProbeFeature>) {

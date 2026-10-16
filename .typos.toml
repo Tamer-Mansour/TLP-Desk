@@ -18,3 +18,8 @@ LOD = "LOD"
 fo = "fo"
 # Loop index pair (ix, iy).
 iy = "iy"
+# ISO BMFF (MP4) box names: track box, track fragment run (session recording).
+trak = "trak"
+trun = "trun"
+# H.264 syntax descriptor ue(v): unsigned Exp-Golomb code.
+ue = "ue"

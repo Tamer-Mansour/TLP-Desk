@@ -1,19 +1,35 @@
 //! Video encode/decode traits and implementations.
 //!
-//! The only backend today is software H.264 via OpenH264 ([`H264Encoder`], [`H264Decoder`]),
-//! compiled from the bundled source at build time (no runtime download). Colour conversion uses
-//! BT.709 limited range, which the encoder signals in the SPS VUI.
+//! Backends: software H.264 via OpenH264 ([`H264Encoder`], [`H264Decoder`]), compiled from the
+//! bundled source at build time (no runtime download), and on Windows hardware H.264 through
+//! Media Foundation encoder MFTs (`MfEncoder`: Intel Quick Sync, NVIDIA, AMD). Colour
+//! conversion uses BT.709 limited range, which the software encoder signals in the SPS VUI.
 //!
-//! `unsafe` is denied crate-wide; the single exception is the small OpenH264 runtime-bitrate
-//! shim in `h264::raw`, which documents its `// SAFETY:` invariants.
+//! [`new_encoder`] tries hardware first and falls back to OpenH264 ([`FallbackEncoder`]); the
+//! [`ENCODER_ENV`] environment variable (`auto`, `hardware`, `software`) overrides the choice.
+//!
+//! `unsafe` is denied crate-wide; the exceptions are the OpenH264 encoder FFI in `h264::ffi`
+//! and the Windows Media Foundation / DXGI wrappers in `mf`, which document their
+//! `// SAFETY:` invariants.
 #![deny(unsafe_code)]
 
 use tlp_desk_capture::BgraFrame;
 
 pub mod convert;
 mod h264;
+#[cfg(windows)]
+mod mf;
+mod select;
 
 pub use h264::{Downscale, H264Complexity, H264Decoder, H264Encoder, H264Tuning};
+#[cfg(windows)]
+pub use mf::{
+    list_adapters, list_hw_encoders, GpuAdapter, HwAdapter, HwEncoderInfo, MfEncoder, VENDOR_AMD,
+    VENDOR_INTEL, VENDOR_NVIDIA,
+};
+pub use select::{
+    new_encoder_with, EncoderOptions, EncoderPreference, FallbackEncoder, ADAPTER_ENV, ENCODER_ENV,
+};
 
 /// Encoder settings. `width`/`height` are the size of the *input* frames (the captured
 /// monitor); the encoded size may be smaller, see [`H264Encoder::encoded_size`].
@@ -82,6 +98,11 @@ pub trait VideoEncoder: Send {
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError>;
 
     fn config(&self) -> EncoderConfig;
+
+    /// Short human-readable name of the implementation in use (logs, stats overlay).
+    fn backend_label(&self) -> String {
+        "H.264".into()
+    }
 }
 
 pub trait VideoDecoder: Send {
@@ -94,9 +115,11 @@ pub trait VideoDecoder: Send {
     }
 }
 
-/// Creates the default (software H.264) encoder.
+/// Creates the default encoder: hardware H.264 when available, else OpenH264, switching to
+/// OpenH264 transparently if the hardware fails mid-stream. Honours [`ENCODER_ENV`] and
+/// [`ADAPTER_ENV`] (see [`EncoderOptions::from_env`]).
 pub fn new_encoder(config: EncoderConfig) -> Result<Box<dyn VideoEncoder>, CodecError> {
-    Ok(Box::new(H264Encoder::new(config)?))
+    new_encoder_with(config, &EncoderOptions::from_env())
 }
 
 /// Creates the default (software H.264) decoder.

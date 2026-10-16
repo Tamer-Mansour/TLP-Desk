@@ -12,7 +12,7 @@ later without touching session logic.
 | [`tlp-desk-capture`](capture.md) | `ScreenCapturer` trait; Windows.Graphics.Capture and DXGI; GPU downscale | Done for M1 |
 | [`tlp-desk-codec`](codec.md) | `VideoEncoder` / `VideoDecoder` traits; H.264 via OpenH264; colour conversion | Done for M1 |
 | [`tlp-desk-input`](input.md) | `InputInjector` trait, `SendInput`, coordinate mapping, keyboard grab, local activity, pointer marker | Done for M1 |
-| [`tlp-desk-audio`](audio.md) | System audio loopback + Opus | Placeholder |
+| [`tlp-desk-audio`](audio.md) | System audio loopback + Opus, jitter buffer, session features | Done for M2 |
 | [`tlp-desk-files`](files.md) | File transfer + clipboard sync | Placeholder |
 | [`tlp-desk-host`](host.md) | Host session: capture → encode → send pipeline, input, priority, monitors | Done for M1 |
 | [`tlp-desk-viewer`](viewer.md) | Viewer session: receive → decode → frames, input out, stats | Done for M1 |
@@ -47,7 +47,7 @@ graph TD
 ```
 
 `tlp-desk-codec` depends on `tlp-desk-capture` only for the shared `BgraFrame` type. The
-`audio` and `files` crates have no dependencies yet.
+`files` crate has no dependencies yet.
 
 ## Common rules
 

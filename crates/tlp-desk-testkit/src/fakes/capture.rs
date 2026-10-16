@@ -55,7 +55,7 @@ pub fn monitor_lister(list: Vec<MonitorInfo>) -> MonitorLister {
 /// A [`CapturerFactory`] opening a [`FakeCapturer`] on any monitor of `list` (unknown indices
 /// fail like a real capturer would).
 pub fn capturer_factory(list: Vec<MonitorInfo>, alive: Arc<Alive>) -> CapturerFactory {
-    Arc::new(move |index| {
+    Arc::new(move |index, _options| {
         let mon = list
             .iter()
             .find(|m| m.index == index)
@@ -176,8 +176,8 @@ mod tests {
     #[test]
     fn factory_refuses_unknown_monitors() {
         let f = capturer_factory(monitors(2), Arc::default());
-        assert!(f(1).is_ok());
-        assert!(f(7).is_err());
+        assert!(f(1, Default::default()).is_ok());
+        assert!(f(7, Default::default()).is_err());
         assert!(monitors(3)[2].name.contains("شاشة"));
     }
 }

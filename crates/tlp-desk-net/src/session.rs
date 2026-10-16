@@ -60,6 +60,26 @@ pub enum VideoSendStatus {
     Dropped,
 }
 
+/// Snapshot of the QUIC path statistics ([`Session::transport_stats`]). Counters are
+/// cumulative since the connection started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TransportStats {
+    /// Smoothed round-trip time.
+    pub rtt: Duration,
+    /// Smallest round-trip time seen (ack delay excluded).
+    pub min_rtt: Duration,
+    /// Current congestion window, bytes.
+    pub cwnd: u64,
+    /// Times the congestion controller reduced its window.
+    pub congestion_events: u64,
+    /// Packets declared lost.
+    pub lost_packets: u64,
+    /// Packets sent.
+    pub sent_packets: u64,
+    /// UDP payload bytes sent.
+    pub sent_bytes: u64,
+}
+
 /// Reader of length-prefixed [`Message`]s from a QUIC receive stream.
 pub(crate) struct FramedRecv {
     recv: quinn::RecvStream,
@@ -330,6 +350,21 @@ impl Session {
     /// Current smoothed round-trip time.
     pub fn rtt(&self) -> Duration {
         self.conn.rtt()
+    }
+
+    /// Congestion-control view of the connection, for adaptive bitrate: smoothed and minimum
+    /// RTT, congestion window and cumulative loss / congestion counters (take deltas).
+    pub fn transport_stats(&self) -> TransportStats {
+        let s = self.conn.stats();
+        TransportStats {
+            rtt: s.path.rtt,
+            min_rtt: s.path.min_rtt,
+            cwnd: s.path.cwnd,
+            congestion_events: s.path.congestion_events,
+            lost_packets: s.path.lost_packets,
+            sent_packets: s.path.sent_packets,
+            sent_bytes: s.udp_tx.bytes,
+        }
     }
 
     /// Sends one message on the control stream.

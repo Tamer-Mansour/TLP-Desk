@@ -1,7 +1,16 @@
 # tlp-desk wire protocol
 
-Status: **draft**, `PROTOCOL_VERSION = 4`. Source of truth: `crates/tlp-desk-proto` (messages),
+Status: **draft**, `PROTOCOL_VERSION = 5`. Source of truth: `crates/tlp-desk-proto` (messages),
 `crates/tlp-desk-net` (transport, discovery) and `crates/tlp-desk-crypto` (keys, PAKE).
+
+### Changes in v5
+
+- Appended `ClipboardData::Png { width, height, png }` (index 2 inside `ClipboardData`): a
+  PNG-compressed clipboard image, so a 4K screenshot (33 MB of RGBA) fits well inside the
+  16 MiB frame limit. `ClipboardData::Image` (raw RGBA) stays valid for tiny or legacy images.
+  Receivers check `width * height * 4` against their cap *before* decoding and reject a PNG whose
+  header disagrees with `width`/`height`. Needs `CLIPBOARD`, like the other clipboard messages.
+- Nothing else changed; every v4 index is unchanged.
 
 ### Changes in v4
 
@@ -142,12 +151,13 @@ Bodies larger than `MAX_FRAME_LEN` (16 MiB) are a protocol error and the connect
 | `AuthResult::Spake2Reply { spake2_msg }` | host → viewer | Host's SPAKE2 half |
 | `AuthRequest::KeyConfirm { mac }` | viewer → host | Viewer's SPAKE2 key confirmation (v2) |
 | `AuthResult::KeyConfirm { mac }` | host → viewer | Host's SPAKE2 key confirmation (v2) |
-| `AuthRequest::ReconnectTicket { token }` | viewer → host | Re-authorize with a single-use ticket (v4; refused until implemented) |
+| `AuthRequest::ReconnectTicket { token }` | viewer → host | Re-authorize with a single-use ticket (v4) |
 | `AuthResult::Accepted { permissions }` | host → viewer | Session authorized |
 | `AuthResult::Rejected { reason }` | host → viewer | `UserDeclined`, `WrongCredentials`, `RateLimited`, `NotAllowed`, `VersionMismatch` |
 | `VideoFrame { seq, timestamp_us, width, height, codec, keyframe, data }` | host → viewer (one uni stream per frame) | One encoded frame, H.264 Annex-B |
 | `InputEvent` | viewer → host | Mouse/keyboard; see below |
 | `ClipboardData::Text / Image` | both | Clipboard sync (needs `CLIPBOARD`) |
+| `ClipboardData::Png { width, height, png }` | both | PNG-compressed clipboard image (v5, `CLIPBOARD`) |
 | `FileChunk { transfer_id, offset, data, last }` | both | File transfer (needs `FILES`) |
 | `Permissions(u16)` | host → viewer | Live permission update/revocation |
 | `Bye { reason }` | both | Graceful close |
@@ -295,6 +305,8 @@ Directories (`is_dir`) are created by the receiver; modification times are resto
 - `ClipboardData::Text / Image` (v1) keep working; text is sent byte-exact (Arabic, RTL marks,
   ZWJ/ZWNJ preserved). Payloads larger than about 1 MiB should go on a `StreamKind::Clipboard` uni
   stream (body = one framed `Message`) instead of the control stream.
+- `ClipboardData::Png { width, height, png }` (v5): images travel PNG-compressed. The decoded
+  RGBA size is capped (64 MiB by default) before allocating.
 - `ClipboardHtml { html, alt_text }`: the `CF_HTML` fragment as UTF-8 plus a plain-text fallback.
 - `ClipboardFiles { transfer_id, items }`: files were copied on one side. Nothing is sent until the
   user pastes on the other side; then the viewer starts a `TransferOffer` with the same id
@@ -324,8 +336,20 @@ body is a sequence of `u16` LE length + one Opus packet. `enabled: false` stops 
 
 `ReconnectTicket { token, expires_unix_ms }` is single-use and bound on the host to the viewer's
 TLS fingerprint. After the host restarts, the viewer reconnects and sends
-`AuthRequest::ReconnectTicket { token }` instead of a prompt/code; a ticket presented by another
-key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited like passwords).
+`AuthRequest::ReconnectTicket { token }` instead of a prompt/code; the host answers `Accepted`
+with the permissions the session had when the ticket was issued. Every ticket check counts
+against the per-IP rate limit like a password attempt. Refusals:
+
+- unknown, already used, revoked, expired, or presented by another key (the ticket is then
+  burned): `Rejected(WrongCredentials)`; the viewer stops trying;
+- the host process that issued the ticket is still running (the restart has not happened yet),
+  or the host does not accept tickets: `Rejected(NotAllowed)`; the viewer may retry later.
+
+Host behavior (TLP-Desk): the token is 32 random bytes; only its SHA-256 is stored (persisted in
+the data folder so it survives the reboot), it expires after 10 minutes, a viewer holds at most
+one, and it is revoked when the session's permissions change, when the session is ended on
+purpose (host user disconnects, viewer says `Bye(UserClosed)`, `VIEW` revoked), or when the
+restart fails. Before anyone logs in the host only answers if the TLP-Desk service runs.
 
 ### Quality and latency
 
@@ -345,6 +369,19 @@ key, after expiry or a second time is `Rejected(NotAllowed)` (and rate-limited l
   `TunnelOpened { id }` or `TunnelClose { id, error }`. Each local TCP connection accepted by the
   viewer becomes one `StreamKind::Tunnel` bidi stream (stream id = tunnel id), opened by the viewer;
   the host connects to the target for each stream and copies bytes both ways.
+  - **Targets**: `target_host` must be an IP literal (IPv6 optionally in brackets) or
+    `localhost`, and inside the host's allow-list (default: loopback, RFC 1918, link-local,
+    IPv6 ULA). Host names are never resolved, so no DNS query leaves the LAN; unspecified,
+    multicast and broadcast addresses are refused.
+  - **Close reasons**: the host fills `TunnelClose::error` with one of `target-not-allowed`,
+    `bad-target`, `too-many-tunnels`, `duplicate-id`, `permission-denied`,
+    `permission-revoked` (sent for every open tunnel when `TUNNEL` is revoked). Receivers
+    treat other text as free text (control characters stripped, at most 200 characters).
+  - **Half-close**: TCP EOF finishes the stream's send direction; a finished stream shuts down
+    the TCP write half; the other direction keeps flowing.
+  - **Refusal / abort**: a tunnel stream for an unknown or closed tunnel, beyond the host's
+    connection limit, without `TUNNEL`, or whose target cannot be reached is stopped/reset
+    with `STREAM_REFUSED`; aborted (idle, revoked) connections are reset the same way.
 - **Whiteboard** (`WHITEBOARD`): `WhiteboardStroke { id, points, color_rgba, width }` with points
   normalized to `0..=65535` over the streamed monitor, `color_rgba = 0xRRGGBBAA`, width in 1/10000
   of the monitor height; `WhiteboardClear` erases all.

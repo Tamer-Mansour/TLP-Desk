@@ -26,7 +26,7 @@ pub use stream::{
 
 /// Wire protocol version. Bump on every incompatible change to [`Message`] and update
 /// `docs/protocol.md`.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Errors produced while encoding or decoding protocol frames.
 #[derive(Debug, thiserror::Error)]

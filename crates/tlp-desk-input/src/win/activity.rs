@@ -21,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PM_NOREMOVE, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_QUIT, WM_USER,
 };
 
-use crate::activity::{ActivityStamp, LocalActivity};
+use crate::activity::{counts_as_local, ActivityStamp, LocalActivity};
 use crate::InputError;
 
 thread_local! {
@@ -36,6 +36,8 @@ thread_local! {
 /// The hooks never block or swallow anything: they store one atomic timestamp and pass the
 /// event on with `CallNextHookEx`. Events carrying `LLMHF_INJECTED` / `LLKHF_INJECTED` (or the
 /// lower-integrity variants) — i.e. `SendInput` from this or any other program — are ignored.
+/// While privacy mode blocks the local keyboard and mouse ([`crate::local_input_blocked`]),
+/// physical events are ignored too: local priority is suspended during privacy mode.
 ///
 /// Dropping the monitor removes both hooks and joins the thread.
 pub struct LocalActivityMonitor {
@@ -85,6 +87,14 @@ impl LocalActivityMonitor {
 impl LocalActivity for LocalActivityMonitor {
     fn last_physical_input(&self) -> Option<Instant> {
         self.stamp.last()
+    }
+
+    fn last_physical_keyboard(&self) -> Option<Instant> {
+        self.stamp.last_physical_keyboard()
+    }
+
+    fn last_physical_pointer(&self) -> Option<Instant> {
+        self.stamp.last_physical_pointer()
     }
 }
 
@@ -148,11 +158,18 @@ fn hook_thread(stamp: Arc<ActivityStamp>, ready: SyncSender<Result<u32, String>>
     STAMP.with(|s| s.borrow_mut().take());
 }
 
-fn record(injected: bool) {
+/// Stamps one hook event. Injected events, and physical ones that privacy mode swallows,
+/// do not count (see [`counts_as_local`]).
+fn record(keyboard: bool, injected: bool) {
     let now = Instant::now();
+    let ignored = !counts_as_local(injected);
     STAMP.with(|s| {
         if let Some(s) = s.borrow().as_ref() {
-            s.record(injected, now);
+            if keyboard {
+                s.record_keyboard(ignored, now);
+            } else {
+                s.record_pointer(ignored, now);
+            }
         }
     });
 }
@@ -163,7 +180,10 @@ unsafe extern "system" fn ll_mouse_proc(code: i32, wparam: WPARAM, lparam: LPARA
         // SAFETY: for WH_MOUSE_LL with HC_ACTION, lParam points to an MSLLHOOKSTRUCT valid for
         // the duration of this call; we copy the flags out immediately.
         let flags = unsafe { (*(lparam.0 as *const MSLLHOOKSTRUCT)).flags };
-        record(flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED) != 0);
+        record(
+            false,
+            flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED) != 0,
+        );
     }
     // SAFETY: forwards the unmodified arguments we received, as the hook contract requires.
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
@@ -175,7 +195,10 @@ unsafe extern "system" fn ll_keyboard_proc(code: i32, wparam: WPARAM, lparam: LP
         // SAFETY: for WH_KEYBOARD_LL with HC_ACTION, lParam points to a KBDLLHOOKSTRUCT valid
         // for the duration of this call; we copy the flags out immediately.
         let flags = unsafe { (*(lparam.0 as *const KBDLLHOOKSTRUCT)).flags };
-        record(flags.contains(LLKHF_INJECTED) || flags.contains(LLKHF_LOWER_IL_INJECTED));
+        record(
+            true,
+            flags.contains(LLKHF_INJECTED) || flags.contains(LLKHF_LOWER_IL_INJECTED),
+        );
     }
     // SAFETY: forwards the unmodified arguments we received, as the hook contract requires.
     unsafe { CallNextHookEx(None, code, wparam, lparam) }

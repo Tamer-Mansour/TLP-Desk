@@ -1,15 +1,31 @@
 # Wake-on-LAN
 
-> **Coming soon.** This feature is planned but not available yet. It is part of **M4 — Power features** in the [roadmap](https://github.com/Tamer-Mansour/TLP-Desk/blob/TLP-Desk/ROADMAP.md).
+![Magic packet sent](../../../media/wake-on-lan-en-light.png)
 
-## What it will do
+TLP-Desk can switch on a sleeping or powered-off PC from the [address book](address-book.md),
+using the standard Wake-on-LAN "magic packet" on your local network.
 
-Turn on a sleeping or switched-off PC from the address book, using the standard Wake-on-LAN magic packet on your local network.
+## Using it
 
-## Status
+When a saved device is offline, its row shows **Wake up** instead of **Connect**. Click it; the
+message **Magic packet sent to …** confirms the packet left this PC. Give the PC a minute to
+start, then connect when its dot turns green.
 
-The network code can already send Wake-on-LAN packets; the address book and the button are missing.
+**Wake up** needs the PC's MAC address:
 
-## Until then
+- TLP-Desk learns it automatically while the PC is on: when you connect to it or see it in
+  **Devices on this network**, the address is read from Windows' own neighbour (ARP) cache.
+  Nothing extra is sent on the network for this.
+- Or type it yourself in the edit dialog (`00:1a:2b:3c:4d:5e`, dashes also work). A MAC you
+  typed is never replaced by a learned one.
 
-Any Wake-on-LAN tool can wake the PC; it must be enabled in the PC's BIOS/UEFI and network adapter settings.
+The packet is sent as a broadcast to the subnet where the PC was last seen (or to every network
+of this PC if that subnet is unknown). It never leaves your local network.
+
+## Requirements on the PC to wake
+
+- Wake-on-LAN enabled in the BIOS/UEFI.
+- In Device Manager, on the network adapter: **Power Management** → *Allow this device to wake
+  the computer*, and on **Advanced** → *Wake on Magic Packet* enabled.
+- Wired Ethernet is the reliable choice; most Wi-Fi adapters cannot be woken.
+- The PC must be on the same local network (broadcasts do not cross routers).
