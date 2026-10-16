@@ -84,6 +84,18 @@ Every decoder and every message handler must turn bad input into an error, never
 - `tlp-desk-host/tests/hostile_viewer.rs` — an authorized viewer that sends what it has no
   permission for, forges host-only messages, floods, and reconnects in a loop.
 
+Hostile inputs of the feature lanes live next to the feature (find them with the names below):
+
+| Input | Test |
+|---|---|
+| file paths: `..`, drive letters, devices, alternate data streams, shares | `files::transfer::path` and `files::fs::path` unit tests, `transfer::traversal_attempts_are_rejected` |
+| tunnel targets: public IPs and names | `host/tests/tunnel.rs` `internet_and_named_targets_are_refused`, `e2e::public_addresses_are_refused` |
+| chat length and flood | `host/tests/chat.rs` `length_cap_and_duplicates_are_enforced`, `peer_flood_is_rate_limited` |
+| clipboard size caps | `files::clipboard::wire` cap tests, `clipboard_e2e::oversized_text_is_refused_with_an_event` |
+| whiteboard stroke floods | `host/tests/whiteboard.rs` `hostile_strokes_are_capped` |
+| device-info spoofing | `host::device_info` `limit_*`, `viewer::device_info` `sanitize_caps_hostile_answers` |
+| hostile `Hello`, wrong order, huge frames, unknown stream kinds, storms, half-open streams, brute force | `net/tests/hostile.rs` |
+
 When your lane adds a message handler, add its malformed and unpermitted cases there (or next to
 your feature's tests with the test kit): wrong ids, Arabic and over-long text, `..` paths,
 absurd sizes.
@@ -142,3 +154,24 @@ usual names).
 - A hardware test gets `#[ignore = "<reason>"]` with a reason that says what it needs, and the
   command to run it in the file's doc comment.
 - Tests may `unwrap`, `expect` and index freely (`.clippy.toml` allows it in tests).
+
+## Hunting flaky tests
+
+A test that fails "about one run in three under load" is a bug until proven otherwise. Raise the
+load the way CI does, then run the single test many times at once:
+
+```powershell
+cargo test -p tlp-desk-files --test transfer --no-run
+$exe = (Get-ChildItem $env:CARGO_TARGET_DIR\debug\deps	ransfer-*.exe | Sort LastWriteTime | Select -Last 1).FullName
+1..48 | % { Start-Job { param($e) & $e many_small_files 2>&1 | Out-String } -ArgumentList $exe } | Receive-Job -Wait
+```
+
+Set `RUST_LOG=tlp_desk_net=debug,tlp_desk_files=debug` on a failing run: the first `WARN` line is
+usually the cause. Two real bugs were found this way (both fixed, both with a regression test):
+
+- `many_small_files` hung: a side stream arriving while its per-kind queue (64) was full was
+  refused, but the sender had already `finish()`ed it, so the file vanished silently. The queue now
+  applies back-pressure (`slow_consumer_receives_every_stream`).
+- `unattended::restart_and_reconnect_with_ticket` could not rebind its port after `drop(host)`:
+  the endpoint's accept task kept the UDP socket bound for the life of the process
+  (`dropping_the_endpoint_releases_the_port`).
