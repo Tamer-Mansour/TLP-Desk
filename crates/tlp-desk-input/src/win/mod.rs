@@ -21,10 +21,11 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
     KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
-    MAPVK_VK_TO_VSC_EX, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE,
-    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL,
-    MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY,
+    KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC_EX, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL,
+    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
+    MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK,
+    MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, MOUSE_EVENT_FLAGS,
+    VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -209,6 +210,24 @@ impl SendInputSink {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(0),
                             wScan: key.scancode,
+                            dwFlags: flags,
+                            time: 0,
+                            dwExtraInfo: 0,
+                        },
+                    },
+                }
+            }
+            RawInput::Unicode { unit, down } => {
+                let mut flags: KEYBD_EVENT_FLAGS = KEYEVENTF_UNICODE;
+                if !down {
+                    flags |= KEYEVENTF_KEYUP;
+                }
+                INPUT {
+                    r#type: INPUT_KEYBOARD,
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: VIRTUAL_KEY(0),
+                            wScan: unit,
                             dwFlags: flags,
                             time: 0,
                             dwExtraInfo: 0,
@@ -406,6 +425,23 @@ mod tests {
             ki.dwFlags,
             KEYEVENTF_SCANCODE | KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP
         );
+    }
+
+    #[test]
+    fn unicode_unit_conversion() {
+        let i = SendInputSink::to_input(
+            &RawInput::Unicode {
+                unit: 0x0628,
+                down: false,
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(i.r#type, INPUT_KEYBOARD);
+        // SAFETY: keyboard input built above.
+        let ki = unsafe { i.Anonymous.ki };
+        assert_eq!((ki.wScan, ki.wVk), (0x0628, VIRTUAL_KEY(0)));
+        assert_eq!(ki.dwFlags, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
     }
 
     #[test]

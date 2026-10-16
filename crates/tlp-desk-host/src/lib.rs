@@ -863,7 +863,7 @@ fn input_allowed(perms: Permissions, ev: &InputEvent) -> bool {
         InputEvent::MouseMove { .. }
         | InputEvent::MouseButton { .. }
         | InputEvent::MouseWheel { .. } => perms.contains(Permissions::CONTROL),
-        InputEvent::Key { .. } => perms.contains(Permissions::KEYBOARD),
+        InputEvent::Key { .. } | InputEvent::Text { .. } => perms.contains(Permissions::KEYBOARD),
         InputEvent::ReleaseAll => {
             perms.contains(Permissions::CONTROL) || perms.contains(Permissions::KEYBOARD)
         }

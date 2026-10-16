@@ -106,6 +106,8 @@ struct RemoteState {
     keys: HashSet<(u16, bool)>,
     wheel: i32,
     input_events: u64,
+    /// Text received through `InputEvent::Text`.
+    typed: String,
     /// Streamed monitor index.
     monitor: u32,
 }
@@ -560,6 +562,7 @@ impl Backend for FakeBackend {
                     r.keys.remove(&(scancode, extended));
                 }
             }
+            InputEvent::Text { text } => r.typed.push_str(&text),
             InputEvent::ReleaseAll => {
                 r.keys.clear();
                 r.buttons.clear();
