@@ -3,13 +3,13 @@
 #[path = "fs_common/mod.rs"]
 mod common;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{connect, wait_until, Pair, HOST_KEY, VIEWER_KEY};
 use tlp_desk_files::clipfiles::{
-    ClipFilesConfig, ClipFilesFeature, ManualClipboard, RemoteClipboardFiles, CLIPBOARD_ID_BIT,
-    FEATURE_NAME,
+    AnnouncedFiles, ClipFilesConfig, ClipFilesFeature, ManualClipboard, RemoteClipboardFiles,
+    RemoteUpdate, CLIPBOARD_ID_BIT, FEATURE_NAME, VIEWER_ID_BIT,
 };
 use tlp_desk_net::FeatureSet;
 use tlp_desk_proto::Permissions;
@@ -20,6 +20,7 @@ const BOTH: Permissions =
 struct Setup {
     pair: Pair,
     clip: ManualClipboard,
+    viewer_clip: ManualClipboard,
     host: Arc<ClipFilesFeature>,
     viewer: Arc<ClipFilesFeature>,
 }
@@ -30,9 +31,9 @@ async fn setup(perms: Permissions) -> Setup {
         source: clip.factory(),
         poll: Duration::from_millis(10),
     });
-    // The viewer's own clipboard is never read in these tests.
+    let viewer_clip = ManualClipboard::default();
     let viewer = ClipFilesFeature::new(ClipFilesConfig {
-        source: ManualClipboard::default().factory(),
+        source: viewer_clip.factory(),
         poll: Duration::from_millis(10),
     });
     let pair = connect(
@@ -44,6 +45,7 @@ async fn setup(perms: Permissions) -> Setup {
     Setup {
         pair,
         clip,
+        viewer_clip,
         host,
         viewer,
     }
@@ -145,7 +147,10 @@ async fn already_copied_files_are_announced_when_the_session_starts() {
         source: clip.factory(),
         poll: Duration::from_millis(10),
     });
-    let viewer = ClipFilesFeature::new(ClipFilesConfig::default());
+    let viewer = ClipFilesFeature::new(ClipFilesConfig {
+        source: ManualClipboard::default().factory(),
+        poll: Duration::from_millis(10),
+    });
     let _pair = connect(
         BOTH,
         FeatureSet::new().with(host),
@@ -153,4 +158,107 @@ async fn already_copied_files_are_announced_when_the_session_starts() {
     )
     .await;
     wait_until(|| viewer.remote_files(VIEWER_KEY).is_some()).await;
+}
+
+/// Viewer copies in Explorer -> the host's handler gets the files with a pull function; pulling
+/// makes the viewer's upload handler fire with exactly the files the viewer announced.
+#[tokio::test(flavor = "multi_thread")]
+async fn viewer_copy_reaches_the_host_and_a_pull_asks_the_viewer_to_upload() {
+    let s = setup(BOTH).await;
+    let updates: Arc<Mutex<Vec<RemoteUpdate>>> = Arc::default();
+    let sink = updates.clone();
+    s.host
+        .set_remote_handler(Arc::new(move |u| sink.lock().unwrap().push(u)));
+    let uploads: Arc<Mutex<Vec<(u64, AnnouncedFiles)>>> = Arc::default();
+    let sink = uploads.clone();
+    s.viewer
+        .set_upload_handler(Arc::new(move |k, a| sink.lock().unwrap().push((k, a))));
+
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("ملفات المشروع");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("تقرير.docx"), [1u8; 20]).unwrap();
+    s.viewer_clip.set(vec![folder.clone()]);
+
+    wait_until(|| s.host.remote_files(HOST_KEY).is_some()).await;
+    let got = s.host.remote_files(HOST_KEY).unwrap();
+    assert_ne!(got.transfer_id & VIEWER_ID_BIT, 0);
+    assert_eq!(got.transfer_id & CLIPBOARD_ID_BIT, 0);
+    let rel: Vec<_> = got.items.iter().map(|i| i.rel_path.as_str()).collect();
+    assert_eq!(rel, ["ملفات المشروع", "ملفات المشروع/تقرير.docx"]);
+    let pull = {
+        let u = updates.lock().unwrap();
+        let last = u.last().unwrap();
+        assert_eq!(last.files.as_ref(), Some(&got));
+        last.pull.clone().expect("the host can pull")
+    };
+    assert!(
+        uploads.lock().unwrap().is_empty(),
+        "nothing is uploaded before the paste"
+    );
+
+    pull();
+    wait_until(|| !uploads.lock().unwrap().is_empty()).await;
+    let (key, files) = uploads.lock().unwrap()[0].clone();
+    assert_eq!(key, VIEWER_KEY);
+    assert_eq!(files.transfer_id, got.transfer_id);
+    assert_eq!(files.set.source_dir, tmp.path());
+
+    // The viewer copies something else: the host's entry is cleared and the handler told.
+    s.viewer_clip.set(Vec::new());
+    wait_until(|| s.host.remote_files(HOST_KEY).is_none()).await;
+    wait_until(|| {
+        updates
+            .lock()
+            .unwrap()
+            .last()
+            .is_some_and(|u| u.files.is_none())
+    })
+    .await;
+}
+
+/// A host cannot make the viewer upload files it never announced, and a pull without
+/// permission is ignored.
+#[tokio::test(flavor = "multi_thread")]
+async fn pull_requests_for_unknown_ids_or_without_permission_are_ignored() {
+    let s = setup(BOTH).await;
+    let uploads: Arc<Mutex<Vec<(u64, AnnouncedFiles)>>> = Arc::default();
+    let sink = uploads.clone();
+    s.viewer
+        .set_upload_handler(Arc::new(move |k, a| sink.lock().unwrap().push((k, a))));
+    let updates: Arc<Mutex<Vec<RemoteUpdate>>> = Arc::default();
+    let sink = updates.clone();
+    s.host
+        .set_remote_handler(Arc::new(move |u| sink.lock().unwrap().push(u)));
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("سري.txt"), "x").unwrap();
+    s.viewer_clip.set(vec![tmp.path().join("سري.txt")]);
+    wait_until(|| s.host.remote_files(HOST_KEY).is_some()).await;
+    let got = s.host.remote_files(HOST_KEY).unwrap();
+    let pull = updates
+        .lock()
+        .unwrap()
+        .last()
+        .unwrap()
+        .pull
+        .clone()
+        .unwrap();
+
+    // Forged pull: right items, wrong id.
+    let forged = tlp_desk_proto::Message::ClipboardFiles {
+        transfer_id: got.transfer_id ^ 2,
+        items: got.items.clone(),
+    };
+    s.pair.host.send(&forged).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(uploads.lock().unwrap().is_empty());
+
+    // Real pull but the permission was revoked meanwhile.
+    s.pair
+        .set_permissions(Permissions::VIEW | Permissions::CLIPBOARD)
+        .await;
+    wait_until(|| s.host.remote_files(HOST_KEY).is_none()).await;
+    pull();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(uploads.lock().unwrap().is_empty());
 }
