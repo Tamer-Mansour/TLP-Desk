@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Args;
 
-use super::common::{Ctx, DialArgs};
+use super::common::{Ctx, DialArgs, OnConflict};
 use super::send_file::{connect, watch};
 
 /// Arguments of `get-file`.
@@ -19,11 +19,14 @@ pub struct GetFileArgs {
     /// Local destination folder (default: the current folder).
     #[arg(long, default_value = ".")]
     pub to: PathBuf,
+    /// What to do with a file that already exists in the destination.
+    #[arg(long, value_enum, default_value_t)]
+    pub on_conflict: OnConflict,
 }
 
 /// Runs `get-file`.
 pub async fn run(ctx: &Ctx, args: &GetFileArgs) -> Result<()> {
-    let (ft, mut dialed) = connect(ctx, &args.dial).await?;
+    let (ft, mut dialed) = connect(ctx, &args.dial, args.on_conflict).await?;
     let mut sub = ft.subscribe();
     let key = dialed.session.feature_key();
     let res = match ft

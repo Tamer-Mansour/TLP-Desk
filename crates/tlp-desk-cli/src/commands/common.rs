@@ -21,6 +21,29 @@ use crate::exit::CliError;
 use crate::output::Output;
 use crate::text;
 
+/// What to do when a file being received already exists (`--on-conflict`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum OnConflict {
+    /// Keep both: the new file becomes `name (2).ext` (default).
+    #[default]
+    KeepBoth,
+    /// Replace the existing file.
+    Overwrite,
+    /// Keep the existing file, skip the new one.
+    Skip,
+}
+
+impl OnConflict {
+    /// The engine policy.
+    pub fn policy(self) -> tlp_desk_files::ConflictPolicy {
+        match self {
+            Self::KeepBoth => tlp_desk_files::ConflictPolicy::Rename,
+            Self::Overwrite => tlp_desk_files::ConflictPolicy::Overwrite,
+            Self::Skip => tlp_desk_files::ConflictPolicy::Skip,
+        }
+    }
+}
+
 /// Environment variable holding the unattended-access password. The password is never
 /// accepted on the command line, where other local users could read it from the process list.
 pub const PASSWORD_ENV: &str = "TLP_DESK_PASSWORD";
@@ -183,4 +206,17 @@ pub async fn dial(ctx: &Ctx, args: &DialArgs, features: FeatureSet) -> Result<Di
         events,
         endpoint,
     })
+}
+
+#[cfg(test)]
+mod on_conflict_tests {
+    use super::*;
+
+    #[test]
+    fn on_conflict_maps_to_engine_policies_and_defaults_to_keeping_both() {
+        use tlp_desk_files::ConflictPolicy as P;
+        assert_eq!(OnConflict::default().policy(), P::Rename);
+        assert_eq!(OnConflict::Overwrite.policy(), P::Overwrite);
+        assert_eq!(OnConflict::Skip.policy(), P::Skip);
+    }
 }
