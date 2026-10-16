@@ -59,6 +59,10 @@ pub struct ServeArgs {
     /// Do not show the green marker at the pointer while a viewer moves it.
     #[arg(long)]
     pub no_pointer_marker: bool,
+    /// Give every viewer its own screen capturer instead of sharing one per monitor
+    /// (for comparing CPU use; sharing is the default).
+    #[arg(long)]
+    pub no_shared_capture: bool,
     /// Let viewers turn on privacy mode (black screen + blocked local keyboard/mouse here).
     /// Hold Ctrl+Alt+Shift+P for 3 s, or press Ctrl+Alt+Del, to end it locally.
     #[arg(long)]
@@ -116,6 +120,7 @@ impl ServeArgs {
                 .clone()
                 .unwrap_or_else(tlp_desk_net::default_device_name),
             features: host_features(self),
+            share_capture: !self.no_shared_capture,
             ..HostConfig::default()
         }
     }
