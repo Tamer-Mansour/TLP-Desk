@@ -16,7 +16,7 @@
 //!   `HMAC-SHA256(K, "tlp-desk/kc/host" || T)`. MACs are compared in constant time.
 //!   A wrong code yields a different `K` on each side, so the MACs fail on both sides cleanly.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use spake2::{Ed25519Group, Identity as SpakeIdentity, Password, Spake2};
 
@@ -131,16 +131,7 @@ impl PakeSession {
             msg_a,
             msg_b,
         ]);
-        let mac = |label: &[u8]| -> [u8; 32] {
-            #[allow(
-                clippy::expect_used,
-                reason = "HMAC accepts keys of any length: new_from_slice cannot fail"
-            )]
-            let mut m = <Hmac<Sha256> as Mac>::new_from_slice(&key).expect("HMAC takes any key");
-            m.update(label);
-            m.update(&transcript);
-            m.finalize().into_bytes().into()
-        };
+        let mac = |label: &[u8]| hmac_sha256(&key, &[label, &transcript]);
         let session_key = mac(b"tlp-desk/session-key");
         Ok(PakeKeys {
             role: self.role,
@@ -203,9 +194,43 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// HMAC-SHA256 of the concatenation of `parts` under `key`.
+fn hmac_sha256(key: &[u8], parts: &[&[u8]]) -> [u8; 32] {
+    #[allow(
+        clippy::expect_used,
+        reason = "HMAC accepts keys of any length: new_from_slice cannot fail"
+    )]
+    let mut m = <Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("HMAC takes any key");
+    for p in parts {
+        m.update(p);
+    }
+    m.finalize().into_bytes().into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Key confirmation must stay byte-identical across hmac/sha2 updates, or a viewer and a
+    /// host built with different versions could no longer authenticate each other.
+    /// RFC 4231 test case 2 (HMAC-SHA256) and the FIPS 180-2 "abc" vector (SHA-256).
+    #[test]
+    fn hmac_and_sha256_match_published_vectors() {
+        use sha2::Digest as _;
+        let tag = hmac_sha256(b"Jefe", &[b"what do ya want ", b"for nothing?"]);
+        assert_eq!(
+            hex(&tag),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+        assert_eq!(
+            hex(&Sha256::digest(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     fn ctx(cb: &[u8]) -> PakeContext {
         PakeContext {
