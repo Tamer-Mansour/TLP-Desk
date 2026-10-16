@@ -114,3 +114,40 @@ fn default_refine_forces_a_bigger_keyframe_and_restores_the_bitrate() {
     println!("default refine: {moving_psnr:.1} -> {refined_psnr:.1} dB");
     assert!(refined_psnr > moving_psnr + 2.0);
 }
+
+/// The numbers quoted in `docs/src/dev/performance.md`: 1080p60 at the default LAN bitrate,
+/// 11 px text scrolled 37 px per frame (worst case for motion compensation), then stopped.
+#[test]
+fn report_1080p_default_bitrate() {
+    let cfg = EncoderConfig::for_screen(1920, 1080, 60);
+    let mut enc = H264Encoder::new(cfg).unwrap();
+    let mut dec = new_decoder().unwrap();
+    let mut last = None;
+    let mut bytes = 0usize;
+    for i in 0..30u32 {
+        let src = text_scene(1920, 1080, 2, i * 37);
+        let mut f = src.clone();
+        f.timestamp_us = u64::from(i) * 16_667;
+        let out = enc.encode(&f).unwrap().unwrap();
+        bytes += out.data.len();
+        let d = decode_one(dec.as_mut(), &out.data);
+        last = Some((src, d));
+    }
+    let (src, moving) = last.unwrap();
+    let mut f = src.clone();
+    f.timestamp_us = 30 * 16_667;
+    let refined = enc.encode_refine(&f).unwrap().unwrap();
+    let r = decode_one(dec.as_mut(), &refined.data);
+    println!(
+        "1080p60 @ {} kbps, scrolling text: moving PSNR {:.1} dB SSIM {:.4} (avg {} KB/frame); \
+         refined PSNR {:.1} dB SSIM {:.4} ({} KB once)",
+        cfg.bitrate_kbps,
+        psnr(&src, &moving),
+        ssim(&src, &moving),
+        bytes / 30 / 1024,
+        psnr(&src, &r),
+        ssim(&src, &r),
+        refined.data.len() / 1024
+    );
+    assert!(psnr(&src, &r) > psnr(&src, &moving) + 3.0);
+}
