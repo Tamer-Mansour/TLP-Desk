@@ -23,6 +23,7 @@ pub mod audio;
 pub mod chat;
 mod clipboard;
 pub mod device_info;
+pub(crate) mod drag_out;
 pub mod fake;
 pub mod files;
 pub mod files_bridge;
@@ -888,6 +889,27 @@ pub trait Backend: Send + Sync {
             session = session.0,
             "device info not supported by this backend"
         );
+    }
+
+    // --- drag-out: remote files dragged into Explorer (TLP-drag-out) ---
+    /// A pointer drag of remote files (absolute host paths in one folder) started in the file
+    /// browser: list them now so a drag out of the window can start at once. Replaces any
+    /// earlier prepared drag.
+    fn drag_out_prepare(&self, session: SessionId, remote: Vec<String>) {
+        let _ = (session, remote);
+    }
+
+    /// The pointer left the window with the prepared drag: hands the files to the OS drag loop
+    /// and returns when they were dropped or the drag was cancelled (Windows: a modal loop on
+    /// the GUI thread). The drop target copies the files afterwards, in the background.
+    fn drag_out_run(&self, session: SessionId) -> files::DragOutcome {
+        let _ = session;
+        files::DragOutcome::Unsupported
+    }
+
+    /// The prepared drag ended inside the window: forget it.
+    fn drag_out_cancel(&self, session: SessionId) {
+        let _ = session;
     }
 }
 
