@@ -2,6 +2,7 @@
 //! (`main.rs`) wires it to a backend implementation.
 #![forbid(unsafe_code)]
 
+pub mod address_book;
 pub mod app;
 pub mod backend;
 pub mod banner;

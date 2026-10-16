@@ -17,6 +17,7 @@ use crate::backend::{
 use crate::i18n::{format::to_western_digits, Lang, Tx, S};
 use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
+use crate::ui::address_book::AddressBookUi;
 use crate::ui::chat::{self as chat_ui, ChatState};
 use crate::ui::icons::{self, Icon};
 use crate::ui::recordings::{self, RecordState, RecordingsUi};
@@ -80,6 +81,9 @@ pub struct StartOptions {
     /// One-time code for `connect`.
     pub code: Option<String>,
     pub screen_settings: bool,
+    /// Keep the address book in memory only: nothing is read from or written to
+    /// `%APPDATA%` (screenshots, tests).
+    pub address_book_in_memory: bool,
 }
 
 pub struct App {
@@ -117,6 +121,8 @@ pub struct App {
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    /// Saved devices (home screen tab).
+    pub address_book: AddressBookUi,
     // --- TLP-settings-tray ---
     /// Settings screen editor state.
     pub settings_ui: crate::ui::settings::SettingsUi,
@@ -146,6 +152,12 @@ impl App {
         theme::install(&cc.egui_ctx);
         theme::apply_lang(&cc.egui_ctx, settings.lang);
         let local = backend.local_info();
+        let book_tx = Tx::new(settings.lang, settings.digits);
+        let address_book = if opts.address_book_in_memory {
+            AddressBookUi::load(None, book_tx)
+        } else {
+            AddressBookUi::load_default(book_tx)
+        };
         let mut app = Self {
             name_edit: local.device_name.clone(),
             backend,
@@ -174,6 +186,7 @@ impl App {
             host_input_blocked: None,
             session: None,
             notice: None,
+            address_book,
             settings_ui: Default::default(),
             autostart: crate::settings::autostart::system(),
             tray: Default::default(),
@@ -287,7 +300,11 @@ impl App {
                     }
                     self.local = info;
                 }
-                BackendEvent::Devices(list) => self.devices = Some(list),
+                BackendEvent::Devices(list) => {
+                    self.address_book
+                        .on_devices(&list, self.backend.as_ref(), self.tx);
+                    self.devices = Some(list);
+                }
                 BackendEvent::AwaitingAccept { attempt } => {
                     if let Some(p) = self.pending.as_mut().filter(|p| p.attempt == attempt) {
                         p.awaiting_accept = true;
@@ -323,6 +340,8 @@ impl App {
                 } => {
                     if self.pending.as_ref().is_some_and(|p| p.attempt == attempt) {
                         self.pending = None;
+                        self.address_book
+                            .on_session_started(&peer, self.backend.as_ref(), self.tx);
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
                         view.clipboard.sync = !self.settings.clipboard_sync_off;
                         if let Some(grab) =

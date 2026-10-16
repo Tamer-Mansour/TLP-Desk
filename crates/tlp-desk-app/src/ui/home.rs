@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, Id, RichText};
 
+use super::address_book::{BookCommand, HomeTab};
 use super::icons::{self, Icon};
 use super::{theme, widgets};
 use crate::app::{App, Screen};
@@ -16,6 +17,10 @@ enum Action {
     /// connection log (TLP-settings-tray)
     OpenConnectionLog,
     SetLang(Lang),
+    /// Save a discovered device to the address book.
+    SaveDevice(DiscoveredDevice),
+    /// Switch to the address book tab.
+    ShowAddressBook,
     /// recording (TLP-recording)
     OpenRecordings,
 }
@@ -105,12 +110,15 @@ impl App {
                     .inner_margin(20),
             )
             .show(ui, |ui| {
+                self.address_book.offer_ui(ui, tx, self.backend.as_ref());
                 ui.columns(2, |cols| {
                     let (first, second) = if tx.rtl() { (1, 0) } else { (0, 1) };
                     self.device_card(&mut cols[first], &mut actions);
                     self.connect_card(&mut cols[second], &mut actions);
                 });
             });
+        self.address_book.dialogs_ui(ui.ctx(), tx);
+        self.address_book.toast_ui(ui.ctx(), tx);
 
         for action in actions {
             match action {
@@ -120,6 +128,11 @@ impl App {
                 Action::OpenSettings => self.screen = Screen::Settings,
                 Action::OpenConnectionLog => self.open_connection_log(),
                 Action::SetLang(l) => self.set_lang(ui.ctx(), l),
+                Action::SaveDevice(d) => {
+                    self.address_book
+                        .save_discovered(&d, self.backend.as_ref(), tx);
+                }
+                Action::ShowAddressBook => self.address_book.tab = HomeTab::AddressBook,
                 Action::OpenRecordings => {
                     self.recordings.open = true;
                     self.recordings.reload();
@@ -248,8 +261,29 @@ impl App {
         ui.add_space(12.0);
         theme::card(ui, |ui| {
             theme::column(ui, tx.rtl(), |ui| {
-                widgets::icon_heading(ui, tx, Icon::Network, tx.t(S::NearbyDevices));
+                // Tabs: devices on this network | address book.
+                theme::row(ui, tx.rtl(), |ui| {
+                    let tab = &mut self.address_book.tab;
+                    for (t, icon, key) in [
+                        (HomeTab::Nearby, Icon::Network, S::NearbyDevices),
+                        (HomeTab::AddressBook, Icon::AddressBook, S::AbTitle),
+                    ] {
+                        let b = icons::icon_text_selectable(tx, *tab == t, icon, tx.t(key));
+                        if ui.add(b).clicked() {
+                            *tab = t;
+                        }
+                    }
+                });
                 ui.add_space(6.0);
+                if self.address_book.tab == HomeTab::AddressBook {
+                    let backend = self.backend.clone();
+                    if let Some(BookCommand::Connect(t)) =
+                        self.address_book.list_ui(ui, tx, backend.as_ref())
+                    {
+                        actions.push(Action::Connect(t));
+                    }
+                    return;
+                }
                 match &self.devices {
                     None => {
                         theme::row(ui, tx.rtl(), |ui| {
@@ -262,7 +296,8 @@ impl App {
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
                                 for dev in list {
-                                    device_row(ui, tx, dev, actions);
+                                    let saved = self.address_book.book.contains(dev.device_id);
+                                    device_row(ui, tx, dev, saved, actions);
                                 }
                             });
                     }
@@ -272,7 +307,13 @@ impl App {
     }
 }
 
-fn device_row(ui: &mut egui::Ui, tx: Tx, dev: &DiscoveredDevice, actions: &mut Vec<Action>) {
+fn device_row(
+    ui: &mut egui::Ui,
+    tx: Tx,
+    dev: &DiscoveredDevice,
+    saved: bool,
+    actions: &mut Vec<Action>,
+) {
     let dark = ui.visuals().dark_mode;
     egui::Frame::new()
         .fill(ui.visuals().extreme_bg_color)
@@ -306,6 +347,19 @@ fn device_row(ui: &mut egui::Ui, tx: Tx, dev: &DiscoveredDevice, actions: &mut V
                         .clicked()
                     {
                         actions.push(Action::Connect(ConnectTarget::Id(dev.device_id)));
+                    }
+                    // Address book: a selected star means saved (click opens the book).
+                    let tip = if saved {
+                        S::AbSavedDevice
+                    } else {
+                        S::AbSaveDevice
+                    };
+                    if icons::icon_toggle(ui, tx, saved, Icon::Star, tx.t(tip)).clicked() {
+                        actions.push(if saved {
+                            Action::ShowAddressBook
+                        } else {
+                            Action::SaveDevice(dev.clone())
+                        });
                     }
                 });
             });

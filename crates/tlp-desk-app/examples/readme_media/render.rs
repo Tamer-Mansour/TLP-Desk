@@ -98,6 +98,8 @@ pub fn harness(look: Look) -> Harness<'static, App> {
     };
     let opts = StartOptions {
         lang: Some(look.lang),
+        // Never read or write the real address book.
+        address_book_in_memory: true,
         ..StartOptions::default()
     };
     Harness::builder()

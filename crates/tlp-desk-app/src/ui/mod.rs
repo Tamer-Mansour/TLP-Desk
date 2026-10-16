@@ -1,5 +1,6 @@
 //! egui views.
 
+pub mod address_book;
 pub mod chat;
 pub mod clipboard;
 pub mod connection_log;

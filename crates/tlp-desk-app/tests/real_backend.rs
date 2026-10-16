@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use tlp_desk_app::backend::real::{RealBackend, RealConfig};
 use tlp_desk_app::backend::{
-    Backend, BackendEvent, ConnectError, ConnectTarget, EndReason, EventReceiver, FrameSlot,
-    HostProblem, SessionId,
+    Backend, BackendEvent, ConnectError, ConnectTarget, DeviceId, EndReason, EventReceiver,
+    FrameSlot, HostProblem, SessionId,
 };
 use tlp_desk_capture::{BgraFrame, CaptureError, CursorState, MonitorInfo, ScreenCapturer};
 use tlp_desk_files::TransferConfig;
@@ -398,6 +398,30 @@ fn changed_host_key_is_loud_and_can_be_forgotten() {
             _ => None,
         });
     let _ = &mut host;
+}
+
+/// The address book shows the key pinned in known hosts. (Wake-on-LAN is not exercised here:
+/// the real backend would broadcast; `address_book::wol` tests it on loopback.)
+#[test]
+fn address_book_hooks_read_known_hosts_and_the_neighbour_cache() {
+    let rt = Runtime::new().unwrap();
+    let peer = start(&rt, Arc::default(), 0, |dir| {
+        std::fs::write(
+            dir.join("known_hosts"),
+            format!("id:482913057 {}\n", "3f9a".repeat(16)),
+        )
+        .unwrap();
+    });
+    assert_eq!(
+        peer.backend.pinned_fingerprint(DeviceId(482_913_057)),
+        Some("3f9a 3f9a 3f9a 3f9a".into())
+    );
+    assert_eq!(peer.backend.pinned_fingerprint(DeviceId(123_456_789)), None);
+    // Loopback never has a neighbour-cache entry; the lookup is read-only.
+    assert_eq!(
+        peer.backend.neighbor_mac("127.0.0.1".parse().unwrap()),
+        None
+    );
 }
 
 /// TLP-recording: the viewer records the live H.264 stream to an MP4 that plays back.

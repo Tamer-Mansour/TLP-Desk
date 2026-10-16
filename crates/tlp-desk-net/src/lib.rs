@@ -12,12 +12,15 @@
 //! * [`Feature`] / [`FeatureSet`] / [`FeatureDispatch`]: how feature lanes plug into sessions.
 //! * [`ChatFeature`]: chat between the viewer and the host user (both roles).
 //! * [`Discovery`]: mDNS `_tlpdesk._udp.local.` + broadcast fallback on UDP 47401.
-//! * [`send_wake_on_lan`].
+//! * [`send_wake_on_lan`]; [`neighbor_mac`] learns a device's MAC from the OS neighbour cache.
 //! * Port forwarding helpers: [`pipe_tcp`] (TCP <-> tunnel stream) and [`resolve_target`]
 //!   (LAN-only target check).
 //!
 //! No function in this crate contacts anything outside the local network.
-#![forbid(unsafe_code)]
+//!
+//! `unsafe` is denied crate-wide; only the Windows neighbour-cache wrapper
+//! (`neighbor::windows`) opts back in, with a `// SAFETY:` note on every block.
+#![deny(unsafe_code)]
 
 mod allow;
 mod chat;
@@ -25,6 +28,7 @@ mod discovery;
 mod endpoint;
 mod error;
 mod feature;
+mod neighbor;
 mod session;
 mod tls;
 mod tunnel;
@@ -46,6 +50,7 @@ pub use error::NetError;
 pub use feature::{
     Feature, FeatureCtx, FeatureDispatch, FeatureEvent, FeatureEventSink, FeatureSet,
 };
+pub use neighbor::{format_mac, neighbor_mac, neighbor_table, Neighbor};
 pub use quinn::{RecvStream, SendStream};
 pub use session::{
     stream_priority, PeerInfo, Session, SideStream, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT,

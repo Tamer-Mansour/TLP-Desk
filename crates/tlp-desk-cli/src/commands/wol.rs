@@ -1,7 +1,8 @@
 //! `wol <mac|alias>` (alias `exec-wol`): wake a sleeping PC on the LAN with a Wake-on-LAN
 //! magic packet.
 //!
-//! `<alias>` is looked up in `<data dir>/wol-aliases.txt`, one `name = MAC` per line (UTF-8,
+//! `<alias>` is looked up in the GUI address book (alias or name of a saved device that has a
+//! MAC), then in `<data dir>/wol-aliases.txt`, one `name = MAC` per line (UTF-8,
 //! Arabic names welcome, `#` starts a comment). The packet goes to every IPv4 subnet
 //! broadcast, or with `--to` to one LAN address; anything outside the LAN allow-list is
 //! refused (LAN-only rule).
@@ -58,8 +59,50 @@ pub fn resolve(data_dir: &Path, target: &str) -> Result<[u8; 6]> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e).with_context(|| format!("cannot read {}", path.display())),
     };
-    // FEATURE HOOK: the address book can add its saved MACs here.
-    lookup_alias(&text, target).ok_or_else(|| CliError::NotFound(target.to_owned()).into())
+    if let Some(mac) = lookup_alias(&text, target) {
+        return Ok(mac);
+    }
+    // The GUI's address book: saved devices with a MAC, found by alias or device name.
+    for dir in address_book_dirs(data_dir) {
+        let Ok(json) = std::fs::read_to_string(dir.join(ADDRESS_BOOK_FILE)) else {
+            continue;
+        };
+        if let Some(mac) = lookup_address_book(&json, target) {
+            return Ok(mac);
+        }
+    }
+    Err(CliError::NotFound(target.to_owned()).into())
+}
+
+/// The GUI's address book file name (`%APPDATA%\TLP-Desk\address_book.json`).
+pub const ADDRESS_BOOK_FILE: &str = "address_book.json";
+
+/// Folders that may hold the address book: the per-user app folder, then the data dir.
+fn address_book_dirs(data_dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        dirs.push(std::path::PathBuf::from(appdata).join("TLP-Desk"));
+    }
+    dirs.push(data_dir.to_path_buf());
+    dirs
+}
+
+/// Finds a saved device whose alias or name equals `name` (case-insensitive, trimmed) and has
+/// a MAC. Reads only the fields it needs, so newer files keep working.
+pub fn lookup_address_book(json: &str, name: &str) -> Option<[u8; 6]> {
+    let want = name.trim().to_lowercase();
+    let doc: serde_json::Value = serde_json::from_str(json).ok()?;
+    doc.get("entries")?.as_array()?.iter().find_map(|e| {
+        let field = |k: &str| e.get(k).and_then(|v| v.as_str()).unwrap_or_default();
+        let hit = [field("alias"), field("name")]
+            .iter()
+            .any(|n| !n.trim().is_empty() && n.trim().to_lowercase() == want);
+        if hit {
+            parse_mac(field("mac"))
+        } else {
+            None
+        }
+    })
 }
 
 /// Finds `name` (case-insensitive, trimmed) in `name = MAC` lines.
@@ -109,6 +152,24 @@ mod tests {
         assert_eq!(lookup_alias(FILE, " nas "), Some([10, 11, 12, 13, 14, 15]));
         assert_eq!(lookup_alias(FILE, "broken"), None);
         assert_eq!(lookup_alias(FILE, "missing"), None);
+    }
+
+    #[test]
+    fn address_book_aliases_resolve_with_arabic() {
+        let json = r#"{"version":1,"entries":[
+            {"device_id":"123456789","alias":"مكتب المحاسبة","name":"PC-7","mac":"01:23:45:67:89:ab"},
+            {"device_id":"222222222","alias":"","name":"Lab","mac":null},
+            {"device_id":"333333333","name":"NAS","mac":"0a:0b:0c:0d:0e:0f"}]}"#;
+        let mac = Some([0x01, 0x23, 0x45, 0x67, 0x89, 0xab]);
+        assert_eq!(lookup_address_book(json, "مكتب المحاسبة"), mac);
+        assert_eq!(lookup_address_book(json, " pc-7 "), mac);
+        assert_eq!(
+            lookup_address_book(json, "nas"),
+            Some([10, 11, 12, 13, 14, 15])
+        );
+        assert_eq!(lookup_address_book(json, "Lab"), None);
+        assert_eq!(lookup_address_book(json, ""), None);
+        assert_eq!(lookup_address_book("not json", "nas"), None);
     }
 
     #[test]

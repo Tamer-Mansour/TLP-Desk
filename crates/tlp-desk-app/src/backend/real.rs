@@ -1398,6 +1398,27 @@ impl Backend for RealBackend {
         }
     }
 
+    // --- address book + Wake-on-LAN (TLP-addressbook) ---
+    fn neighbor_mac(&self, ip: IpAddr) -> Option<[u8; 6]> {
+        tlp_desk_net::neighbor_mac(ip)
+    }
+
+    fn pinned_fingerprint(&self, id: DeviceId) -> Option<String> {
+        let viewer = self.inner.viewer.as_ref()?;
+        let id = tlp_desk_crypto::DeviceId::new(id.0)?;
+        viewer
+            .known_fingerprint(&HostKey::Id(id))
+            .map(|fp| short_fingerprint(&fp))
+    }
+
+    fn wake_on_lan(&self, mac: [u8; 6], last_ips: &[IpAddr]) -> Result<(), String> {
+        let mac = crate::address_book::MacAddr(mac);
+        let targets =
+            crate::address_book::wol::targets(last_ips, &crate::address_book::wol::local_ifaces());
+        tracing::info!(%mac, ?targets, "sending Wake-on-LAN magic packet");
+        crate::address_book::wol::send(mac, &targets).map_err(|e| e.to_string())
+    }
+
     // --- settings / ux (TLP-settings-tray) ---
     fn apply_host_settings(&self, settings: &HostSettings) {
         settings_tray::apply(
