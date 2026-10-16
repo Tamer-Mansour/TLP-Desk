@@ -217,6 +217,9 @@ impl TransferPanel {
             can_start: allowed,
         };
         egui::Panel::bottom("session-transfers")
+            .resizable(true)
+            .default_size(250.0)
+            .size_range(130.0..=520.0)
             .frame(
                 egui::Frame::new()
                     .fill(ui.visuals().window_fill)
@@ -269,8 +272,7 @@ impl TransferPanel {
                     ui.label(RichText::new(text).color(theme::danger(ui.visuals().dark_mode)));
                 }
                 egui::ScrollArea::vertical()
-                    .max_height(260.0)
-                    .auto_shrink([false, true])
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for a in self.queue.ui(ui, tx, &env) {
                             actions.push(Action::Queue(a));

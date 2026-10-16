@@ -646,6 +646,7 @@ fn transfer_queue(app: &mut App, lang: Lang) {
         ] {
             s.transfers.update(v);
         }
+        s.transfers.toasts.clear();
     }
 }
 

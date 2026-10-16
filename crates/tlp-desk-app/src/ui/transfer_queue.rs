@@ -217,6 +217,16 @@ impl Queue {
     }
 
     fn header(&mut self, ui: &mut egui::Ui, tx: Tx, actions: &mut Vec<QueueAction>) {
+        self.header_row(ui, tx, actions);
+        if !self.show_recent && self.active_count() > 0 {
+            let rate = ltr_isolate(&format::file_size(self.total_rate(), tx.lang, tx.digits));
+            let speed = tx.raw(S::TransferRate).replace("{size}", &rate);
+            let text = tx.raw(S::TqTotalSpeed).replace("{speed}", &speed);
+            ui.label(theme::caption(ui, &tx.p(&text)));
+        }
+    }
+
+    fn header_row(&mut self, ui: &mut egui::Ui, tx: Tx, actions: &mut Vec<QueueAction>) {
         theme::row(ui, tx.rtl(), |ui| {
             for (recent, key) in [(false, S::TqActive), (true, S::TqRecent)] {
                 if ui
@@ -224,18 +234,6 @@ impl Queue {
                     .clicked()
                 {
                     self.show_recent = recent;
-                }
-            }
-            if !self.show_recent {
-                let active = self.active_count();
-                if active > 0 {
-                    let rate =
-                        ltr_isolate(&format::file_size(self.total_rate(), tx.lang, tx.digits));
-                    let speed = tx.f(S::TransferRate, &[("size", &rate)]);
-                    ui.label(theme::caption(
-                        ui,
-                        &tx.f(S::TqTotalSpeed, &[("speed", &speed)]),
-                    ));
                 }
             }
             theme::row_end(ui, tx.rtl(), |ui| {
@@ -257,8 +255,9 @@ impl Queue {
                             for s in Sort::ALL {
                                 ui.selectable_value(&mut self.sort, s, tx.t(s.label()));
                             }
-                        });
-                    ui.label(theme::caption(ui, tx.t(S::TqSortLabel)));
+                        })
+                        .response
+                        .on_hover_text(tx.t(S::TqSortLabel));
                 }
             });
         });

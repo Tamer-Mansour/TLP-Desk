@@ -74,6 +74,11 @@ impl Toasts {
         true
     }
 
+    /// Removes every notice.
+    pub fn clear(&mut self) {
+        self.list.clear();
+    }
+
     /// Number of notices waiting to expire.
     pub fn len(&self) -> usize {
         self.list.len()
@@ -93,11 +98,11 @@ impl Toasts {
         let dark = ctx.global_style().visuals.dark_mode;
         for (i, t) in self.list.iter().enumerate() {
             let anchor = if tx.rtl() {
-                egui::Align2::LEFT_BOTTOM
+                egui::Align2::LEFT_TOP
             } else {
-                egui::Align2::RIGHT_BOTTOM
+                egui::Align2::RIGHT_TOP
             };
-            let offset = egui::vec2(if tx.rtl() { 14.0 } else { -14.0 }, -14.0 - 64.0 * i as f32);
+            let offset = egui::vec2(if tx.rtl() { 14.0 } else { -14.0 }, 60.0 + 64.0 * i as f32);
             egui::Area::new(egui::Id::new((salt, "toast", i)))
                 .anchor(anchor, offset)
                 .order(egui::Order::Foreground)
