@@ -6,6 +6,7 @@
 
 - [Overview](user-guide/en/index.md)
   - [Installing](user-guide/en/installing.md)
+  - [Linux](user-guide/en/linux.md)
   - [First run and the firewall](user-guide/en/first-run.md)
   - [Your device ID and one-time code](user-guide/en/device-id-and-code.md)
   - [Finding devices on your network](user-guide/en/finding-devices.md)
@@ -43,6 +44,7 @@
 
 - [نظرة عامة](user-guide/ar/index.md)
   - [التثبيت](user-guide/ar/installing.md)
+  - [لينكس](user-guide/ar/linux.md)
   - [التشغيل الأول والجدار الناري](user-guide/ar/first-run.md)
   - [معرّف جهازك والرمز لمرة واحدة](user-guide/ar/device-id-and-code.md)
   - [العثور على الأجهزة](user-guide/ar/finding-devices.md)
@@ -101,6 +103,7 @@
   - [tlp-desk-cli](dev/crates/cli.md)
   - [tlp-desk-testkit](dev/crates/testkit.md)
 - [Building on Windows](dev/building.md)
+- [Linux](dev/linux.md)
 - [Testing](dev/testing.md)
 - [Performance notes](dev/performance.md)
 - [i18n and Arabic](dev/i18n.md)

@@ -190,6 +190,10 @@ powershell -ExecutionPolicy Bypass -File installer\build-setup.ps1
 powershell -ExecutionPolicy Bypass -File installer\portable.ps1
 ```
 
+**Linux** (experimental, X11): install `build-essential pkg-config cmake nasm libasound2-dev`, then
+`cargo build --release` and `installer/linux/build-tarball.sh` (see
+[docs/src/dev/linux.md](docs/src/dev/linux.md)).
+
 ---
 
 ## Project layout

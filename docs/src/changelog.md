@@ -20,6 +20,8 @@ a landing page and an MSI.
 
 ### Added
 
+- **Linux host and viewer (X11).** Screen capture through X11 `GetImage` with RandR monitors, the XFixes cursor and a CPU downscale for the size cap; input through XTest with an evdev key table; an `XGrabKeyboard` viewer keyboard grab; system sound from the PulseAudio/PipeWire monitor source (never the microphone); Wake-on-LAN MAC lookup from `/proc/net/arp`; XDG data and autostart folders; the xdg-desktop-portal file picker; a tarball with `install.sh` and a `.desktop` entry; a Linux CI job. Cross-compiled and linted for `x86_64-unknown-linux-gnu` from Windows, not yet run on real Linux machines. Wayland screen sharing (ScreenCast portal + PipeWire), privacy mode, the pointer marker, the host whiteboard overlay, local-input priority and the tray icon are not available on Linux yet. See [Linux](dev/linux.md). No wire change.
+
 - **Windows service, secure desktop and Ctrl+Alt+Del.** `TLP-Desk.exe install-service` runs TLP-Desk as a SYSTEM service that starts a session agent in the active console session and follows user switching, so the sign-in screen, lock screen and UAC prompts can be seen and controlled. Ctrl+Alt+Del is sent with `SendSAS` from the service. (PR #9)
 - **Permanent password, restart and reconnect, lock.** An unattended-access password (Argon2id at rest, never on the wire, 5 attempts per minute then a 10-minute lockout), **Restart remote PC** with a one-use reconnect ticket and automatic reconnect, and **Lock remote PC**. (PR #11)
 - **Privacy mode.** Blanks the host's screens and blocks its local input during a session; ends with Ctrl+Alt+Shift+P (3 s) or Ctrl+Alt+Del, on disconnect or when permission is withdrawn. (PR #19)
