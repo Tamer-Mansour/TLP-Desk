@@ -13,6 +13,7 @@
 //!
 //! Nothing here contacts anything outside the local network.
 
+mod multiviewer;
 mod unattended;
 
 use std::collections::HashMap;
@@ -1617,6 +1618,14 @@ impl Backend for RealBackend {
             (None, Some(id)) => self.inner.chat.send_host(id.0, text),
             (None, None) => Err(ChatSendError::Unavailable),
         }
+    }
+
+    fn host_set_input_paused(&self, session: SessionId, paused: bool) {
+        self.inner.set_input_paused(session, paused);
+    }
+
+    fn host_set_view_only(&self, session: SessionId, view_only: bool) {
+        self.inner.set_view_only(session, view_only);
     }
 
     fn set_chat_allowed(&self, session: SessionId, allowed: bool) {

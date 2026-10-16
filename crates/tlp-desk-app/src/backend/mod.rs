@@ -855,6 +855,19 @@ pub trait Backend: Send + Sync {
         );
     }
 
+    // multi-viewer (TLP-multiviewer)
+    /// Host side: pause (or resume) one connected viewer's mouse and keyboard without
+    /// changing its permissions; the other viewers keep control.
+    fn host_set_input_paused(&self, session: SessionId, paused: bool) {
+        tracing::debug!(session = session.0, paused, "input pause not supported");
+    }
+
+    /// Host side: take mouse and keyboard away from one connected viewer (`true`) or give
+    /// both back (`false`), live.
+    fn host_set_view_only(&self, session: SessionId, view_only: bool) {
+        tracing::debug!(session = session.0, view_only, "view-only not supported");
+    }
+
     // whiteboard (TLP-whiteboard)
     /// Viewer side: send whiteboard ops (strokes, clear) to the host, in order. The host
     /// enforces `WHITEBOARD`; the UI only offers drawing while it is granted.

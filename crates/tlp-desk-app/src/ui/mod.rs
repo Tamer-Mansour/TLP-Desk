@@ -29,5 +29,6 @@ pub mod tunnels;
 pub mod typing;
 pub mod unattended;
 pub mod view_scale;
+pub mod viewer_input;
 pub mod whiteboard;
 pub mod widgets;
