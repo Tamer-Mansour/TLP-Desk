@@ -229,7 +229,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// The UI's view of an engine snapshot.
-fn transfer_view(s: &TransferSnapshot) -> TransferView {
+pub(crate) fn transfer_view(s: &TransferSnapshot) -> TransferView {
     let status = match &s.state {
         TransferState::Preparing => TransferStatus::Preparing,
         TransferState::Running => TransferStatus::Running,
@@ -1609,6 +1609,11 @@ impl Backend for RealBackend {
     }
 
     fn send_chat(&self, session: SessionId, text: &str) -> Result<ChatLine, ChatSendError> {
+        // TLP-service: chat with a viewer of the service-hosted session.
+        #[cfg(windows)]
+        if let Some(r) = self.service().and_then(|s| s.send_chat(session, text)) {
+            return r;
+        }
         let (viewer, host) = {
             let st = self.inner.state();
             (
@@ -1691,6 +1696,10 @@ impl Backend for RealBackend {
     }
 
     fn cancel_transfer(&self, _session: SessionId, id: TransferId) {
+        #[cfg(windows)]
+        if self.service().is_some_and(|s| s.cancel_transfer(id)) {
+            return;
+        }
         self.inner.files.cancel(tlp_desk_files::TransferId(id.0));
     }
 
@@ -1699,6 +1708,14 @@ impl Backend for RealBackend {
     }
 
     fn resolve_conflict(&self, id: TransferId, answer: Option<ConflictResolution>) {
+        // TLP-service: an upload question of the service-hosted session.
+        #[cfg(windows)]
+        if self
+            .service()
+            .is_some_and(|s| s.resolve_conflict(id, answer.as_ref()))
+        {
+            return;
+        }
         self.inner
             .files
             .resolve_conflicts(tlp_desk_files::TransferId(id.0), answer);
@@ -1800,6 +1817,11 @@ impl Backend for RealBackend {
 
     // --- settings / ux (TLP-settings-tray) ---
     fn apply_host_settings(&self, settings: &HostSettings) {
+        // TLP-service: the service hosts this PC; it applies and saves them machine-wide.
+        #[cfg(windows)]
+        if let Some(s) = self.service() {
+            s.apply_host_settings(settings);
+        }
         self.inner
             .files
             .set_incoming_conflict(if settings.ask_on_upload_conflict {

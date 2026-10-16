@@ -6,6 +6,10 @@
 //! [`AgentPlatform`] (Windows: capture crate, `SendInput`, `OpenInputDesktop`,
 //! `LockWorkStation`), so the protocol is tested end to end with fakes over an in-memory pipe.
 //!
+//! User-session features (clipboard, Explorer paste, overlays, marker, local-input hooks,
+//! privacy shield, loopback audio) are served by the platform's [`FeatureHost`] on their own
+//! connections; their events share the events connection with desktop switches.
+//!
 //! Desktop switches: a capture or input connection keeps its thread attached to the input
 //! desktop with a [`DesktopFollower`]. When the input desktop changes (lock screen, UAC), a
 //! capture connection answers `SurfaceLost` and ends; the service's pipeline then opens a new
@@ -15,11 +19,14 @@
 
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tlp_desk_capture::{CaptureError, CursorState, MonitorInfo, ScreenCapturer};
 use tlp_desk_input::{InputError, InputEvent, InputInjector, MonitorRect};
 
+use super::agent_features::FeatureHost;
 use super::desktop::{DesktopFollower, DesktopSource, DesktopWatcher};
 use super::ipc::{
     self, AgentChannel, AgentCommand, AgentEvent, AgentHello, AgentWelcome, CaptureReply,
@@ -56,6 +63,11 @@ pub trait AgentPlatform: Send + Sync + 'static {
     fn lock_workstation(&self) -> Result<(), HostError>;
     /// A fresh desktop source for one thread.
     fn desktop_source(&self) -> Box<dyn DesktopSource>;
+    /// The user-session features of this agent (`None`: feature and audio channels are
+    /// refused as unsupported).
+    fn feature_host(&self) -> Option<&Arc<FeatureHost>> {
+        None
+    }
 }
 
 impl DesktopSource for Box<dyn DesktopSource> {
@@ -103,6 +115,20 @@ pub fn serve_connection<C: Read + Write + ?Sized>(
         AgentChannel::Input { rect } => serve_input(conn, platform, rect),
         AgentChannel::Command => serve_commands(conn, platform, stop),
         AgentChannel::Events => serve_events(conn, platform, stop),
+        AgentChannel::Feature => match platform.feature_host() {
+            Some(host) => {
+                welcome_ok(conn, platform)?;
+                host.serve(conn)
+            }
+            None => refuse(conn, WireError::Unsupported),
+        },
+        AgentChannel::Audio => match platform.feature_host() {
+            Some(host) => {
+                welcome_ok(conn, platform)?;
+                host.serve_audio(conn)
+            }
+            None => refuse(conn, WireError::Unsupported),
+        },
     }
 }
 
@@ -332,20 +358,38 @@ fn serve_events<C: Read + Write + ?Sized>(
     platform: &dyn AgentPlatform,
     stop: &AtomicBool,
 ) -> Result<(), HostError> {
+    // Feature events (clipboard, local input, shield, overlay, paste) go out as they happen;
+    // the desktop is polled in between. Subscribed before the welcome, so nothing that
+    // happens after it is missed.
+    let features = platform.feature_host().map(FeatureHost::subscribe);
     welcome_ok(conn, platform)?;
     let mut watcher = DesktopWatcher::new(platform.desktop_source());
+    let mut next_poll = Instant::now();
     while !stop.load(Ordering::Acquire) {
-        if let Some(change) = watcher.poll() {
-            tracing::info!(desktop = %change.name, secure = change.secure, "input desktop changed");
-            ipc::write_msg(
-                conn,
-                &AgentEvent::Desktop {
-                    name: change.name,
-                    secure: change.secure,
-                },
-            )?;
+        let now = Instant::now();
+        if now >= next_poll {
+            next_poll = now + DESKTOP_POLL_EVERY;
+            if let Some(change) = watcher.poll() {
+                tracing::info!(desktop = %change.name, secure = change.secure, "input desktop changed");
+                ipc::write_msg(
+                    conn,
+                    &AgentEvent::Desktop {
+                        name: change.name,
+                        secure: change.secure,
+                    },
+                )?;
+            }
         }
-        std::thread::sleep(DESKTOP_POLL_EVERY);
+        let wait = next_poll.saturating_duration_since(Instant::now());
+        match &features {
+            Some(rx) => match rx.recv_timeout(wait) {
+                Ok(ev) => ipc::write_msg(conn, &ev)?,
+                Err(RecvTimeoutError::Timeout) => {}
+                // A newer events connection took the feature events over.
+                Err(RecvTimeoutError::Disconnected) => std::thread::sleep(wait),
+            },
+            None => std::thread::sleep(wait),
+        }
     }
     Ok(())
 }

@@ -405,6 +405,9 @@ strings! {
     // --- service ---
     ServiceDisplayName => "TLP-Desk Service", "خدمة TLP-Desk";
     ServiceDescription => "Lets trusted devices on your local network reach this computer with TLP-Desk, including at the lock and sign-in screens (unattended access).", "تتيح للأجهزة الموثوقة في شبكتك المحلية الوصول إلى هذا الحاسوب عبر TLP-Desk، حتى عند شاشة القفل وشاشة تسجيل الدخول (الوصول غير المراقَب).";
+    ServiceInstalledOk => "The TLP-Desk service is installed and running.", "تم تثبيت خدمة TLP-Desk وهي تعمل الآن.";
+    ServiceUninstalledOk => "The TLP-Desk service was removed.", "تمت إزالة خدمة TLP-Desk.";
+    ServiceCommandFailed => "The TLP-Desk service command failed (run it as administrator). Details:", "فشل أمر خدمة TLP-Desk (شغّله بصلاحيات المسؤول). التفاصيل:";
     ServiceHosting => "Unattended access is on: the TLP-Desk service receives connections for this device.", "الوصول غير المراقَب مفعّل: خدمة TLP-Desk تستقبل الاتصالات لهذا الجهاز.";
     RemoteLocked => "The remote computer is locked. Use Ctrl+Alt+Del to sign in.", "الحاسوب البعيد مقفل. استخدم Ctrl+Alt+Del لتسجيل الدخول.";
     RemoteSecureDesktop => "The remote computer shows a secure screen (sign-in, lock or an administrator prompt).", "يعرض الحاسوب البعيد شاشة آمنة (تسجيل الدخول أو القفل أو طلب صلاحيات المسؤول).";

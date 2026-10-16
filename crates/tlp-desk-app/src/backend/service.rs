@@ -5,6 +5,9 @@
 //! * **Host under the service**: when the installed service owns UDP 47400, this GUI cannot
 //!   host. [`ServiceMirror`] mirrors the service's status (ID, code, Accept prompts, who is
 //!   connected) into the usual backend events, and the user's answers go back as commands.
+//!   The service's app messages (`service_host::wire`) become the same events the GUI host
+//!   produces: host-side transfers and upload questions, chat, privacy mode; chat replies,
+//!   conflict answers, cancels and host settings go back as app commands.
 //!   [`ServiceLink`] runs the pipe I/O on its own thread (Windows only).
 
 use std::net::{IpAddr, Ipv4Addr};
@@ -14,7 +17,9 @@ use tlp_desk_net::{Feature, FeatureCtx};
 use tlp_desk_proto::Message;
 use tokio::sync::mpsc;
 
+use super::files::TransferId;
 use super::{BackendEvent, DeviceId, EndReason, PeerInfo, RequestId, SessionId};
+use crate::service_host::wire::{self, UiEvent};
 
 /// [`Feature::name`] of [`DesktopStateFeature`].
 pub const DESKTOP_FEATURE: &str = "desktop-state";
@@ -76,8 +81,19 @@ pub enum MirrorOut {
 }
 
 /// Ids handed to the UI for service requests/sessions start here, far away from the backend's
-/// own counter, so the two never collide.
-const MIRROR_ID_BASE: u64 = 1 << 48;
+/// own counter, so the two never collide. Service transfer ids are shifted by it too.
+pub const MIRROR_ID_BASE: u64 = 1 << 48;
+
+/// The UI's id for a service transfer.
+pub fn mirror_transfer_id(service: u64) -> Option<TransferId> {
+    MIRROR_ID_BASE.checked_add(service).map(TransferId)
+}
+
+/// The service's id for a UI transfer id, if it is one of the service's.
+pub fn service_transfer_id(id: TransferId) -> Option<u64> {
+    id.0.checked_sub(MIRROR_ID_BASE)
+        .filter(|_| id.0 > MIRROR_ID_BASE)
+}
 
 /// Maps the service's GUI events to backend events and remembers which UI ids belong to the
 /// service.
@@ -86,6 +102,8 @@ pub struct ServiceMirror {
     next: u64,
     requests: Vec<(RequestId, u64)>,
     sessions: Vec<(SessionId, u64)>,
+    /// Ids of chat lines written here (shown before the service confirms).
+    lines: u64,
 }
 
 impl Default for ServiceMirror {
@@ -94,6 +112,7 @@ impl Default for ServiceMirror {
             next: MIRROR_ID_BASE,
             requests: Vec::new(),
             sessions: Vec::new(),
+            lines: 0,
         }
     }
 }
@@ -110,6 +129,12 @@ fn peer(p: &GuiPeer) -> PeerInfo {
 }
 
 impl ServiceMirror {
+    /// A fresh id for a chat line this GUI sends through the service.
+    pub fn next_line(&mut self) -> u64 {
+        self.lines = self.lines.wrapping_add(1);
+        MIRROR_ID_BASE.wrapping_add(self.lines)
+    }
+
     fn id(&mut self) -> u64 {
         self.next = self.next.wrapping_add(1);
         self.next
@@ -119,6 +144,44 @@ impl ServiceMirror {
     pub fn take_request(&mut self, request: RequestId) -> Option<u64> {
         let i = self.requests.iter().position(|(r, _)| *r == request)?;
         Some(self.requests.swap_remove(i).1)
+    }
+
+    /// The UI's session for a service session id.
+    pub fn ui_session(&self, service: u64) -> Option<SessionId> {
+        self.sessions
+            .iter()
+            .find(|(_, id)| *id == service)
+            .map(|(s, _)| *s)
+    }
+
+    /// One app message from the service: the backend event the GUI host would emit.
+    pub fn on_app(&self, bytes: &[u8]) -> Option<BackendEvent> {
+        let ev: UiEvent = wire::decode(bytes)?;
+        Some(match ev {
+            UiEvent::Transfer { session, view } => BackendEvent::Transfer {
+                session: self.ui_session(session)?,
+                view: view.view(mirror_transfer_id(view.id)?),
+            },
+            UiEvent::Conflict { session, prompt } => BackendEvent::TransferConflict {
+                session: self.ui_session(session)?,
+                prompt: prompt.prompt(mirror_transfer_id(prompt.id)?),
+            },
+            UiEvent::ConflictClosed { id } => BackendEvent::TransferConflictClosed {
+                id: mirror_transfer_id(id)?,
+            },
+            UiEvent::Chat { session, line } => BackendEvent::ChatReceived {
+                session: self.ui_session(session)?,
+                line: (&line).into(),
+            },
+            UiEvent::ChatAvailability { session, allowed } => BackendEvent::ChatAvailability {
+                session: self.ui_session(session)?,
+                allowed,
+            },
+            UiEvent::Privacy { session, active } => BackendEvent::HostPrivacyChanged {
+                session: self.ui_session(session)?,
+                active,
+            },
+        })
     }
 
     /// The service's session id for a UI host session.
@@ -218,6 +281,11 @@ impl ServiceMirror {
             GuiEvent::SessionStarted(s) => self.add_session(&s, &mut out),
             GuiEvent::SessionEnded { id } => self.drop_session(id, EndReason::Remote, &mut out),
             GuiEvent::CodeChanged { code } => out.push(MirrorOut::Code(code)),
+            GuiEvent::App(bytes) => {
+                if let Some(ev) = self.on_app(&bytes) {
+                    out.push(MirrorOut::Event(ev));
+                }
+            }
             GuiEvent::Desktop(_) => {}
         }
         out
@@ -248,8 +316,11 @@ mod link {
     use tlp_desk_host::service::ipc::{GuiCommand, GuiReply};
     use tlp_desk_host::service::windows::{gui_command, gui_subscribe};
 
-    use super::{MirrorOut, ServiceMirror};
+    use super::{service_transfer_id, MirrorOut, ServiceMirror};
+    use crate::backend::chat::{ChatLine, ChatSendError};
+    use crate::backend::files::{ConflictResolution, TransferId};
     use crate::backend::{BackendEvent, RequestId, SessionId};
+    use crate::service_host::wire::{self, UiCommand, WireResolution};
 
     /// Where the link delivers what it learns (implemented by the real backend).
     pub trait ServiceSink: Send + Sync {
@@ -307,6 +378,81 @@ mod link {
         pub fn rotate_code(&self) {
             send(GuiCommand::RotateCode);
         }
+
+        /// Whether `session` is hosted by the service.
+        pub fn owns_session(&self, session: SessionId) -> bool {
+            lock(&self.mirror).session(session).is_some()
+        }
+
+        /// Sends a chat line to the viewer of a service-hosted session; `None` if the
+        /// session is not the service's. The line is shown at once; delivery is logged.
+        pub fn send_chat(
+            &self,
+            session: SessionId,
+            text: &str,
+        ) -> Option<Result<ChatLine, ChatSendError>> {
+            let id = lock(&self.mirror).session(session)?;
+            if text.trim().is_empty() {
+                return Some(Err(ChatSendError::Empty));
+            }
+            let max = crate::backend::chat::max_chat_chars();
+            if text.chars().count() > max {
+                return Some(Err(ChatSendError::TooLong { max }));
+            }
+            send(GuiCommand::App(wire::encode(&UiCommand::SendChat {
+                session: id,
+                text: text.to_owned(),
+            })));
+            let at_unix_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+                .unwrap_or(0);
+            let line_id = lock(&self.mirror).next_line();
+            Some(Ok(ChatLine {
+                id: line_id,
+                mine: true,
+                text: text.to_owned(),
+                at_unix_ms,
+            }))
+        }
+
+        /// Answers an upload question of the service; `false` if the id is not the service's.
+        pub fn resolve_conflict(
+            &self,
+            id: TransferId,
+            answer: Option<&ConflictResolution>,
+        ) -> bool {
+            let Some(id) = service_transfer_id(id) else {
+                return false;
+            };
+            send(GuiCommand::App(wire::encode(&UiCommand::ResolveConflict {
+                id,
+                answer: answer.map(WireResolution::from),
+            })));
+            true
+        }
+
+        /// Cancels a transfer of the service; `false` if the id is not the service's.
+        pub fn cancel_transfer(&self, id: TransferId) -> bool {
+            let Some(id) = service_transfer_id(id) else {
+                return false;
+            };
+            send(GuiCommand::App(wire::encode(&UiCommand::CancelTransfer {
+                id,
+            })));
+            true
+        }
+
+        /// Hands the user's host settings to the service, which validates, applies and saves
+        /// them machine-wide.
+        pub fn apply_host_settings(&self, settings: &crate::settings::HostSettings) {
+            match serde_json::to_string(settings) {
+                Ok(json) => send(GuiCommand::App(wire::encode(&UiCommand::ApplySettings {
+                    json,
+                }))),
+                Err(e) => tracing::warn!(%e, "cannot encode host settings"),
+            }
+        }
     }
 
     /// Commands do pipe I/O: never on the UI thread.
@@ -315,8 +461,16 @@ mod link {
             .name("tlp-desk-service-cmd".into())
             .spawn(move || match gui_command(&cmd) {
                 Ok(GuiReply::Ok) => {}
-                Ok(other) => tracing::info!(?cmd, ?other, "service command not applied"),
-                Err(e) => tracing::warn!(%e, ?cmd, "service command failed"),
+                Ok(GuiReply::App(bytes)) => match wire::decode::<wire::UiReply>(&bytes) {
+                    Some(wire::UiReply::Error(e)) => {
+                        tracing::info!(%e, "service did not apply the command");
+                    }
+                    Some(_) => {}
+                    None => tracing::info!("service sent an unreadable answer"),
+                },
+                // Never log app commands: they may hold chat text.
+                Ok(other) => tracing::info!(?other, "service command not applied"),
+                Err(e) => tracing::warn!(%e, "service command failed"),
             });
         if let Err(e) = spawned {
             tracing::warn!(%e, "cannot send a service command");
@@ -512,6 +666,115 @@ mod tests {
             panic!();
         };
         assert!(request.0 > MIRROR_ID_BASE);
+    }
+
+    #[test]
+    fn app_messages_become_host_side_events_for_known_sessions() {
+        use crate::service_host::wire::{
+            encode, WireChatLine, WireConflict, WireFileConflict, WireStatus, WireTransfer,
+        };
+        let mut m = ServiceMirror::default();
+        let out = m.on_event(GuiEvent::SessionStarted(GuiSession {
+            id: 9,
+            peer: gpeer("سارة"),
+            permissions: Permissions::VIEW,
+        }));
+        let MirrorOut::Event(BackendEvent::HostSessionStarted { session, .. }) = out[0] else {
+            panic!("{out:?}");
+        };
+        let transfer = UiEvent::Transfer {
+            session: 9,
+            view: WireTransfer {
+                id: 4,
+                sending: false,
+                label: "تقرير.pdf".into(),
+                status: WireStatus::Running,
+                bytes_done: 1,
+                total_bytes: 2,
+                files_done: 0,
+                total_files: 1,
+                failed_files: 0,
+                bytes_per_sec: 3,
+                local_dest: Some(r"C:\Users\تامر\Desktop".into()),
+                local: false,
+                started_unix_ms: 0,
+            },
+        };
+        let out = m.on_event(GuiEvent::App(encode(&transfer)));
+        let [MirrorOut::Event(BackendEvent::Transfer { session: s, view })] = &out[..] else {
+            panic!("{out:?}");
+        };
+        assert_eq!(*s, session);
+        assert_eq!(view.label, "تقرير.pdf");
+        assert_eq!(service_transfer_id(view.id), Some(4));
+        assert!(view.id.0 > MIRROR_ID_BASE);
+        // Upload question, then its end.
+        let conflict = UiEvent::Conflict {
+            session: 9,
+            prompt: WireConflict {
+                id: 4,
+                label: "صور".into(),
+                dest_dir: r"C:\Users\تامر\Desktop".into(),
+                total: 1,
+                files: vec![WireFileConflict {
+                    index: 0,
+                    rel_path: "صور/١.jpg".into(),
+                    existing_size: 1,
+                    existing_modified_unix_ms: 0,
+                    incoming_size: 2,
+                    incoming_modified_unix_ms: 0,
+                    partial_bytes: None,
+                }],
+            },
+        };
+        let out = m.on_event(GuiEvent::App(encode(&conflict)));
+        assert!(matches!(
+            &out[..],
+            [MirrorOut::Event(BackendEvent::TransferConflict { prompt, .. })]
+                if !prompt.local && prompt.files[0].rel_path == "صور/١.jpg"
+        ));
+        let out = m.on_event(GuiEvent::App(encode(&UiEvent::ConflictClosed { id: 4 })));
+        assert!(matches!(
+            &out[..],
+            [MirrorOut::Event(BackendEvent::TransferConflictClosed { id })]
+                if service_transfer_id(*id) == Some(4)
+        ));
+        // Chat and privacy.
+        let chat = UiEvent::Chat {
+            session: 9,
+            line: WireChatLine {
+                id: 1,
+                mine: false,
+                text: "مرحبا\u{200f}!".into(),
+                at_unix_ms: 5,
+            },
+        };
+        let out = m.on_event(GuiEvent::App(encode(&chat)));
+        assert!(matches!(
+            &out[..],
+            [MirrorOut::Event(BackendEvent::ChatReceived { line, .. })] if line.text == "مرحبا\u{200f}!"
+        ));
+        let privacy = UiEvent::Privacy {
+            session: 9,
+            active: true,
+        };
+        assert!(matches!(
+            &m.on_event(GuiEvent::App(encode(&privacy)))[..],
+            [MirrorOut::Event(BackendEvent::HostPrivacyChanged {
+                active: true,
+                ..
+            })]
+        ));
+        // Unknown session or garbage: nothing.
+        let unknown = UiEvent::ChatAvailability {
+            session: 77,
+            allowed: true,
+        };
+        assert!(m.on_event(GuiEvent::App(encode(&unknown))).is_empty());
+        assert!(m.on_event(GuiEvent::App(vec![255, 1])).is_empty());
+        // Local ids are never mistaken for the service's.
+        assert_eq!(service_transfer_id(TransferId(5)), None);
+        assert_eq!(service_transfer_id(TransferId(MIRROR_ID_BASE)), None);
     }
 
     #[test]
