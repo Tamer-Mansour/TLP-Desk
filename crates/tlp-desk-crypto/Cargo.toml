@@ -14,7 +14,7 @@ thiserror.workspace = true
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
 x509-parser = "0.16"
 sha2 = "0.10"
-hmac = "0.12"
+hmac = "0.13"
 spake2 = "0.4"
 rand = "0.8"
 argon2 = "0.5"
