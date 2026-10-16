@@ -8,6 +8,10 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Added
+
+- **Copy in Explorer on one PC, paste in Explorer on the other.** Ctrl+C on files or folders on either PC and Ctrl+V in an Explorer window (or the desktop) on the other PC now works in both directions, with Explorer's own copy dialog. The files are offered as virtual clipboard files and pulled only when you paste, using the existing transfer engine (resume, BLAKE3 verification). Needs the Files and Clipboard permissions; revoking either removes the pending paste. The paste buttons and Ctrl+V in the session window stay as a fallback. No wire change.
+
 ### Fixed
 
 - **The session toolbar fits any window width.** Items that do not fit move into a **More** menu (least important first); the connection label is shortened with an ellipsis and **Disconnect** is always visible at the reading end, in English and Arabic. A running recording shows a red dot on **More** while its button is in the menu.
