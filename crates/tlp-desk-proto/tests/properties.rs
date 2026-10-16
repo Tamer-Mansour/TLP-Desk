@@ -136,7 +136,32 @@ fn clipboard_data() -> impl Strategy<Value = ClipboardData> {
                 rgba,
             }
         }),
+        // v5: compressed image.
+        (any::<u32>(), any::<u32>(), bytes(256))
+            .prop_map(|(width, height, png)| { ClipboardData::Png { width, height, png } }),
     ]
+}
+
+/// Every `ClipboardData` variant is produced (the match below stops compiling when one is
+/// appended without a strategy).
+#[test]
+fn clipboard_strategy_covers_every_variant() {
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::{Config, TestRng, TestRunner};
+    let mut runner = TestRunner::new_with_rng(
+        Config::default(),
+        TestRng::deterministic_rng(proptest::test_runner::RngAlgorithm::ChaCha),
+    );
+    let strategy = clipboard_data();
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..2_000 {
+        seen.insert(match strategy.new_tree(&mut runner).unwrap().current() {
+            ClipboardData::Text(_) => "Text",
+            ClipboardData::Image { .. } => "Image",
+            ClipboardData::Png { .. } => "Png",
+        });
+    }
+    assert_eq!(seen.len(), 3, "only saw {seen:?}");
 }
 
 fn file_chunk() -> impl Strategy<Value = FileChunk> {
