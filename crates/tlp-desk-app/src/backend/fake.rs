@@ -629,6 +629,8 @@ impl Backend for FakeBackend {
                 failed_files: 0,
                 bytes_per_sec: 50_000_000,
                 local_dest: None,
+                local: true,
+                started_unix_ms: super::transfer_history::now_unix_ms(),
             };
             while view.bytes_done < total {
                 inner.emit(BackendEvent::Transfer {

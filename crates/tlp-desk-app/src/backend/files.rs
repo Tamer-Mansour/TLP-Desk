@@ -77,9 +77,19 @@ pub struct TransferView {
     pub bytes_per_sec: u64,
     /// Receiving: the local folder the files go to (for "open folder").
     pub local_dest: Option<PathBuf>,
+    /// `true` if this device started the transfer (as the viewer), `false` if the other side
+    /// did (files arriving at, or taken from, this host).
+    pub local: bool,
+    /// When it was created (Unix milliseconds), for ordering by age.
+    pub started_unix_ms: u64,
 }
 
 impl TransferView {
+    /// Whether "pause" applies: only transfers this device started can be paused and resumed.
+    pub fn can_pause(&self) -> bool {
+        self.local && matches!(self.status, TransferStatus::Running)
+    }
+
     /// Estimated seconds left, if the speed is known.
     pub fn eta_secs(&self) -> Option<u64> {
         self.total_bytes
@@ -97,6 +107,38 @@ impl TransferView {
             };
         }
         (self.bytes_done as f64 / self.total_bytes as f64).clamp(0.0, 1.0) as f32
+    }
+}
+
+/// A question the engine needs answered before it copies: files with these names already
+/// exist at the destination (see [`ConflictResolution`] for the answer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictPrompt {
+    /// The transfer that waits.
+    pub id: TransferId,
+    /// `true` if this device started the transfer, `false` for a viewer's upload to this host.
+    pub local: bool,
+    /// Name of the first top-level item.
+    pub label: String,
+    /// The destination folder.
+    pub dest_dir: String,
+    /// How many files clash (can exceed `files.len()`).
+    pub total: u32,
+    /// The first clashes, with both versions' size and time.
+    pub files: Vec<FileConflict>,
+}
+
+pub use tlp_desk_files::{ConflictChoice, ConflictResolution, FileConflict, FileRow, FileState};
+
+/// The UI form of an engine question.
+pub fn conflict_prompt(req: &tlp_desk_files::ConflictRequest) -> ConflictPrompt {
+    ConflictPrompt {
+        id: TransferId(req.id.0),
+        local: req.initiated_locally,
+        label: req.label.clone(),
+        dest_dir: req.dest_dir.clone(),
+        total: req.total_conflicts,
+        files: req.conflicts.clone(),
     }
 }
 
