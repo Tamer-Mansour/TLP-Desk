@@ -223,7 +223,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// The UI's view of an engine snapshot.
-fn transfer_view(s: &TransferSnapshot) -> TransferView {
+pub(crate) fn transfer_view(s: &TransferSnapshot) -> TransferView {
     let status = match &s.state {
         TransferState::Preparing => TransferStatus::Preparing,
         TransferState::Running => TransferStatus::Running,

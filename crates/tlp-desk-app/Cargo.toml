@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
+postcard.workspace = true
 tlp-desk-proto.workspace = true
 tlp-desk-crypto.workspace = true
 tlp-desk-net.workspace = true
