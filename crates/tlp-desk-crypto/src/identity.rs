@@ -42,8 +42,8 @@ impl Identity {
 
     /// Loads the identity from `dir`, or generates and saves a new one if none exists.
     ///
-    /// If `dir` does not exist it is created and, on Windows, its ACL is restricted with
-    /// [`crate::harden_dir`].
+    /// When a new identity is saved, `dir` is created if needed and, on Windows, its ACL is
+    /// restricted with [`crate::harden_dir`].
     pub fn load_or_generate(dir: &Path) -> Result<Self, CryptoError> {
         if let Some(id) = Self::load(dir)? {
             return Ok(id);
@@ -67,11 +67,10 @@ impl Identity {
     }
 
     /// Writes the private key to `dir/identity.key.pem` (atomically via a temp file + rename).
+    /// The directory is created if needed and its private ACL re-applied first, also when it
+    /// already existed ([`crate::ensure_private_dir`]).
     pub fn save(&self, dir: &Path) -> Result<(), CryptoError> {
-        if !dir.exists() {
-            fs::create_dir_all(dir)?;
-            crate::harden_dir(dir);
-        }
+        crate::ensure_private_dir(dir)?;
         let key = KeyPair::try_from(self.key_pkcs8_der.as_slice())?;
         let pem = key.serialize_pem();
         let tmp = dir.join(format!("{KEY_FILE}.tmp"));

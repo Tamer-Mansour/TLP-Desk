@@ -6,7 +6,7 @@
 //! the quality preset to a running viewer session, start-up options to the `Run` key.
 
 mod allow_list;
-mod incoming;
+pub(crate) mod incoming;
 mod startup;
 
 pub(crate) use incoming::PERMISSION_LABELS;

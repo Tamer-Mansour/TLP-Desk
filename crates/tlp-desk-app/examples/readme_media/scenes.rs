@@ -170,6 +170,11 @@ pub const SCENES: &[Scene] = &[
         about: "host side: banner button and the File transfers window with who sends what",
         setup: host_transfers,
     },
+    Scene {
+        name: "accept-popup",
+        about: "the Accept window: countdown ring, permission chips (Files switched off), trust",
+        setup: accept_popup,
+    },
 ];
 /// Find a scene by name.
 pub fn find(name: &str) -> Option<&'static Scene> {
@@ -717,4 +722,29 @@ fn host_transfers(app: &mut App, lang: Lang) {
     ] {
         app.host_transfers.update(v, &who);
     }
+}
+
+fn accept_popup(app: &mut App, lang: Lang) {
+    use tlp_desk_app::prompt::PromptRequest;
+    use tlp_desk_app::ui::accept_window::AcceptCard;
+    home(app, lang);
+    let peer = tlp_desk_app::backend::PeerInfo {
+        name: pick(lang, "Reception-Desk-2", "مكتب-الاستقبال-٢"),
+        ..incoming_peer(lang)
+    };
+    let mut card = AcceptCard::new(PromptRequest {
+        peer_name: peer.name.clone(),
+        device_id: peer.device_id.0,
+        address: peer.address.to_string(),
+        permissions: app.settings.host.default_permissions,
+        timeout_secs: app.settings.host.accept_timeout_secs,
+        lang,
+        ..PromptRequest::default()
+    });
+    card.permissions = card.permissions.difference(Permissions::FILES);
+    card.trust = true;
+    // Twelve seconds after it appeared: the countdown ring has started to empty.
+    card.set_elapsed(0.0, 12.0);
+    app.incoming.push_back((RequestId(1), peer));
+    app.accept_card = Some((RequestId(1), card));
 }

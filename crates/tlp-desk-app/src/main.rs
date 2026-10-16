@@ -5,8 +5,11 @@
 //! * `--connect <id|name|ip[:port]>` — start connecting immediately;
 //! * `--code <6 digits>` — the host's one-time code for `--connect`;
 //! * `--settings` — open on the settings screen;
+//! * `--hidden` — start in the notification area this time (the service uses it so that an
+//!   Accept prompt shows only its own window);
 //! * `--port <udp port>` — listen on another port than 47400 (testing two instances);
-//! * `--fake` — run on the in-process fake backend (no network; development/screenshots).
+//! * `--fake` — run on the in-process fake backend (no network; development/screenshots);
+//! * `--accept-prompt` — internal: the stand-alone Accept window (see `prompt`).
 #![forbid(unsafe_code)]
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -46,6 +49,7 @@ fn parse_args() -> Args {
             "--connect" => a.start.connect = args.next(),
             "--code" => a.start.code = args.next(),
             "--settings" => a.start.screen_settings = true,
+            "--hidden" => a.start.start_hidden = true,
             "--fake" => a.fake = true,
             "--port" => a.port = args.next().and_then(|p| p.parse().ok()),
             other => eprintln!("ignoring unknown argument {other:?}"),
@@ -58,6 +62,10 @@ fn main() -> anyhow::Result<()> {
     // The service, its session agent and (un)installation run headless: never open a window.
     #[cfg(windows)]
     if let Some(code) = tlp_desk_app::service_entry::dispatch() {
+        std::process::exit(code);
+    }
+    // `--accept-prompt`: the stand-alone Accept window (one request on stdin, answer on stdout).
+    if let Some(code) = tlp_desk_app::prompt::dispatch() {
         std::process::exit(code);
     }
     let args = parse_args();
@@ -130,11 +138,12 @@ fn main() -> anyhow::Result<()> {
                 };
                 backend::real::RealBackend::start_with(&rt, repaint, cfg)
             };
-            #[cfg_attr(not(windows), allow(unused_mut))]
             let mut app = App::new(cc, backend, events, settings, start);
             // Notification-area icon: only the real GUI creates one (never tests or media).
             #[cfg(windows)]
             app.enable_tray(&cc.egui_ctx);
+            // Incoming requests also open the stand-alone Accept window.
+            app.enable_accept_popup(&cc.egui_ctx);
             Ok(Box::new(app))
         }),
     )

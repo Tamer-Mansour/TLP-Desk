@@ -110,6 +110,9 @@ Uninstalling keeps the identity and settings folders so your device ID stays the
 - **Unsigned installer.** Releases are not code-signed yet. Verify downloads against
   `SHA256SUMS.txt`.
 
+The October 2026 review of the Windows service and its local IPC, with the status of each
+finding, is in [Service and IPC audit (2026-10)](security-audit-2026-10.md).
+
 ## For contributors
 
 Security rules every change must keep (from CLAUDE.md and the code style guide):

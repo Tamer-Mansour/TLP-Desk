@@ -107,6 +107,12 @@ impl App {
                     &mut host.allow_one_time_code,
                     tx.t(S::AllowOneTimeCode),
                 );
+                // Accept window (TLP-accept-popup).
+                let popup = &mut self.settings.accept_popup;
+                changed |= check_row(ui, tx, &mut popup.enabled, tx.t(S::PopupEnabled));
+                ui.add_enabled_ui(popup.enabled, |ui| {
+                    changed |= check_row(ui, tx, &mut popup.sound, tx.t(S::PopupSound));
+                });
                 ui.add_space(6.0);
                 ui.label(theme::caption(ui, tx.t(S::LocalGrace)));
                 theme::row(ui, tx.rtl(), |ui| {

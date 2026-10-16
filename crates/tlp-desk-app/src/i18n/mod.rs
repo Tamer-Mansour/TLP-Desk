@@ -757,6 +757,18 @@ strings! {
     FsDragOutHint => "Drag files from here to Explorer or the desktop to copy them to this PC", "اسحب الملفات من هنا إلى المستكشف أو سطح المكتب لنسخها إلى هذا الجهاز";
     FsDragOutDropped => "Windows is copying the dragged files and shows its own progress.", "يقوم ويندوز بنسخ الملفات المسحوبة ويعرض تقدّم النسخ بنفسه.";
     FsDragOutFailed => "The files could not be dragged out: {detail}", "تعذّر سحب الملفات إلى الخارج: {detail}";
+    // --- accept popup (TLP-accept-popup) ---
+    PopupTitle => "Connection request", "طلب اتصال";
+    PopupWants => "wants to connect to this computer", "يريد الاتصال بهذا الحاسوب";
+    PopupAllow => "Allow this device to:", "اسمح لهذا الجهاز بما يلي:";
+    PopupTrust => "Trust this device", "الوثوق بهذا الجهاز";
+    PopupTrustHint => "Remembered on this PC for later. It does not skip this question yet.", "يُحفظ على هذا الجهاز لوقت لاحق، ولا يتخطى هذا السؤال حاليًا.";
+    PopupCountdown => "Declines automatically in {n} s", "يُرفض تلقائيًا بعد {n} ث";
+    PopupAuthPrompt => "Accept prompt", "طلب موافقة";
+    PopupAuthCode => "One-time code", "رمز لمرة واحدة";
+    PopupAuthPassword => "Password", "كلمة المرور";
+    PopupEnabled => "Show connection requests in their own window, even when TLP-Desk is hidden", "عرض طلبات الاتصال في نافذة مستقلة حتى عندما يكون TLP-Desk مخفيًا";
+    PopupSound => "Play a sound when a request arrives", "تشغيل صوت عند وصول طلب";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.

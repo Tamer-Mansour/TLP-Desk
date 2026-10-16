@@ -54,6 +54,10 @@ private in it.
 - **Decline unanswered requests after** — how long the Accept prompt waits (10 s to 10 min).
 - **Allow connecting with the one-time code** — off means only the Accept prompt (or a password)
   lets people in.
+- **Show connection requests in their own window, even when TLP-Desk is hidden** — on by default:
+  requests appear in the [Accept window](accept-prompt.md). Off: inside the TLP-Desk window only.
+- **Play a sound when a request arrives** — the short Windows notification sound when the Accept
+  window appears.
 - **Pause remote control after I use my own mouse or keyboard for** — local priority, 0 to 5
   seconds (0 turns it off).
 - **Show where the remote pointer is on this screen** — the green marker with the viewer's name.

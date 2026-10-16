@@ -118,7 +118,7 @@ impl App {
             } else {
                 self.tray
                     .shell
-                    .startup(self.settings.startup.start_minimized)
+                    .startup(self.settings.startup.start_minimized || self.start_hidden)
             };
             apply_window_cmds(ctx, &cmds);
         }

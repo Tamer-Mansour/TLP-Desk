@@ -230,9 +230,12 @@ fn verdict(r: Result<u16, TicketRejected>) -> Result<Permissions, RejectReason> 
     match r {
         Ok(bits) => Ok(Permissions(bits & Permissions::ALL.0)),
         Err(TicketRejected::NotRestartedYet) => Err(RejectReason::NotAllowed),
-        Err(TicketRejected::Unknown | TicketRejected::WrongPeer | TicketRejected::Expired) => {
-            Err(RejectReason::WrongCredentials)
-        }
+        Err(
+            TicketRejected::Unknown
+            | TicketRejected::WrongPeer
+            | TicketRejected::Expired
+            | TicketRejected::NotPersisted,
+        ) => Err(RejectReason::WrongCredentials),
     }
 }
 
@@ -300,6 +303,7 @@ mod tests {
             TicketRejected::Unknown,
             TicketRejected::WrongPeer,
             TicketRejected::Expired,
+            TicketRejected::NotPersisted,
         ] {
             assert_eq!(verdict(Err(r)), Err(RejectReason::WrongCredentials));
         }

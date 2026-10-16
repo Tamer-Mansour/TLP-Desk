@@ -10,8 +10,10 @@
 //! * **GUI pipe** (created by the service, opened by the logged-in user's GUI): interactive
 //!   users may read and write, but **not** create pipe instances (`FILE_CREATE_PIPE_INSTANCE`
 //!   is the same bit as `FILE_APPEND_DATA`, so `GENERIC_WRITE` must not be granted). The
-//!   service also requires the client to be in the active console session, and the GUI
-//!   checks that the server runs in session 0 (only services do).
+//!   service also requires the client to be in the active console session, to have at
+//!   least Medium integrity and to be the service's own `TLP-Desk.exe`
+//!   ([`check_gui_client`]); the GUI checks that the server runs in session 0 (only
+//!   services do).
 //!
 //! Both pipes are created with `PIPE_REJECT_REMOTE_CLIENTS` and an explicit deny for network
 //! logons: nothing here is reachable from another machine.
@@ -96,9 +98,189 @@ pub fn is_agent_pipe_name(name: &str) -> bool {
             .all(|p| !p.is_empty() && p.len() <= 10 && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// `SECURITY_MANDATORY_MEDIUM_RID`: the integrity level of a normal user process. Low
+/// (`0x1000`, sandboxes, browser renderers) and Untrusted (`0`) clients are refused.
+pub const MEDIUM_INTEGRITY_RID: u32 = 0x2000;
+
+/// What the service found out about a GUI pipe client. `None` = the query failed, which
+/// always refuses the client (fail closed).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GuiClientFacts {
+    /// Windows session of the client (`GetNamedPipeClientSessionId`).
+    pub session: Option<u32>,
+    /// The active console session (`WTSGetActiveConsoleSessionId`).
+    pub console_session: Option<u32>,
+    /// Integrity RID of the client's token (`ImpersonateNamedPipeClient` ->
+    /// `OpenThreadToken` -> `GetTokenInformation(TokenIntegrityLevel)` -> `RevertToSelf`).
+    pub integrity_rid: Option<u32>,
+    /// Image of the client process (`GetNamedPipeClientProcessId` ->
+    /// `QueryFullProcessImageNameW`).
+    pub image: Option<std::path::PathBuf>,
+}
+
+/// Why a GUI pipe client was refused (for the service log).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuiClientRefusal {
+    /// Not in the active console session (or a session could not be read).
+    NotConsoleSession,
+    /// Integrity below Medium, or unreadable.
+    IntegrityTooLow,
+    /// Not the `TLP-Desk.exe` the service runs from, or unreadable.
+    ForeignImage,
+}
+
+/// The GUI pipe's admission rule (audit F2). The pipe ACL already limits it to interactive
+/// users; on top of that the client must
+///
+/// * run in the active console session (the person at the machine decides);
+/// * have at least Medium integrity, so a sandboxed Low-integrity process of the same user
+///   cannot answer Accept prompts, change permissions or read the one-time code;
+/// * be the very `TLP-Desk.exe` the service runs from (`expected_exe`), so another program
+///   in the session cannot either. The Accept popup (`TLP-Desk.exe --accept-prompt`) is the
+///   same executable and passes.
+///
+/// # Errors
+/// The first rule that does not hold, unreadable facts included.
+pub fn check_gui_client(
+    facts: &GuiClientFacts,
+    expected_exe: &std::path::Path,
+) -> Result<(), GuiClientRefusal> {
+    match (facts.session, facts.console_session) {
+        (Some(s), Some(c)) if s == c => {}
+        _ => return Err(GuiClientRefusal::NotConsoleSession),
+    }
+    if !facts
+        .integrity_rid
+        .is_some_and(|rid| rid >= MEDIUM_INTEGRITY_RID)
+    {
+        return Err(GuiClientRefusal::IntegrityTooLow);
+    }
+    if !facts
+        .image
+        .as_deref()
+        .is_some_and(|image| same_image(image, expected_exe))
+    {
+        return Err(GuiClientRefusal::ForeignImage);
+    }
+    Ok(())
+}
+
+/// Whether two Windows executable paths name the same file: case-insensitive, `/` and `\`
+/// alike, with or without the `\\?\` prefix (`std::env::current_exe` and
+/// `QueryFullProcessImageNameW` may differ in exactly these ways).
+pub fn same_image(a: &std::path::Path, b: &std::path::Path) -> bool {
+    fn norm(p: &std::path::Path) -> String {
+        let s = p.to_string_lossy().replace('/', "\\");
+        let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
+        s.to_lowercase()
+    }
+    let (a, b) = (norm(a), norm(b));
+    !a.is_empty() && a == b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn trusted() -> GuiClientFacts {
+        GuiClientFacts {
+            session: Some(1),
+            console_session: Some(1),
+            integrity_rid: Some(MEDIUM_INTEGRITY_RID),
+            image: Some(r"C:\Program Files\TLP-Desk\TLP-Desk.exe".into()),
+        }
+    }
+
+    const EXE: &str = r"C:\Program Files\TLP-Desk\TLP-Desk.exe";
+
+    /// Regression test for audit F2: only TLP-Desk.exe itself, at Medium integrity or above,
+    /// in the console session, may use the GUI pipe; every unreadable fact refuses.
+    #[test]
+    fn gui_client_admission_fails_closed() {
+        let exe = std::path::Path::new(EXE);
+        assert_eq!(check_gui_client(&trusted(), exe), Ok(()));
+        // Elevated GUI (High) and the accept popup (same exe) pass.
+        let high = GuiClientFacts {
+            integrity_rid: Some(0x3000),
+            ..trusted()
+        };
+        assert_eq!(check_gui_client(&high, exe), Ok(()));
+        let popup = GuiClientFacts {
+            image: Some(r"\\?\c:\program files\tlp-desk\TLP-DESK.EXE".into()),
+            ..trusted()
+        };
+        assert_eq!(check_gui_client(&popup, exe), Ok(()));
+
+        for (facts, why) in [
+            (
+                GuiClientFacts {
+                    session: Some(2),
+                    ..trusted()
+                },
+                GuiClientRefusal::NotConsoleSession,
+            ),
+            (
+                GuiClientFacts {
+                    console_session: None,
+                    ..trusted()
+                },
+                GuiClientRefusal::NotConsoleSession,
+            ),
+            (
+                GuiClientFacts {
+                    integrity_rid: Some(0x1000),
+                    ..trusted()
+                },
+                GuiClientRefusal::IntegrityTooLow,
+            ),
+            (
+                GuiClientFacts {
+                    integrity_rid: None,
+                    ..trusted()
+                },
+                GuiClientRefusal::IntegrityTooLow,
+            ),
+            (
+                GuiClientFacts {
+                    image: Some(r"C:\Users\سارة\Downloads\TLP-Desk.exe".into()),
+                    ..trusted()
+                },
+                GuiClientRefusal::ForeignImage,
+            ),
+            (
+                GuiClientFacts {
+                    image: Some(r"C:\Windows\System32\cmd.exe".into()),
+                    ..trusted()
+                },
+                GuiClientRefusal::ForeignImage,
+            ),
+            (
+                GuiClientFacts {
+                    image: None,
+                    ..trusted()
+                },
+                GuiClientRefusal::ForeignImage,
+            ),
+            (
+                GuiClientFacts::default(),
+                GuiClientRefusal::NotConsoleSession,
+            ),
+        ] {
+            assert_eq!(check_gui_client(&facts, exe), Err(why), "{facts:?}");
+        }
+    }
+
+    #[test]
+    fn image_paths_compare_like_windows_does() {
+        use std::path::Path;
+        assert!(same_image(Path::new(EXE), Path::new(&EXE.to_uppercase())));
+        assert!(same_image(
+            Path::new(r"\\?\D:\برامج\TLP-Desk.exe"),
+            Path::new("D:/برامج/tlp-desk.exe")
+        ));
+        assert!(!same_image(Path::new(EXE), Path::new(r"C:\TLP-Desk.exe")));
+        assert!(!same_image(Path::new(""), Path::new("")));
+    }
 
     /// One `(type;flags;rights;;;sid)` ACE of an SDDL DACL.
     #[derive(Debug)]

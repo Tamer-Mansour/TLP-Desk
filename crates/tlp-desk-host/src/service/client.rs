@@ -70,7 +70,7 @@ mod tests {
     use tlp_desk_proto::Permissions;
 
     use super::super::testutil::duplex;
-    use super::super::{serve_gui_connection, GuiCommands, GuiHub};
+    use super::super::{serve_gui_connection, GuiClientRefusal, GuiCommands, GuiHub};
     use super::*;
 
     #[derive(Default)]
@@ -97,7 +97,7 @@ mod tests {
 
         let (a, mut b) = duplex();
         let (h, f) = (hub.clone(), fake.clone());
-        std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, true));
+        std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, || Ok(())));
         let (status, mut sub) = gui_subscribe_on(a).unwrap();
         assert_eq!(status.device_id, 7);
         assert_eq!(status.device_name, "حاسوب");
@@ -113,7 +113,7 @@ mod tests {
 
         let (a, mut b) = duplex();
         let (h, f) = (hub.clone(), fake.clone());
-        std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, true));
+        std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, || Ok(())));
         let reply = gui_command_on(
             a,
             &GuiCommand::Respond {
@@ -127,7 +127,7 @@ mod tests {
 
         let (a, mut b) = duplex();
         let (h, f) = (hub.clone(), fake.clone());
-        std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, true));
+        std::thread::spawn(move || serve_gui_connection(&mut b, &h, &*f, || Ok(())));
         assert_eq!(
             gui_command_on(a, &GuiCommand::Disconnect { session: 1 }).unwrap(),
             GuiReply::NotFound
@@ -140,7 +140,10 @@ mod tests {
         let fake = Fake::default();
         let (a, mut b) = duplex();
         let t = std::thread::spawn(move || gui_subscribe_on(a).map(|(s, _)| s));
-        serve_gui_connection(&mut b, &hub, &fake, false).unwrap();
+        serve_gui_connection(&mut b, &hub, &fake, || {
+            Err(GuiClientRefusal::IntegrityTooLow)
+        })
+        .unwrap();
         drop(b);
         assert!(matches!(t.join().unwrap(), Err(HostError::IpcRefused(_))));
     }
