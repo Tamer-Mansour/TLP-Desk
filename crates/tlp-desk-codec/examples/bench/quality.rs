@@ -96,6 +96,7 @@ impl Canvas {
     }
 
     /// Draws `text` with `face` at pixel height `px`.
+    #[allow(clippy::too_many_arguments)]
     fn text(&self, x: i32, y: i32, text: &str, face: &str, px: i32, bold: bool, rgb: (u8, u8, u8)) {
         let face: Vec<u16> = face.encode_utf16().chain(Some(0)).collect();
         let wide: Vec<u16> = text.encode_utf16().collect();
