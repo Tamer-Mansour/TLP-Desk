@@ -68,6 +68,10 @@ pub enum TicketRejected {
     /// Issued by this very process instance: the restart has not happened yet. The ticket is
     /// kept for the next instance.
     NotRestartedYet,
+    /// The ticket was valid but its removal could not be written to disk. Refused (and
+    /// consumed in memory): a success the store cannot remember would let the same ticket
+    /// work again after the next restart.
+    NotPersisted,
 }
 
 #[derive(Clone)]
@@ -256,7 +260,8 @@ impl TicketStore {
             return Err(TicketRejected::NotRestartedYet);
         }
         s.entries.remove(pos);
-        if let Err(e) = save(&s) {
+        let persisted = save(&s);
+        if let Err(e) = &persisted {
             // Consumed in memory anyway: a ticket must never work twice.
             tracing::warn!(%e, "could not persist the consumed reconnect ticket");
         }
@@ -265,6 +270,11 @@ impl TicketStore {
         }
         if entry.expires_unix_ms <= now_unix_ms {
             return Err(TicketRejected::Expired);
+        }
+        if persisted.is_err() {
+            // Fail closed (audit F4): the file still lists the ticket, so succeeding here
+            // would make it redeemable once more after the next restart.
+            return Err(TicketRejected::NotPersisted);
         }
         Ok(entry.grant)
     }
@@ -504,6 +514,33 @@ mod tests {
         // consumption is persisted too
         let again = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
         assert!(again.is_empty());
+    }
+
+    /// Regression test for audit F4: when consuming a valid ticket cannot be written to disk,
+    /// the redemption fails closed instead of succeeding with the ticket still on file
+    /// (where it would work again after the next restart). The failing writer is real: the
+    /// atomic save's temp file name is occupied by a directory.
+    #[test]
+    fn redemption_fails_closed_when_the_consumption_cannot_be_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("تذاكر").join(TICKETS_FILE);
+        let store = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        let now = now_unix_ms();
+        let t = store.issue(&fp(4), 0x21, now).unwrap();
+
+        let rebooted = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        let mut tmp_name = TICKETS_FILE.to_owned();
+        tmp_name.push_str(".tmp");
+        fs::create_dir(path.with_file_name(tmp_name)).unwrap();
+        assert_eq!(
+            rebooted.redeem(&t.token, &fp(4), now + 1),
+            Err(TicketRejected::NotPersisted)
+        );
+        // Consumed in memory all the same: no second try in this process either.
+        assert_eq!(
+            rebooted.redeem(&t.token, &fp(4), now + 2),
+            Err(TicketRejected::Unknown)
+        );
     }
 
     #[test]
