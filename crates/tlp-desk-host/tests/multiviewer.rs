@@ -691,3 +691,65 @@ async fn no_resume_tickets_when_disabled() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!a.keeper.has(sa.feature_key()));
 }
+
+/// Injector that reports when each event reached it.
+struct TimingInjector(std::sync::mpsc::Sender<(InputEvent, Instant)>);
+
+impl InputInjector for TimingInjector {
+    fn inject(&mut self, event: &InputEvent) -> Result<(), InputError> {
+        let _ = self.0.send((event.clone(), Instant::now()));
+        Ok(())
+    }
+}
+
+/// Input is sent the moment it happens (not batched per video frame): viewer -> host
+/// injection latency over loopback, measured per event while a second viewer streams too.
+/// Prints the median and the 95th percentile.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn input_reaches_the_host_immediately_with_two_viewers() {
+    let (tx, rx) = std::sync::mpsc::channel::<(InputEvent, Instant)>();
+    let tx = Arc::new(Mutex::new(tx));
+    let mut rig = rig(move |c| {
+        c.injector_factory = Arc::new(move |_r: MonitorRect| {
+            let tx = tx.lock().unwrap().clone();
+            Ok(Box::new(TimingInjector(tx)) as Box<dyn InputInjector>)
+        });
+    })
+    .await;
+    let (va, vb) = (viewer("viewer-a"), viewer("viewer-b"));
+    let (sa, _ea, _ca) = join(&mut rig, &va, FULL).await;
+    let (sb, _eb, _cb) = join(&mut rig, &vb, FULL).await;
+    streaming(&sa, W, H).await;
+    streaming(&sb, W, H).await;
+    // The injector is created on the first event; warm it up.
+    sa.send_input(mv(1));
+    let rx = Arc::new(Mutex::new(rx));
+    let first = rx.clone();
+    tokio::task::spawn_blocking(move || first.lock().unwrap().recv_timeout(WAIT))
+        .await
+        .unwrap()
+        .expect("warm-up event");
+
+    let mut samples = Vec::new();
+    for i in 0..60u16 {
+        let ev = mv(5000 + i);
+        let sent = Instant::now();
+        assert!(sa.send_input(ev.clone()));
+        let rx = rx.clone();
+        let got = tokio::task::spawn_blocking(move || loop {
+            let (e, at) = rx.lock().unwrap().recv_timeout(WAIT).expect("event");
+            if e == ev {
+                return at;
+            }
+        })
+        .await
+        .unwrap();
+        samples.push(got.saturating_duration_since(sent));
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    samples.sort();
+    let median = samples[samples.len() / 2];
+    let p95 = samples[samples.len() * 95 / 100];
+    println!("viewer -> host input latency over loopback: median {median:?}, p95 {p95:?}");
+    assert!(p95 < Duration::from_millis(100), "p95 {p95:?}");
+}
