@@ -158,6 +158,7 @@ pub enum TransferStartError {
 use tlp_desk_files::fs::{FsClientError, StartError};
 
 pub use tlp_desk_files::clipfiles::RemoteClipboardFiles;
+pub use tlp_desk_files::shellclip::drag::DragOutcome;
 pub use tlp_desk_proto::{FsEntry, FsOp, FsReply, FsRoot, FsRootKind};
 
 use super::SessionId;

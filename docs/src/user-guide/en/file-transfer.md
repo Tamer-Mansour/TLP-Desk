@@ -58,8 +58,22 @@ is focused does the same as the second button.
 
 ## Drag and drop
 
-Drop files onto the session window to send them to the remote PC (they land in the Desktop
-folder unless you pick a folder in the browser).
+- **Into a remote folder:** drop files or folders from Explorer onto the **Remote PC** pane of the
+  file browser. They are copied into the folder open in that pane (the pane lights up and names
+  the folder while you hover). If the pane shows the drives, open a folder first.
+- **Anywhere else on the session window:** the files go to the remote PC's Desktop.
+- Dropping on the **This PC** pane copies nothing; a single dropped folder is opened there.
+- **Out to this PC:** select files or folders in the **Remote PC** pane and drag them out of the
+  TLP-Desk window, onto an Explorer window, the desktop or any program that accepts files dragged
+  from Explorer-style sources. Windows shows its usual copy progress; the files are pulled from
+  the other PC only when they are dropped (folders are listed while you drag), with the same
+  resume and verification as every transfer. Released inside the TLP-Desk window, the drag is the
+  usual copy between the two panes.
+
+Notes on dragging out: the TLP-Desk window does not repaint while the pointer is outside it with
+files (Windows runs the drag); it continues as soon as you drop. Programs that only accept real
+files on disk (some editors) do not take files dragged from the remote pane: drop them in a folder
+first. Dragging needs the **Files** permission.
 
 ## When a file already exists
 
