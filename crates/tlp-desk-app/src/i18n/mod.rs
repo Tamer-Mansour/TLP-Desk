@@ -10,6 +10,7 @@
 //!
 //! Each piece of text must be shaped **exactly once**; never feed a display string back in.
 
+mod bidi_line;
 pub mod format;
 pub mod shaping;
 
@@ -18,6 +19,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 pub use format::DigitStyle;
+pub use bidi_line::{bidi_line, BidiLine};
 pub use shaping::{
     has_rtl, ltr_isolate, shape_for_display, shape_for_edit, visual_for_egui, BaseDir,
 };
