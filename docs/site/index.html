@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TLP-Desk: free remote desktop for your local network</title>
+<meta name="description" content="TLP-Desk is a free, open-source remote desktop for Windows that works only inside your local network: no cloud, no account, no relay server, no telemetry. Arabic (right-to-left) and English.">
+<link rel="alternate" hreflang="ar" href="ar.html">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!--
+  Static landing page, no external resources. Images are referenced as ../media/ so this file
+  previews correctly from the repository; the Docs workflow publishes docs/media as media/ next to
+  this page and rewrites the paths (see .github/workflows/docs.yml).
+-->
+<div class="hero">
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="index.html">TLP-Desk</a>
+      <nav class="top" aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#download">Download</a>
+        <a href="book/">Documentation</a>
+        <a href="ar.html" hreflang="ar" lang="ar">العربية</a>
+      </nav>
+    </header>
+    <h1>Remote desktop for your own network. Nothing leaves it.</h1>
+    <p class="lead">TLP-Desk lets one Windows PC see and control another on the same local network.
+      It is free, open source and written in Rust. No cloud, no account, no relay server, no
+      telemetry. It keeps working with the internet cable unplugged.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/Tamer-Mansour/TLP-Desk/releases/latest">Download for Windows</a>
+      <a class="btn secondary" href="book/">Read the documentation</a>
+    </div>
+    <div class="shot">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="../media/home-en-dark@2x.png">
+        <img src="../media/home-en-light@2x.png" width="2240" height="1400"
+             alt="The TLP-Desk home screen: this device's ID and one-time code, the connect box and the devices found on the network">
+      </picture>
+    </div>
+  </div>
+</div>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <h2>What you get</h2>
+    <p class="sub">One small app is both the PC being controlled (the host) and the PC in control
+      (the viewer).</p>
+    <div class="grid">
+      <div class="card"><h3>Offline and LAN-only</h3>
+        <p>Devices find each other automatically on your network, or you type an ID or IP address.
+        By default only private and link-local addresses can connect.</p></div>
+      <div class="card"><h3>Encrypted and authenticated</h3>
+        <p>Every session uses QUIC with TLS 1.3. The 9-digit device ID is derived from the device's
+        key, so connecting by ID pins its identity. A changed key is a loud warning.</p></div>
+      <div class="card"><h3>You decide who gets in</h3>
+        <p>Click <em>Accept</em> on the host, enter a one-time 6-digit code, or use a permanent
+        password for unattended access. Passwords never cross the network, and attempts are rate
+        limited.</p></div>
+      <div class="card"><h3>Smooth video</h3>
+        <p>About 60 frames per second of H.264 video. When the network falls behind, frames are
+        dropped instead of queued, so lag does not build up.</p></div>
+      <div class="card"><h3>Full control</h3>
+        <p>Mouse, wheel and keyboard, including Win, Alt+Tab and the language switch keys. Switch
+        between the host's monitors live. The person at the host always has priority.</p></div>
+      <div class="card"><h3>Files, clipboard, chat, sound</h3>
+        <p>Fast file transfer with a remote file browser, clipboard sync for text, images and files,
+        a chat, and the remote computer's sound.</p></div>
+      <div class="card"><h3>Unattended access</h3>
+        <p>An optional Windows service keeps the PC reachable at the lock and sign-in screens, and
+        reconnects after a restart.</p></div>
+      <div class="card"><h3>Privacy and tools</h3>
+        <p>Privacy mode blanks the host's screen during a session. Draw on the screen, forward a
+        port, wake a sleeping PC, and review the connection log.</p></div>
+      <div class="card"><h3>Arabic first</h3>
+        <p>The whole interface is available in Arabic with a mirrored right-to-left layout, joined
+        letters, correct mixed Arabic/English order, Arabic-Indic digits, and Arabic text fields
+        that behave while you type.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Connect in three steps</h2>
+    <ol class="steps">
+      <li>On the PC you want to control, open TLP-Desk and note its <strong>device ID</strong> and
+        <strong>one-time code</strong>.</li>
+      <li>On your PC, pick it from <strong>Devices on this network</strong>, or type its ID or IP
+        address.</li>
+      <li>Enter the code, or leave it empty and click <strong>Accept</strong> on the other PC. You
+        are in.</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>English and Arabic, side by side</h2>
+    <p class="sub">The same session in both languages: the toolbar and overlays mirror in Arabic.</p>
+    <div class="two">
+      <figure style="margin:0">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../media/session-en-dark.png">
+          <img src="../media/session-en-light.png" loading="lazy"
+               alt="A viewer session in English with the toolbar and stats overlay">
+        </picture>
+        <figcaption>English</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../media/session-ar-dark.png">
+          <img src="../media/session-ar-light.png" loading="lazy"
+               alt="The same session in Arabic with a mirrored toolbar and overlay">
+        </picture>
+        <figcaption>العربية</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download</h2>
+    <div class="dl">
+      <p>Get the latest release from GitHub Releases:</p>
+      <ul>
+        <li><code>TLP-Desk-&lt;version&gt;-setup.exe</code>: installer (Arabic and English) that also adds
+          Windows Firewall rules for private networks only.</li>
+        <li><code>TLP-Desk-&lt;version&gt;-win-x64-portable.zip</code>: no installation; unzip and run
+          <code>TLP-Desk.exe</code>.</li>
+        <li><code>SHA256SUMS.txt</code>: checksums to verify your download.</li>
+      </ul>
+      <p><a class="btn" href="https://github.com/Tamer-Mansour/TLP-Desk/releases/latest">Open the latest release</a>
+         <a class="btn secondary" href="https://github.com/Tamer-Mansour/TLP-Desk/releases">All releases</a></p>
+      <p class="note">Requires Windows 10 (2004 or newer) or Windows 11, x64. The installer is not
+        code-signed yet, so SmartScreen may warn: choose <em>More info</em>, then <em>Run anyway</em>.
+        Start TLP-Desk on both PCs and set the network to <em>Private</em> in Windows.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Learn more</h2>
+    <div class="grid">
+      <div class="card"><h3><a href="book/user-guide/en/index.html">User guide</a></h3>
+        <p>Installing, connecting, controlling, settings, troubleshooting and the FAQ.
+        <a href="book/user-guide/ar/index.html" lang="ar" hreflang="ar">بالعربية</a></p></div>
+      <div class="card"><h3><a href="book/security.html">Security model</a></h3>
+        <p>Threat model, identity and pinning, and the known limitations, stated plainly.</p></div>
+      <div class="card"><h3><a href="https://github.com/Tamer-Mansour/TLP-Desk">Source code</a></h3>
+        <p>MIT or Apache-2.0, at your option. Contributions and bug reports are welcome.</p></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>TLP-Desk is free software under the MIT or Apache-2.0 licence. It makes no outbound internet
+      connections: no update checks, no analytics, no crash uploads.</p>
+    <p><a href="https://github.com/Tamer-Mansour/TLP-Desk">GitHub</a> ·
+      <a href="https://github.com/Tamer-Mansour/TLP-Desk/releases">Releases</a> ·
+      <a href="book/">Documentation</a> ·
+      <a href="ar.html" lang="ar" hreflang="ar">العربية</a></p>
+  </div>
+</footer>
+</body>
+</html>

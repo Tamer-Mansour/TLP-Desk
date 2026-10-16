@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TLP-Desk: سطح مكتب بعيد مجاني لشبكتك المحلية</title>
+<meta name="description" content="TLP-Desk برنامج مجاني ومفتوح المصدر للتحكم بحاسوب Windows عن بُعد داخل شبكتك المحلية فقط: بلا سحابة ولا حساب ولا خادم وسيط ولا تتبّع. بالعربية (من اليمين إلى اليسار) والإنجليزية.">
+<link rel="alternate" hreflang="en" href="index.html">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!--
+  صفحة هبوط ثابتة بلا موارد خارجية. الصور مكتوبة بالمسار ../media/ لتظهر عند المعاينة من المستودع؛
+  ويقوم مسار عمل Docs بنشر docs/media باسم media/ بجوار هذه الصفحة وتعديل المسارات
+  (انظر .github/workflows/docs.yml).
+-->
+<div class="hero">
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="ar.html">TLP-Desk</a>
+      <nav class="top" aria-label="التنقل">
+        <a href="#features">المزايا</a>
+        <a href="#download">التنزيل</a>
+        <a href="book/user-guide/ar/index.html">التوثيق</a>
+        <a href="index.html" hreflang="en" lang="en">English</a>
+      </nav>
+    </header>
+    <h1>سطح مكتب بعيد لشبكتك أنت. ولا شيء يخرج منها.</h1>
+    <p class="lead">يتيح لك TLP-Desk رؤية حاسوب Windows آخر والتحكم به من حاسوب على الشبكة المحلية نفسها.
+      وهو مجاني ومفتوح المصدر ومكتوب بلغة Rust. بلا سحابة ولا حساب ولا خادم وسيط ولا تتبّع،
+      ويواصل العمل حتى لو فصلت كابل الإنترنت.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/Tamer-Mansour/TLP-Desk/releases/latest">تنزيل لنظام Windows</a>
+      <a class="btn secondary" href="book/user-guide/ar/index.html">اقرأ التوثيق</a>
+    </div>
+    <div class="shot">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="../media/home-ar-dark@2x.png">
+        <img src="../media/home-ar-light@2x.png" width="2240" height="1400"
+             alt="الشاشة الرئيسية في TLP-Desk: معرّف هذا الجهاز ورمزه لمرة واحدة، ومربع الاتصال، والأجهزة الموجودة على الشبكة">
+      </picture>
+    </div>
+  </div>
+</div>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <h2>ما الذي تحصل عليه</h2>
+    <p class="sub">تطبيق صغير واحد هو الحاسوب المتحكَّم به (المضيف) والحاسوب المتحكِّم (العارض) في آنٍ واحد.</p>
+    <div class="grid">
+      <div class="card"><h3>دون إنترنت وعلى الشبكة المحلية فقط</h3>
+        <p>تجد الأجهزة بعضها تلقائيًا على شبكتك، أو تكتب المعرّف أو عنوان IP. وافتراضيًا لا يتصل إلا
+        العناوين الخاصة وعناوين الارتباط المحلي.</p></div>
+      <div class="card"><h3>مشفَّر وموثَّق</h3>
+        <p>تستخدم كل جلسة QUIC مع TLS 1.3. ومعرّف الجهاز المكوّن من 9 أرقام مشتق من مفتاحه، فالاتصال
+        بالمعرّف يثبّت هوية الجهاز. وإذا تغيّر المفتاح ظهر تحذير واضح.</p></div>
+      <div class="card"><h3>أنت من يقرر من يدخل</h3>
+        <p>اضغط <em>قبول</em> على المضيف، أو أدخل رمزًا من 6 أرقام لمرة واحدة، أو استخدم كلمة مرور دائمة
+        للوصول غير المراقَب. لا تنتقل كلمات المرور عبر الشبكة، وتُحدَّد محاولات الإدخال.</p></div>
+      <div class="card"><h3>فيديو سلس</h3>
+        <p>نحو 60 إطارًا في الثانية بترميز H.264. وإذا تأخرت الشبكة تُسقَط الإطارات بدل أن تتراكم،
+        فلا يزداد التأخير.</p></div>
+      <div class="card"><h3>تحكّم كامل</h3>
+        <p>الفأرة والعجلة ولوحة المفاتيح، بما فيها Win وAlt+Tab ومفاتيح تبديل اللغة. بدّل بين شاشات
+        المضيف مباشرة. والأولوية دائمًا للشخص الجالس أمام المضيف.</p></div>
+      <div class="card"><h3>ملفات وحافظة ومحادثة وصوت</h3>
+        <p>نقل سريع للملفات مع مستعرض للملفات البعيدة، ومزامنة الحافظة للنصوص والصور والملفات،
+        ومحادثة، وصوت الحاسوب البعيد.</p></div>
+      <div class="card"><h3>وصول غير مراقَب</h3>
+        <p>تُبقي خدمة Windows الاختيارية الحاسوب في المتناول عند شاشة القفل وشاشة تسجيل الدخول،
+        وتعيد الاتصال بعد إعادة التشغيل.</p></div>
+      <div class="card"><h3>الخصوصية والأدوات</h3>
+        <p>وضع الخصوصية يُظلم شاشة المضيف أثناء الجلسة. ارسم على الشاشة، ووجّه منفذًا، وأيقظ حاسوبًا نائمًا،
+        وراجع سجل الاتصالات.</p></div>
+      <div class="card"><h3>العربية أولًا</h3>
+        <p>الواجهة كلها متاحة بالعربية بتخطيط معكوس من اليمين إلى اليسار، وحروف متصلة، وترتيب صحيح
+        للنص المختلط بين العربية والإنجليزية، وأرقام هندية، وحقول نص عربية تتصرف كما ينبغي أثناء الكتابة.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>اتصل في ثلاث خطوات</h2>
+    <ol class="steps">
+      <li>على الحاسوب الذي تريد التحكم به، افتح TLP-Desk ودوّن <strong>معرّف الجهاز</strong> و<strong>الرمز
+        لمرة واحدة</strong>.</li>
+      <li>على حاسوبك، اختره من <strong>الأجهزة على هذه الشبكة</strong>، أو اكتب معرّفه أو عنوان IP.</li>
+      <li>أدخل الرمز، أو اتركه فارغًا واضغط <strong>قبول</strong> على الحاسوب الآخر. وها أنت متصل.</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>الإنجليزية والعربية جنبًا إلى جنب</h2>
+    <p class="sub">الجلسة نفسها باللغتين: ينعكس الشريط والعناصر العائمة في العربية.</p>
+    <div class="two">
+      <figure style="margin:0">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../media/session-ar-dark.png">
+          <img src="../media/session-ar-light.png" loading="lazy"
+               alt="جلسة عارض بالعربية مع شريط أدوات وعناصر عائمة معكوسة">
+        </picture>
+        <figcaption>العربية</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../media/session-en-dark.png">
+          <img src="../media/session-en-light.png" loading="lazy"
+               alt="الجلسة نفسها بالإنجليزية مع شريط الأدوات وعناصر الإحصاءات">
+        </picture>
+        <figcaption lang="en" dir="ltr">English</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>التنزيل</h2>
+    <div class="dl">
+      <p>نزّل أحدث إصدار من صفحة الإصدارات على GitHub:</p>
+      <ul>
+        <li><code dir="ltr">TLP-Desk-&lt;الإصدار&gt;-setup.exe</code>: مثبِّت (بالعربية والإنجليزية) يضيف أيضًا
+          قواعد جدار حماية Windows للشبكات الخاصة فقط.</li>
+        <li><code dir="ltr">TLP-Desk-&lt;الإصدار&gt;-win-x64-portable.zip</code>: نسخة محمولة بلا تثبيت؛ فُكَّ
+          الضغط وشغّل <code dir="ltr">TLP-Desk.exe</code>.</li>
+        <li><code dir="ltr">SHA256SUMS.txt</code>: بصمات للتحقق من سلامة ما نزّلته.</li>
+      </ul>
+      <p><a class="btn" href="https://github.com/Tamer-Mansour/TLP-Desk/releases/latest">افتح أحدث إصدار</a>
+         <a class="btn secondary" href="https://github.com/Tamer-Mansour/TLP-Desk/releases">كل الإصدارات</a></p>
+      <p class="note">يتطلب Windows 10 (الإصدار 2004 أو أحدث) أو Windows 11 بمعمارية x64. المثبِّت غير موقَّع
+        رقميًا بعد، لذا قد يحذّرك SmartScreen: اختر <em>مزيد من المعلومات</em> ثم <em>تشغيل على أي حال</em>.
+        شغّل TLP-Desk على الحاسوبين واضبط الشبكة على <em>خاصة</em> في Windows.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>اعرف المزيد</h2>
+    <div class="grid">
+      <div class="card"><h3><a href="book/user-guide/ar/index.html">دليل المستخدم</a></h3>
+        <p>التثبيت والاتصال والتحكم والإعدادات وحل المشكلات والأسئلة الشائعة.
+        <a href="book/user-guide/en/index.html" lang="en" hreflang="en">In English</a></p></div>
+      <div class="card"><h3><a href="book/security.html">نموذج الأمان</a></h3>
+        <p>نموذج التهديدات، والهوية والتثبيت، والقيود المعروفة، مذكورة بصراحة.</p></div>
+      <div class="card"><h3><a href="https://github.com/Tamer-Mansour/TLP-Desk">الشيفرة المصدرية</a></h3>
+        <p>برخصة MIT أو Apache-2.0 بحسب اختيارك. المساهمات وبلاغات الأخطاء مرحَّب بها.</p></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>TLP-Desk برنامج حر برخصة MIT أو Apache-2.0. ولا يجري أي اتصال صادر بالإنترنت: لا فحص للتحديثات
+      ولا تحليلات ولا رفع لتقارير الأعطال.</p>
+    <p><a href="https://github.com/Tamer-Mansour/TLP-Desk">GitHub</a> ·
+      <a href="https://github.com/Tamer-Mansour/TLP-Desk/releases">الإصدارات</a> ·
+      <a href="book/user-guide/ar/index.html">التوثيق</a> ·
+      <a href="index.html" lang="en" hreflang="en">English</a></p>
+  </div>
+</footer>
+</body>
+</html>
