@@ -148,6 +148,10 @@ impl InputSink for XTestSink {
                         self.fake(kind, code, 0, 0)?;
                     }
                 }
+                // XTest only presses keycodes of the current keymap; typing arbitrary Unicode
+                // would need a temporary keymap remap. Not supported yet: the viewer's
+                // "type with my layout" falls back to the host layout's keys on Linux hosts.
+                RawInput::Unicode { .. } => return Err(InputError::Unsupported),
             }
         }
         // One flush per batch so a press/release pair reaches the server together.

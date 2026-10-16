@@ -165,6 +165,9 @@ impl InputSink for CgEventSink {
                 RawInput::Button { button, down } => self.button(button, down)?,
                 RawInput::Wheel { horizontal, delta } => self.wheel(horizontal, delta)?,
                 RawInput::Key { key, down } => self.key(key, down)?,
+                // Typing arbitrary Unicode needs CGEventKeyboardSetUnicodeString; not
+                // implemented yet, so `InputEvent::Text` is reported as unsupported.
+                RawInput::Unicode { .. } => return Err(InputError::Unsupported),
             }
         }
         Ok(())
