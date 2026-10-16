@@ -135,11 +135,12 @@ fn main() -> anyhow::Result<()> {
                 };
                 backend::real::RealBackend::start_with(&rt, repaint, cfg)
             };
-            #[cfg_attr(not(windows), allow(unused_mut))]
             let mut app = App::new(cc, backend, events, settings, start);
             // Notification-area icon: only the real GUI creates one (never tests or media).
             #[cfg(windows)]
             app.enable_tray(&cc.egui_ctx);
+            // Incoming requests also open the stand-alone Accept window.
+            app.enable_accept_popup(&cc.egui_ctx);
             Ok(Box::new(app))
         }),
     )

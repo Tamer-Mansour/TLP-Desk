@@ -150,6 +150,10 @@ pub struct App {
     pub conflicts: crate::ui::transfer_conflict::ConflictDialogs,
     /// Files moving to and from this host: list, window and notices (TLP-transfer-ux).
     pub host_transfers: crate::ui::host_transfers::HostTransfers,
+    /// Stand-alone Accept windows, one per request (TLP-accept-popup).
+    pub accept_popups: crate::prompt::AcceptPopups,
+    /// The in-app Accept card (popup off or failed) and the request it shows.
+    pub accept_card: Option<(RequestId, crate::ui::accept_window::AcceptCard)>,
 }
 
 impl App {
@@ -215,6 +219,8 @@ impl App {
             host_clipboard: Default::default(),
             conflicts: Default::default(),
             host_transfers: Default::default(),
+            accept_popups: Default::default(),
+            accept_card: None,
         };
         // The Run key is the truth for "start with Windows" (it can be removed outside the app).
         if let Ok(on) = app.autostart.is_enabled() {
@@ -487,15 +493,15 @@ impl App {
                 }
                 BackendEvent::IncomingRequest { request, peer } => {
                     let name = peer.name.clone();
+                    let popup = self.popup_incoming(ctx, request, &peer);
                     self.incoming.push_back((request, peer));
-                    if self.tray.system_present() {
-                        self.tray_incoming_request(ctx, &name);
-                    } else {
-                        bring_to_front(ctx);
+                    if !popup {
+                        self.notify_incoming(ctx, &name);
                     }
                 }
                 BackendEvent::IncomingRequestCancelled { request } => {
                     self.incoming.retain(|(r, _)| *r != request);
+                    self.popup_cancelled(request);
                 }
                 BackendEvent::HostSessionStarted { session, peer } => {
                     if !self.host_sessions.iter().any(|(id, _)| *id == session) {
@@ -866,54 +872,8 @@ impl App {
             any = true;
         }
 
-        if let Some((request, peer)) = self.incoming.front().cloned() {
-            any = true;
-            let mut answer = None;
-            egui::Modal::new(Id::new("incoming-request")).show(ctx, |ui| {
-                ui.set_width(400.0);
-                theme::column(ui, tx.rtl(), |ui| {
-                    widgets::icon_heading(ui, tx, Icon::Monitor, tx.t(S::IncomingTitle));
-                    ui.add_space(4.0);
-                    ui.label(tx.f(S::IncomingBody, &[("name", &peer.name)]));
-                    ui.add_space(6.0);
-                    egui::Frame::new()
-                        .fill(ui.visuals().extreme_bg_color)
-                        .corner_radius(8)
-                        .inner_margin(10)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            for (k, v) in [
-                                (S::DeviceName, tx.d(&peer.name)),
-                                (S::IdLabel, tx.n(&peer.device_id.to_string())),
-                                (S::AddressLabel, tx.n(&peer.address.to_string())),
-                            ] {
-                                theme::row(ui, tx.rtl(), |ui| {
-                                    ui.label(theme::caption(ui, tx.t(k)));
-                                    // Arabic final forms can overhang their box; keep a gap.
-                                    ui.add_space(6.0);
-                                    ui.label(RichText::new(v).strong());
-                                });
-                            }
-                        });
-                    ui.add_space(10.0);
-                    theme::row(ui, tx.rtl(), |ui| {
-                        let accept =
-                            widgets::primary_icon_button(ui, tx, Icon::Accept, tx.t(S::Accept));
-                        if ui.add(accept).clicked() {
-                            answer = Some(true);
-                        }
-                        let decline = icons::icon_text_button(tx, Icon::Reject, tx.t(S::Decline));
-                        if ui.add(decline).clicked() {
-                            answer = Some(false);
-                        }
-                    });
-                });
-            });
-            if let Some(accept) = answer {
-                self.backend.respond_to_request(request, accept);
-                self.incoming.pop_front();
-            }
-            return any;
+        if self.incoming_dialog(ctx) {
+            return true;
         }
 
         if let Some(w) = self.key_warning.clone() {
@@ -1059,6 +1019,18 @@ impl App {
     }
 }
 
+impl App {
+    /// Tell the user about a request answered in the main window: tray balloon when there is
+    /// a tray icon, otherwise bring the window up.
+    pub(crate) fn notify_incoming(&mut self, ctx: &egui::Context, name: &str) {
+        if self.tray.system_present() {
+            self.tray_incoming_request(ctx, name);
+        } else {
+            bring_to_front(ctx);
+        }
+    }
+}
+
 /// Un-minimize, focus and flash the window (incoming request, viewer connected).
 fn bring_to_front(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
@@ -1072,6 +1044,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_events(&ctx);
+        self.popup_frame(&ctx);
         self.tray_frame(&ctx);
         self.banner_window(&ctx);
         self.host_banner(ui);

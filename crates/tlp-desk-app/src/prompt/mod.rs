@@ -13,6 +13,7 @@
 //! The card itself is drawn by [`crate::ui::accept_window`], which the main window also uses
 //! for its fallback dialog.
 
+mod glue;
 pub mod launcher;
 pub mod protocol;
 pub mod run;
