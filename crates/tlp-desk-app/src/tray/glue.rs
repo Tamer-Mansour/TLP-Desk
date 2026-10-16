@@ -19,6 +19,9 @@ pub struct TrayState {
     pub system: Option<super::SystemTray>,
     /// The first frame ran (start-minimized is applied once).
     started: bool,
+    /// This run was started to open a session (`--connect`): the first frame shows the
+    /// window normally instead of applying start-minimized.
+    pub show_on_start: bool,
     /// Name of the newest unanswered incoming request, for the tooltip.
     pub request: Option<String>,
 }
@@ -30,6 +33,7 @@ impl Default for TrayState {
             #[cfg(windows)]
             system: None,
             started: false,
+            show_on_start: false,
             request: None,
         }
     }
@@ -109,10 +113,13 @@ impl App {
     pub(crate) fn tray_frame(&mut self, ctx: &egui::Context) {
         if !self.tray.started {
             self.tray.started = true;
-            let cmds = self
-                .tray
-                .shell
-                .startup(self.settings.startup.start_minimized);
+            let cmds = if self.tray.show_on_start {
+                self.tray.shell.startup_for_session()
+            } else {
+                self.tray
+                    .shell
+                    .startup(self.settings.startup.start_minimized)
+            };
             apply_window_cmds(ctx, &cmds);
         }
         if ctx.input(|i| i.viewport().close_requested()) {

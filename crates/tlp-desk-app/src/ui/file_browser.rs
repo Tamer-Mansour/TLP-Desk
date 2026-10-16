@@ -5,8 +5,10 @@
 //!
 //! All file-system work goes through [`Backend::fs_request`] (answers arrive as
 //! `BackendEvent::FsResult` and are fed to [`FileBrowser::on_result`]); copies go through
-//! [`Backend::fs_transfer`].
+//! [`Backend::fs_transfer`]. Files dragged out to Explorer or dropped in from it: see
+//! [`outside`].
 
+mod outside;
 mod pane;
 
 use std::collections::HashMap;
@@ -23,6 +25,7 @@ use crate::backend::{Backend, SessionId};
 use crate::i18n::{Tx, S};
 use crate::ui::icons::{self, Icon};
 use crate::ui::{theme, widgets};
+pub use outside::release_pointer_if_requested;
 use pane::{DragFiles, Pane, PaneAction, SortKey};
 
 const LOCAL: usize = 0;
@@ -73,6 +76,14 @@ pub struct FileBrowser {
     tx: Tx,
     /// The last click landed inside the panel: keys belong to it, not to the remote view.
     keyboard: bool,
+    /// Where each pane was drawn in the last frame (window points), to hit-test drops.
+    pane_rects: [Option<egui::Rect>; 2],
+    /// Remote rows are being dragged and the backend has prepared a drag-out.
+    dragging_out: bool,
+    /// Where files dragged over the window from another program would land.
+    drop_hover: Option<outside::DropTarget>,
+    /// Finds the pointer during a drag from another program (the OS; tests use egui's).
+    pointer: fn(&egui::Context) -> Option<egui::Pos2>,
 }
 
 impl FileBrowser {
@@ -88,6 +99,10 @@ impl FileBrowser {
             offset_s: local_offset_s(),
             tx: Tx::new(crate::i18n::Lang::En, crate::i18n::DigitStyle::Western),
             keyboard: false,
+            pane_rects: [None, None],
+            dragging_out: false,
+            drop_hover: None,
+            pointer: outside::os_pointer,
         }
     }
 
@@ -182,6 +197,8 @@ impl FileBrowser {
     pub fn ui(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend, perms: Permissions) {
         self.tx = tx;
         if !self.open {
+            self.pane_rects = [None, None];
+            self.drop_hover = None;
             return;
         }
         for i in [LOCAL, REMOTE] {
@@ -230,6 +247,9 @@ impl FileBrowser {
                 ui.columns(2, |cols| {
                     for (col, &i) in cols.iter_mut().zip(order.iter()) {
                         let (acts, dropped) = self.pane_ui(col, tx, i);
+                        if let Some(r) = self.pane_rects.get_mut(i) {
+                            *r = Some(col.min_rect());
+                        }
                         actions.extend(acts.into_iter().map(|a| (i, a)));
                         if let Some(d) = dropped {
                             drop_into = Some((i, d));
@@ -250,6 +270,8 @@ impl FileBrowser {
                 self.copy_between(d.from, d.names, backend);
             }
         }
+        self.files_from_outside(ui.ctx(), tx, backend);
+        self.drag_out_tick(ui.ctx(), tx, backend);
         self.dialogs(ui.ctx(), tx, backend);
     }
 
@@ -333,7 +355,10 @@ impl FileBrowser {
                 icons::BUTTON_ICON,
                 ui.visuals().text_color(),
             );
-            ui.label(RichText::new(title).strong());
+            let title = ui.label(RichText::new(title).strong());
+            if i == REMOTE {
+                title.on_hover_text(tx.t(S::FsDragOutHint));
+            }
         });
         // Toolbar: Back / Forward / Up / Refresh | New folder / Rename / Delete | Copy across.
         theme::row(ui, rtl, |ui| {
@@ -462,6 +487,9 @@ impl FileBrowser {
                                 from: i,
                                 names: p.selection(),
                             });
+                            if i == REMOTE {
+                                acts.push(PaneAction::DragOut(p.selection()));
+                            }
                         }
                         if r.double_clicked() && e.is_dir {
                             if let Some(dir) = &p.path {
@@ -526,6 +554,7 @@ impl FileBrowser {
                 self.dialog = Some(Dialog::ConfirmDelete { pane: i, names });
             }
             PaneAction::CopyToOther(names) => self.copy_between(i, names, backend),
+            PaneAction::DragOut(names) => self.prepare_drag_out(names, backend),
         }
     }
 

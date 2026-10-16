@@ -7,10 +7,13 @@
 //! dialog); [`VirtualStream`] is the `IStream` it hands out per file, which waits (pumping
 //! messages) until the transfer engine has staged the whole file.
 //!
+//! The same data object serves drag-out (`super::drag`): it then lives on a thread of its own
+//! and deletes its staging folder when the drop target releases it ([`Release::Drag`]).
+//!
 //! Every `unsafe` block carries a `// SAFETY:` comment. COM pointers that come from the caller
 //! are checked for null before use.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -50,16 +53,16 @@ use super::ClipboardPort;
 
 /// Registered clipboard format ids of the shell formats we serve.
 #[derive(Clone, Copy)]
-struct Formats {
-    descriptor: u16,
-    contents: u16,
+pub(super) struct Formats {
+    pub(super) descriptor: u16,
+    pub(super) contents: u16,
     preferred_effect: u16,
     performed_effect: u16,
     paste_succeeded: u16,
 }
 
 impl Formats {
-    fn register() -> Option<Self> {
+    pub(super) fn register() -> Option<Self> {
         let reg = |name: windows::core::PCWSTR| {
             // SAFETY: `name` is a valid NUL-terminated wide string literal.
             let id = unsafe { RegisterClipboardFormatW(name) };
@@ -81,7 +84,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Handles pending window messages for a moment so COM calls (and our own `Release`s) are
 /// served while a read waits. Our command message is put back for the main loop.
-fn pump() {
+pub(super) fn pump() {
     let mut deferred = 0u32;
     let mut quit: Option<i32> = None;
     loop {
@@ -303,20 +306,38 @@ impl IStream_Impl for VirtualStream_Impl {
     }
 }
 
-/// The clipboard `IDataObject` offering the peer's files.
-#[implement(IDataObject, IDataObjectAsyncCapability)]
-struct VirtualFiles {
+/// What the last release of a [`VirtualFiles`] object means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Release {
+    /// The clipboard offer: stop the pull; [`super::ShellClipboard`] deletes the staging
+    /// folder when the offer is replaced or cleared.
+    Clipboard,
+    /// A drag: stop the pull, delete the staging folder and end the object's own thread.
+    Drag,
+}
+
+/// The `IDataObject` offering the peer's files (clipboard paste and drag-out).
+///
+/// Not agile: a drag hands it to the GUI thread as a proxy, and only a proxy keeps the drop
+/// target's (blocking) reads on this object's own thread instead of the GUI thread.
+#[implement(IDataObject, IDataObjectAsyncCapability, Agile = false)]
+pub(super) struct VirtualFiles {
     staged: Arc<StagedItems>,
-    group: GroupDescriptor,
+    /// The descriptor bytes, built once the items are known (a drag lists them meanwhile).
+    group: OnceCell<GroupDescriptor>,
     fmt: Formats,
     async_mode: AtomicBool,
     in_operation: AtomicBool,
     performed_effect: AtomicU32,
+    release: Release,
 }
 
 impl VirtualFiles {
-    fn new(staged: Arc<StagedItems>, fmt: Formats) -> Self {
-        let group = build_group_descriptor(staged.items());
+    pub(super) fn new(staged: Arc<StagedItems>, fmt: Formats, release: Release) -> Self {
+        let group = OnceCell::new();
+        if staged.is_listed() {
+            let _ = group.set(build_group_descriptor(staged.items()));
+        }
         Self {
             staged,
             group,
@@ -324,15 +345,40 @@ impl VirtualFiles {
             async_mode: AtomicBool::new(true),
             in_operation: AtomicBool::new(false),
             performed_effect: AtomicU32::new(0),
+            release,
+        }
+    }
+
+    /// The file group descriptor; for a drag it waits (pumping) for the remote listing.
+    fn group(&self) -> Option<&GroupDescriptor> {
+        if let Some(g) = self.group.get() {
+            return Some(g);
+        }
+        match self.staged.wait_items(&mut pump) {
+            Ok(items) => {
+                let built = build_group_descriptor(items);
+                Some(self.group.get_or_init(|| built))
+            }
+            Err(e) => {
+                tracing::debug!(%e, "virtual files could not be listed");
+                None
+            }
         }
     }
 }
 
 impl Drop for VirtualFiles {
     fn drop(&mut self) {
-        // OLE released the clipboard object (replaced by another copy, or we cleared it) and
-        // no paste still holds it: nothing will read the staged bytes any more.
+        // OLE released the object (clipboard replaced or cleared, drop target finished or
+        // drag cancelled) and nothing still holds it: nobody will read the staged bytes.
         self.staged.cancel();
+        if self.release == Release::Drag {
+            super::discard(&self.staged);
+            // The last release runs on the object's own STA thread (the object is not
+            // agile): end its message loop.
+            // SAFETY: plain call without pointers; it only posts to this thread's queue.
+            unsafe { windows::Win32::UI::WindowsAndMessaging::PostQuitMessage(0) };
+        }
     }
 }
 
@@ -398,15 +444,13 @@ impl VirtualFiles_Impl {
             if fe.tymed & (TYMED_ISTREAM.0 as u32) == 0 {
                 return Err(DV_E_TYMED);
             }
-            let ok = usize::try_from(fe.lindex)
-                .ok()
-                .is_some_and(|i| i < self.group.item_index.len());
-            // lindex -1 is how callers probe support; serving needs a real index.
-            return if ok || fe.lindex == -1 {
-                Ok(())
-            } else {
-                Err(DV_E_LINDEX)
-            };
+            // lindex -1 is how callers probe support; serving needs a real index (which needs
+            // the descriptor, so a drag's listing is waited for only here).
+            let ok = fe.lindex == -1
+                || usize::try_from(fe.lindex)
+                    .ok()
+                    .is_some_and(|i| self.group().is_some_and(|g| i < g.item_index.len()));
+            return if ok { Ok(()) } else { Err(DV_E_LINDEX) };
         }
         Err(DV_E_FORMATETC)
     }
@@ -421,7 +465,10 @@ impl IDataObject_Impl for VirtualFiles_Impl {
         self.check(fe).map_err(windows::core::Error::from)?;
         let cf = fe.cfFormat;
         if cf == self.fmt.descriptor {
-            return Ok(hglobal_medium(global_from_bytes(&self.group.bytes)?));
+            let group = self
+                .group()
+                .ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+            return Ok(hglobal_medium(global_from_bytes(&group.bytes)?));
         }
         if cf == self.fmt.preferred_effect {
             let effect = DROPEFFECT_COPY.0.to_le_bytes();
@@ -431,9 +478,8 @@ impl IDataObject_Impl for VirtualFiles_Impl {
         let slot =
             usize::try_from(fe.lindex).map_err(|_| windows::core::Error::from(DV_E_LINDEX))?;
         let item_idx = *self
-            .group
-            .item_index
-            .get(slot)
+            .group()
+            .and_then(|g| g.item_index.get(slot))
             .ok_or_else(|| windows::core::Error::from(DV_E_LINDEX))?;
         let item = self
             .staged
@@ -710,7 +756,7 @@ fn run(queue: &Queue, ready: &mpsc::Sender<Option<u32>>) {
 fn apply(cmd: Command, fmt: Formats, current: &mut Option<IDataObject>) {
     match cmd {
         Command::Set(staged) => {
-            let obj: IDataObject = VirtualFiles::new(staged, fmt).into();
+            let obj: IDataObject = VirtualFiles::new(staged, fmt, Release::Clipboard).into();
             // Another program can hold the clipboard open for a moment: retry briefly.
             let mut last = None;
             for _ in 0..10 {

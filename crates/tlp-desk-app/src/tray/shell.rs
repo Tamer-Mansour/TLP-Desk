@@ -71,6 +71,14 @@ impl Shell {
         }
     }
 
+    /// First frame of a run started to open a session right away (`--connect`): show the
+    /// window normally, whatever the start-minimized setting or the show state the launcher
+    /// (a console, a script) passed to the new process.
+    pub fn startup_for_session(&mut self) -> Vec<WindowCmd> {
+        self.mode = WindowMode::Shown;
+        vec![WindowCmd::Restore, WindowCmd::Focus]
+    }
+
     /// Send the window to the tray (no-op without a tray icon).
     pub fn to_tray(&mut self) -> Vec<WindowCmd> {
         if !self.has_tray || self.mode == WindowMode::InTray {
@@ -158,5 +166,17 @@ mod tests {
         );
         assert_eq!(s.mode(), WindowMode::Shown);
         assert!(Shell::new(true).startup(false).is_empty());
+    }
+
+    #[test]
+    fn a_run_started_for_a_session_always_shows_the_window() {
+        for tray in [true, false] {
+            let mut s = Shell::new(tray);
+            assert_eq!(
+                s.startup_for_session(),
+                [WindowCmd::Restore, WindowCmd::Focus]
+            );
+            assert_eq!(s.mode(), WindowMode::Shown);
+        }
     }
 }
