@@ -587,8 +587,9 @@ async fn malformed_side_stream_headers_are_refused() {
     .is_err());
 }
 
-/// A flood of side streams nobody accepts fills that kind's queue (64) and the rest are
-/// refused instead of piling up.
+/// A flood of side streams nobody accepts fills that kind's queue (64); the rest wait (back-
+/// pressure, bounded by the QUIC stream limit) and are refused once the wait is over, instead of
+/// piling up.
 #[tokio::test(flavor = "multi_thread")]
 async fn side_stream_flood_is_bounded() {
     let r = rig();
@@ -599,7 +600,7 @@ async fn side_stream_flood_is_bounded() {
         s.write_all(b"x").await.unwrap();
         // Queued streams are never stopped: they time out here, which is the point.
         waits.spawn(async move {
-            match timeout(Duration::from_secs(3), s.stopped()).await {
+            match timeout(Duration::from_secs(15), s.stopped()).await {
                 Ok(Ok(Some(code))) => {
                     assert_eq!(code, STREAM_REFUSED.into());
                     true
@@ -619,6 +620,35 @@ async fn side_stream_flood_is_bounded() {
         .unwrap()
         .unwrap();
     assert!(first.id < 100);
+}
+
+/// Regression: a feature that is slow to accept (busy machine, burst of small files) must not
+/// lose streams. 150 streams opened at once while nobody accepts are all delivered once the
+/// consumer catches up; none is refused (this used to hang `many_small_files` under load).
+#[tokio::test(flavor = "multi_thread")]
+async fn slow_consumer_receives_every_stream() {
+    let r = rig();
+    let (h, v) = r.honest_session().await;
+    let mut sends = Vec::new();
+    for id in 0..150u64 {
+        let mut s = v.open_uni(StreamKind::FileData, id).await.unwrap();
+        s.write_all(b"x").await.unwrap();
+        s.finish().unwrap();
+        sends.push(s);
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..150 {
+        let got = timeout(T, h.accept_side_stream(StreamKind::FileData))
+            .await
+            .unwrap()
+            .unwrap();
+        seen.insert(got.id);
+    }
+    assert_eq!(seen.len(), 150);
+    for mut s in sends {
+        assert_eq!(s.stopped().await.unwrap(), None, "a stream was refused");
+    }
 }
 
 /// Half-open side streams (no header ever sent) do not block the control stream or other

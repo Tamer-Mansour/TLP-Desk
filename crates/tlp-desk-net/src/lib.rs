@@ -63,8 +63,8 @@ pub use feature::{
 pub use neighbor::{format_mac, neighbor_mac, neighbor_table, Neighbor};
 pub use quinn::{RecvStream, SendStream};
 pub use session::{
-    stream_priority, PeerInfo, Session, SideStream, TransportStats, VideoSendStatus, DEFAULT_MAX_VIDEO_IN_FLIGHT,
-    HANDSHAKE_MAX_FRAME, STREAM_REFUSED,
+    stream_priority, PeerInfo, Session, SideStream, TransportStats, VideoSendStatus,
+    DEFAULT_MAX_VIDEO_IN_FLIGHT, HANDSHAKE_MAX_FRAME, STREAM_REFUSED,
 };
 pub use tlp_desk_proto::{StreamHeader, StreamKind};
 pub use tls::{Pin, ALPN};
