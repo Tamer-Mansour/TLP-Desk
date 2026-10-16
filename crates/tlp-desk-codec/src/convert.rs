@@ -298,6 +298,38 @@ pub fn bgra_to_i420_half(src: &BgraFrame, out: &mut I420Buffer) {
     });
 }
 
+/// Bytes of a tight NV12 picture of the buffer's size: the Y plane then interleaved U/V.
+pub fn nv12_len(src: &I420Buffer) -> usize {
+    src.width * src.height * 3 / 2
+}
+
+/// Writes `src` as tight NV12 (Y plane, then one half-height plane of interleaved U, V) into
+/// the first [`nv12_len`] bytes of `dst`. Returns `false` (writing nothing) when `dst` is too
+/// small or `src`'s planes do not match its size.
+pub fn i420_to_nv12(src: &I420Buffer, dst: &mut [u8]) -> bool {
+    let (w, h) = (src.width, src.height);
+    let y_len = w * h;
+    let c_len = y_len / 4;
+    if dst.len() < nv12_len(src)
+        || src.y.len() < y_len
+        || src.u.len() < c_len
+        || src.v.len() < c_len
+    {
+        return false;
+    }
+    let (y_dst, uv_dst) = dst.split_at_mut(y_len);
+    y_dst.copy_from_slice(&src.y[..y_len]);
+    for ((pair, &u), &v) in uv_dst[..c_len * 2]
+        .chunks_exact_mut(2)
+        .zip(&src.u[..c_len])
+        .zip(&src.v[..c_len])
+    {
+        pair[0] = u;
+        pair[1] = v;
+    }
+    true
+}
+
 // BT.709 limited-range inverse, scaled by 4096.
 const CY: i32 = 4769; // 1.1644
 const CRV: i32 = 7343; // 1.7927
@@ -560,6 +592,34 @@ mod tests {
         assert_eq!((out.width, out.height), (4, 4));
         let expect_y = luma(10, 20, 30);
         assert!(out.y.iter().all(|&y| y == expect_y));
+    }
+
+    #[test]
+    fn nv12_interleaves_chroma_after_luma() {
+        let src = I420Buffer {
+            width: 4,
+            height: 2,
+            y: (0..8).collect(),
+            u: vec![100, 101],
+            v: vec![200, 201],
+        };
+        assert_eq!(nv12_len(&src), 12);
+        let mut out = vec![0xEE; 13];
+        assert!(i420_to_nv12(&src, &mut out));
+        assert_eq!(
+            out,
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 100, 200, 101, 201, 0xEE],
+            "Y plane, then U/V pairs; bytes past nv12_len untouched"
+        );
+        // Too small a destination or a short plane is refused without writing.
+        let mut small = vec![0; 11];
+        assert!(!i420_to_nv12(&src, &mut small));
+        assert!(small.iter().all(|&b| b == 0));
+        let short = I420Buffer {
+            u: vec![1],
+            ..src.clone()
+        };
+        assert!(!i420_to_nv12(&short, &mut out));
     }
 
     #[test]

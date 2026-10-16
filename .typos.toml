@@ -8,7 +8,7 @@ extend-exclude = [
     "dist/",
     # Arabic UI strings and translated docs: typos only knows English.
     "**/i18n/ar*",
-    "docs/*-ar.md",
+    "docs/src/user-guide/ar/**",
 ]
 
 [default.extend-words]
@@ -18,3 +18,8 @@ LOD = "LOD"
 fo = "fo"
 # Loop index pair (ix, iy).
 iy = "iy"
+# ISO BMFF (MP4) box names: track box, track fragment run (session recording).
+trak = "trak"
+trun = "trun"
+# H.264 syntax descriptor ue(v): unsigned Exp-Golomb code.
+ue = "ue"

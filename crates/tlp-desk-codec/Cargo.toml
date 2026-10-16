@@ -17,6 +17,22 @@ thiserror.workspace = true
 openh264 = { version = "0.9", default-features = false, features = ["source"] }
 # Direct encoder FFI (fixed slice count for multi-threaded encoding); same version as openh264's.
 openh264-sys2 = { version = "0.9", default-features = false, features = ["source"] }
+# Hardware-encoder fallback and adapter choice are logged (local log files only).
+tracing = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+# Media Foundation hardware H.264 encoder (src/mf): MFTs, ICodecAPI (needs Com/Ole/Variant),
+# and DXGI to find the adapter that drives the captured monitor (output desc needs Gdi).
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+] }
 
 [target.'cfg(windows)'.dev-dependencies]
 # Benchmark only: process CPU time (GetProcessTimes), DPI awareness and the --animate window.

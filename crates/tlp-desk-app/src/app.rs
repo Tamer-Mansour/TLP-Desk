@@ -1,11 +1,15 @@
 //! Top-level eframe application: owns UI state, drains backend events, routes screens.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+
+/// How long the host banner keeps showing "remote input is blocked" after the last refusal.
+const HOST_BLOCKED_NOTICE: std::time::Duration = std::time::Duration::from_secs(15);
 
 use eframe::egui::{self, Id, RichText};
 use tlp_desk_proto::RejectReason;
 
+use crate::backend::chat::ChatLine;
 use crate::backend::{
     AttemptId, Backend, BackendEvent, ConnectError, ConnectTarget, DiscoveredDevice, EndReason,
     EventReceiver, HostProblem, LocalInfo, PeerInfo, RequestId, SessionId,
@@ -13,8 +17,13 @@ use crate::backend::{
 use crate::i18n::{format::to_western_digits, Lang, Tx, S};
 use crate::keygrab::{self, SystemKeyGrab};
 use crate::settings::Settings;
+use crate::ui::address_book::AddressBookUi;
+use crate::ui::audio::AudioControls;
+use crate::ui::chat::{self as chat_ui, ChatState};
 use crate::ui::icons::{self, Icon};
+use crate::ui::recordings::{self, RecordState, RecordingsUi};
 use crate::ui::session::ViewerSession;
+use crate::ui::tunnels::{self, HostTunnelState};
 use crate::ui::{theme, widgets};
 
 /// Which full-window screen is shown when no viewer session is active.
@@ -22,6 +31,8 @@ use crate::ui::{theme, widgets};
 pub enum Screen {
     Home,
     Settings,
+    /// Connection log (TLP-settings-tray).
+    ConnectionLog,
 }
 
 /// A connection attempt in progress.
@@ -71,6 +82,9 @@ pub struct StartOptions {
     /// One-time code for `connect`.
     pub code: Option<String>,
     pub screen_settings: bool,
+    /// Keep the address book in memory only: nothing is read from or written to
+    /// `%APPDATA%` (screenshots, tests).
+    pub address_book_in_memory: bool,
 }
 
 pub struct App {
@@ -99,9 +113,32 @@ pub struct App {
     hwnd: Option<isize>,
     pub incoming: VecDeque<(RequestId, PeerInfo)>,
     pub host_sessions: Vec<(SessionId, PeerInfo)>,
+    /// Port forwarding state per incoming session (TLP-tunnel).
+    pub host_tunnels: HashMap<SessionId, HostTunnelState>,
+    /// Host side: chat with each connected viewer (window opens when the viewer writes).
+    pub host_chats: HashMap<SessionId, ChatState>,
+    /// When the OS last refused a remote viewer's input (elevated window in front).
+    host_input_blocked: Option<std::time::Instant>,
     pub session: Option<ViewerSession>,
     /// Shown once after a remote end.
     pub notice: Option<String>,
+    /// Permanent password card and password sign-in (TLP-unattended).
+    pub unattended: crate::ui::unattended::UnattendedUi,
+    /// Saved devices (home screen tab).
+    pub address_book: AddressBookUi,
+    // --- TLP-settings-tray ---
+    /// Settings screen editor state.
+    pub settings_ui: crate::ui::settings::SettingsUi,
+    /// "Start with Windows" (the HKCU Run key; a fake in tests).
+    pub autostart: Box<dyn crate::settings::autostart::AutoStart>,
+    /// Notification-area icon and main-window mode.
+    pub tray: crate::tray::TrayState,
+    /// Connection log screen state.
+    pub conn_log: crate::ui::connection_log::ConnLogUi,
+    /// Recordings window and playback windows (TLP-recording).
+    pub recordings: RecordingsUi,
+    /// Recent clipboard activity of host sessions (banner indicator, TLP-clipboard).
+    pub host_clipboard: crate::ui::clipboard::HostClipboard,
 }
 
 impl App {
@@ -118,7 +155,16 @@ impl App {
         theme::install(&cc.egui_ctx);
         theme::apply_lang(&cc.egui_ctx, settings.lang);
         let local = backend.local_info();
+        let unattended =
+            crate::ui::unattended::UnattendedUi::new(backend.unattended_password_state());
+        let book_tx = Tx::new(settings.lang, settings.digits);
+        let address_book = if opts.address_book_in_memory {
+            AddressBookUi::load(None, book_tx)
+        } else {
+            AddressBookUi::load_default(book_tx)
+        };
         let mut app = Self {
+            unattended,
             name_edit: local.device_name.clone(),
             backend,
             events,
@@ -141,9 +187,27 @@ impl App {
             hwnd: keygrab::window_handle(cc),
             incoming: VecDeque::new(),
             host_sessions: Vec::new(),
+            host_tunnels: HashMap::new(),
+            host_chats: HashMap::new(),
+            host_input_blocked: None,
             session: None,
             notice: None,
+            address_book,
+            settings_ui: Default::default(),
+            autostart: crate::settings::autostart::system(),
+            tray: Default::default(),
+            conn_log: Default::default(),
+            recordings: RecordingsUi::default(),
+            host_clipboard: Default::default(),
         };
+        // The Run key is the truth for "start with Windows" (it can be removed outside the app).
+        if let Ok(on) = app.autostart.is_enabled() {
+            app.settings.startup.start_with_windows = on;
+        }
+        app.backend
+            .set_clipboard_default(!app.settings.clipboard_sync_off);
+        app.backend
+            .set_audio_on_connect(!app.settings.mute_remote_audio);
         if let Some(code) = opts.code {
             app.code = code;
         }
@@ -183,6 +247,10 @@ impl App {
     /// Connect using the one-time code field (empty = ask the host user to accept). The code
     /// is cleared once used: it rotates on the host after each use.
     pub fn connect(&mut self, target: ConnectTarget) {
+        if self.unattended.use_password {
+            self.connect_password(target);
+            return;
+        }
         let code = match normalize_code(&self.code) {
             Ok(c) => c,
             Err(()) => {
@@ -212,9 +280,35 @@ impl App {
         true
     }
 
+    /// Connect with the permanent password typed in the connect box (TLP-unattended). The
+    /// password stays in the field until the attempt ends, so a confirmed key change can retry.
+    fn connect_password(&mut self, target: ConnectTarget) {
+        if self.unattended.password.is_empty() {
+            self.error = Some(self.tx.t(S::ErrPasswordEmpty).to_owned());
+            return;
+        }
+        if self.pending.is_some() || self.session.is_some() {
+            return;
+        }
+        let label = target.to_string();
+        let attempt = self
+            .backend
+            .connect_with_password(target.clone(), self.unattended.password.clone());
+        self.pending = Some(Pending {
+            attempt,
+            target: label,
+            awaiting_accept: false,
+            dial: target,
+            code: None,
+        });
+    }
+
     fn error_text(&self, error: &ConnectError) -> String {
         let tx = self.tx;
         match error {
+            ConnectError::Rejected(RejectReason::RateLimited) => {
+                crate::ui::unattended::locked_out_text(tx)
+            }
             ConnectError::NotFound => tx.t(S::ErrNotFound).into(),
             ConnectError::Rejected(r) => tx
                 .t(match r {
@@ -244,7 +338,11 @@ impl App {
                     }
                     self.local = info;
                 }
-                BackendEvent::Devices(list) => self.devices = Some(list),
+                BackendEvent::Devices(list) => {
+                    self.address_book
+                        .on_devices(&list, self.backend.as_ref(), self.tx);
+                    self.devices = Some(list);
+                }
                 BackendEvent::AwaitingAccept { attempt } => {
                     if let Some(p) = self.pending.as_mut().filter(|p| p.attempt == attempt) {
                         p.awaiting_accept = true;
@@ -268,7 +366,10 @@ impl App {
                                 presented,
                             });
                         }
-                        other => self.error = Some(self.error_text(&other)),
+                        other => {
+                            self.unattended.password.clear();
+                            self.error = Some(self.error_text(&other));
+                        }
                     }
                 }
                 BackendEvent::SessionStarted {
@@ -280,7 +381,15 @@ impl App {
                 } => {
                     if self.pending.as_ref().is_some_and(|p| p.attempt == attempt) {
                         self.pending = None;
+                        self.unattended.password.clear();
+                        self.address_book
+                            .on_session_started(&peer, self.backend.as_ref(), self.tx);
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
+                        view.clipboard.sync = !self.settings.clipboard_sync_off;
+                        view.quality = self.settings.quality;
+                        self.backend
+                            .request_quality(session, self.settings.quality.to_proto());
+                        view.audio = AudioControls::new(!self.settings.mute_remote_audio);
                         if let Some(grab) =
                             SystemKeyGrab::start(Arc::downgrade(&self.backend), session, self.hwnd)
                         {
@@ -327,22 +436,37 @@ impl App {
                 }
                 BackendEvent::SessionEnded { session, reason } => {
                     self.host_sessions.retain(|(id, _)| *id != session);
+                    self.host_tunnels.remove(&session);
+                    self.host_chats.remove(&session);
                     if self.session.as_ref().is_some_and(|s| s.id == session) {
-                        self.session = None;
+                        let reconnect_failed = self
+                            .session
+                            .take()
+                            .and_then(|mut s| s.unattended.failed.take());
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                         ctx.send_viewport_cmd(egui::ViewportCommand::Title(
                             self.tx.raw(S::AppTitle).into(),
                         ));
-                        self.notice = match reason {
-                            EndReason::Local => None,
-                            EndReason::Remote => Some(self.tx.t(S::SessionEnded).into()),
-                            EndReason::Error(e) => Some(self.tx.f(S::ErrOther, &[("detail", &e)])),
+                        self.notice = match (reconnect_failed, reason) {
+                            (Some(detail), _) => {
+                                Some(self.tx.f(S::ReconnectFailedText, &[("detail", &detail)]))
+                            }
+                            (None, EndReason::Local) => None,
+                            (None, EndReason::Remote) => Some(self.tx.t(S::SessionEnded).into()),
+                            (None, EndReason::Error(e)) => {
+                                Some(self.tx.f(S::ErrOther, &[("detail", &e)]))
+                            }
                         };
                     }
                 }
                 BackendEvent::IncomingRequest { request, peer } => {
+                    let name = peer.name.clone();
                     self.incoming.push_back((request, peer));
-                    bring_to_front(ctx);
+                    if self.tray.system_present() {
+                        self.tray_incoming_request(ctx, &name);
+                    } else {
+                        bring_to_front(ctx);
+                    }
                 }
                 BackendEvent::IncomingRequestCancelled { request } => {
                     self.incoming.retain(|(r, _)| *r != request);
@@ -354,7 +478,187 @@ impl App {
                         bring_to_front(ctx);
                     }
                 }
+                BackendEvent::HostInputBlocked { session } => {
+                    if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_input_blocked = Some(std::time::Instant::now());
+                    }
+                }
                 BackendEvent::HostUnavailable(problem) => self.host_problem = Some(problem),
+                // --- unattended (TLP-unattended) ---
+                BackendEvent::PasswordState(state) => self.unattended.state = state,
+                BackendEvent::PasswordChanged(result) => {
+                    self.unattended.on_password_changed(self.tx, result);
+                }
+                BackendEvent::RemoteRestarting { session } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.on_restarting();
+                    }
+                }
+                BackendEvent::ReconnectAttempt { session, attempt } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.attempt = attempt;
+                    }
+                }
+                BackendEvent::Reconnected {
+                    session,
+                    permissions,
+                } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.on_reconnected();
+                        s.permissions = permissions;
+                    }
+                }
+                BackendEvent::ReconnectFailed { session, error } => {
+                    let text = self.error_text(&error);
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.failed = Some(text);
+                    }
+                }
+                // --- device info (TLP-cli-devinfo) ---
+                BackendEvent::DeviceInfo { session, info } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.device_info.set_info(info);
+                    }
+                }
+                // --- power: port forwarding (TLP-tunnel) ---
+                BackendEvent::Tunnels { session, rules } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.tunnels.rules = rules;
+                    }
+                }
+                BackendEvent::TunnelProblem { session, problem } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.tunnels.problem = Some(problem);
+                        s.tunnels.open = true;
+                    }
+                }
+                BackendEvent::HostTunnels {
+                    session,
+                    allowed,
+                    tunnels,
+                } => {
+                    if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_tunnels
+                            .insert(session, HostTunnelState { allowed, tunnels });
+                    }
+                }
+                // --- audio (TLP-audio) ---
+                BackendEvent::AudioState { session, state } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.audio.apply(state);
+                    }
+                }
+                BackendEvent::AudioDeviceFailed { session } => {
+                    if self.session.as_ref().is_some_and(|s| s.id == session) {
+                        self.notice = Some(self.tx.t(S::AudioDeviceFailed).into());
+                    }
+                }
+                // whiteboard (TLP-whiteboard)
+                BackendEvent::WhiteboardRemote { session, op } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.whiteboard.remote(&op, std::time::Instant::now());
+                    }
+                }
+                // recording (TLP-recording)
+                BackendEvent::RecordingStarted { session, .. } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.recording = RecordState::On {
+                            since: std::time::Instant::now(),
+                        };
+                    }
+                }
+                BackendEvent::RecordingStopped {
+                    session, problem, ..
+                } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.recording = RecordState::Off;
+                    }
+                    if let Some(p) = problem {
+                        self.notice = Some(recordings::problem_text(self.tx, &p));
+                    }
+                    self.recordings.reload();
+                }
+                // chat (TLP-chat)
+                BackendEvent::ChatReceived { session, line } => {
+                    self.chat_received(ctx, session, line)
+                }
+                BackendEvent::ChatAvailability { session, allowed } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.chat.set_allowed(allowed);
+                    } else if self.host_sessions.iter().any(|(id, _)| *id == session) {
+                        self.host_chats
+                            .entry(session)
+                            .or_insert_with(|| ChatState::new(allowed))
+                            .set_allowed(allowed);
+                    }
+                }
+                BackendEvent::Clipboard { session, event } => self.clipboard_event(session, event),
+                // --- files (TLP-files) ---
+                BackendEvent::FsResult {
+                    side,
+                    request,
+                    result,
+                } => {
+                    if let Some(s) = self.session.as_mut() {
+                        s.files.on_result(side, request, result);
+                    }
+                }
+                BackendEvent::RemoteClipboardFiles { session, files } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.files.remote_clipboard = files;
+                    }
+                }
+                BackendEvent::FilesNotice { session, notice } => {
+                    let tx = self.tx;
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.files.on_notice(tx, &notice);
+                        // Progress of the copy shows in the transfer list.
+                        if matches!(
+                            notice,
+                            crate::backend::files::FilesNotice::TransferStarted { .. }
+                        ) {
+                            s.transfers.open = true;
+                        }
+                    }
+                }
+                BackendEvent::Transfer { session, view } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.update(view);
+                    }
+                }
+                BackendEvent::TransferNotStarted { session, error } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.transfers.not_started(error);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A chat message arrived: into the viewer session's panel, or the host chat window (which
+    /// opens). The taskbar button flashes when the window is in the background.
+    fn chat_received(&mut self, ctx: &egui::Context, session: SessionId, line: ChatLine) {
+        if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+            s.chat.push(line);
+        } else if self.host_sessions.iter().any(|(id, _)| *id == session) {
+            let chat = self
+                .host_chats
+                .entry(session)
+                .or_insert_with(|| ChatState::new(true));
+            chat.push(line);
+            chat.set_open(true);
+        } else {
+            return;
+        }
+        chat_ui::notify_if_unfocused(ctx);
+    }
+
+    /// Host side: one chat window per connected viewer that has one open.
+    fn host_chat_windows(&mut self, ctx: &egui::Context) {
+        let tx = self.tx;
+        for (session, peer) in &self.host_sessions {
+            if let Some(chat) = self.host_chats.get_mut(session) {
+                chat_ui::host_window(ctx, tx, chat, &peer.name, self.backend.as_ref(), *session);
             }
         }
     }
@@ -374,6 +678,7 @@ impl App {
         let tx = self.tx;
         let dark = ui.visuals().dark_mode;
         let mut end = None;
+        let mut toggle_chat = None;
         egui::Panel::top("host-banner")
             .frame(
                 egui::Frame::new()
@@ -386,18 +691,48 @@ impl App {
                         let text = tx.f(S::HostBanner, &[("name", &peer.name)]);
                         icons::icon(ui, tx, Icon::ViewOnly, 18.0, egui::Color32::WHITE);
                         ui.label(RichText::new(text).color(egui::Color32::WHITE).strong());
+                        self.host_clipboard.indicator(ui, tx, *session);
                         theme::row_end(ui, tx.rtl(), |ui| {
                             let end_button =
                                 icons::icon_text_button(tx, Icon::EndSession, tx.t(S::EndSession));
                             if ui.add(end_button).clicked() {
                                 end = Some(*session);
                             }
+                            tunnels::host_banner_controls(
+                                ui,
+                                tx,
+                                self.backend.as_ref(),
+                                *session,
+                                self.host_tunnels.get(session),
+                            );
+                            // chat (TLP-chat)
+                            if let Some(chat) = self.host_chats.get(session) {
+                                if chat_ui::chat_toggle(ui, tx, chat) {
+                                    toggle_chat = Some(*session);
+                                }
+                            }
                         });
                     });
+                }
+                // The remote person types into the void otherwise: say why.
+                if self
+                    .host_input_blocked
+                    .is_some_and(|t| t.elapsed() < HOST_BLOCKED_NOTICE)
+                {
+                    ui.label(
+                        RichText::new(tx.t(S::HostInputBlocked))
+                            .color(egui::Color32::WHITE)
+                            .small(),
+                    );
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs(1));
                 }
             });
         if let Some(s) = end {
             self.backend.disconnect(s);
+        }
+        if let Some(chat) = toggle_chat.and_then(|s| self.host_chats.get_mut(&s)) {
+            chat.set_open(!chat.is_open());
         }
     }
 
@@ -543,12 +878,19 @@ impl App {
                 Some(true) => {
                     self.key_warning = None;
                     if self.backend.forget_host_key(w.attempt) {
-                        self.connect_with(w.dial, w.code);
+                        if self.unattended.use_password && !self.unattended.password.is_empty() {
+                            self.connect_password(w.dial);
+                        } else {
+                            self.connect_with(w.dial, w.code);
+                        }
                     } else {
                         self.error = Some(self.tx.t(S::ErrIdentity).to_owned());
                     }
                 }
-                Some(false) => self.key_warning = None,
+                Some(false) => {
+                    self.key_warning = None;
+                    self.unattended.password.clear();
+                }
                 None => {}
             }
             return true;
@@ -633,11 +975,19 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_events(&ctx);
+        self.tray_frame(&ctx);
+        self.banner_window(&ctx);
         self.host_banner(ui);
         if self.session.is_none() {
             self.host_problem_banner(ui);
         }
         let modal_open = self.dialogs(&ctx);
+        let recording_now = self
+            .session
+            .as_ref()
+            .is_some_and(|s| s.recording != RecordState::Off);
+        self.recordings.show(&ctx, self.tx, recording_now);
+        self.host_chat_windows(&ctx);
 
         if self.session.is_some() {
             let tx = self.tx;
@@ -650,6 +1000,7 @@ impl eframe::App for App {
         match self.screen {
             Screen::Home => self.home_ui(ui),
             Screen::Settings => self.settings_ui(ui),
+            Screen::ConnectionLog => self.connection_log_ui(ui),
         }
     }
 }

@@ -153,7 +153,7 @@ async fn setup(perms: Permissions) -> Setup {
     let cfg = HostConfig {
         advertise: false,
         default_permissions: perms,
-        capturer_factory: Arc::new(move |_| {
+        capturer_factory: Arc::new(move |_, _| {
             Ok(Box::new(StillCapturer(mon.clone())) as Box<dyn ScreenCapturer>)
         }),
         monitor_lister: Arc::new(|| Ok(vec![monitor()])),

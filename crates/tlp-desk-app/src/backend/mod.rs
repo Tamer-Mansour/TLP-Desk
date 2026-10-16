@@ -19,16 +19,32 @@
 //! constructed like
 //! `fn start(rt: &tokio::runtime::Handle, repaint: RepaintFn) -> (Arc<dyn Backend>, EventReceiver)`.
 
+pub mod audio;
+pub mod chat;
+mod clipboard;
+pub mod device_info;
 pub mod fake;
+pub mod files;
+pub mod files_bridge;
+pub mod files_fake;
 pub mod real;
+pub mod unattended;
+// TLP-settings-tray: host settings + connection-log glue for the real backend.
+pub mod recording;
+pub(crate) mod settings_tray;
+pub mod tunnels;
+pub mod whiteboard;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
+use std::path::PathBuf;
+
 use tlp_desk_proto::{InputEvent, Permissions, RejectReason};
 
-pub use tlp_desk_proto::MonitorDesc;
+pub use tlp_desk_input::whiteboard::WhiteboardOp;
+pub use tlp_desk_proto::{DeviceInfo, DiskInfo, MonitorDesc};
 
 /// Callback the backend calls (from any thread) to make the UI repaint.
 pub type RepaintFn = Arc<dyn Fn() + Send + Sync>;
@@ -273,6 +289,9 @@ pub struct SessionStats {
     pub fps: f32,
     /// Estimated glass-to-glass latency in milliseconds.
     pub latency_ms: f32,
+    /// `latency_ms` is the clock-synchronized capture-to-display measurement (otherwise a
+    /// coarser estimate).
+    pub latency_synced: bool,
     /// Video bitrate in kilobits per second.
     pub bitrate_kbps: u32,
 }
@@ -334,6 +353,9 @@ pub enum BackendEvent {
     IncomingRequestCancelled { request: RequestId },
     /// Host side: a viewer is now connected to this device (show the banner).
     HostSessionStarted { session: SessionId, peer: PeerInfo },
+    /// Host side: the OS refused to inject this viewer's input (elevated window in front).
+    /// Rate limited by the host; the UI shows a notice for a while.
+    HostInputBlocked { session: SessionId },
     /// This device cannot accept incoming connections (connecting to others may still work).
     /// Sent at startup; the UI shows it until the app restarts.
     HostUnavailable(HostProblem),
@@ -344,13 +366,58 @@ pub enum BackendEvent {
     // in real.rs.
     // =======================================================================================
     // --- files: remote browser, transfers, Explorer copy/paste (TLP-files) ---
-
+    /// Answer to [Backend::fs_request].
+    FsResult {
+        side: files::FsSide,
+        request: files::FsRequestId,
+        result: Result<files::FsReply, files::FsFailure>,
+    },
+    /// The remote PC's clipboard now holds these copied files (None: nothing to paste).
+    RemoteClipboardFiles {
+        session: SessionId,
+        files: Option<files::RemoteClipboardFiles>,
+    },
+    /// Outcome of [Backend::fs_transfer] worth telling the user.
+    FilesNotice {
+        session: SessionId,
+        notice: files::FilesNotice,
+    },
+    /// Viewer side: a file transfer was created or changed (progress arrives about four times a
+    /// second). The UI keeps the newest view per `id`.
+    Transfer {
+        session: SessionId,
+        view: files::TransferView,
+    },
+    /// Viewer side: a transfer could not start.
+    TransferNotStarted {
+        session: SessionId,
+        error: files::TransferStartError,
+    },
     // --- clipboard: text/image/HTML sync (TLP-clipboard) ---
+    /// Clipboard content was synced (or refused) in a viewer or host session. Kinds and sizes
+    /// only, never contents.
+    Clipboard {
+        session: SessionId,
+        event: tlp_desk_files::ClipboardEvent,
+    },
 
-    // --- chat (TLP-ux) ---
-
+    // --- chat (TLP-chat) ---
+    /// A chat message from the other side of a viewer or host session.
+    ChatReceived {
+        session: SessionId,
+        line: chat::ChatLine,
+    },
+    /// Chat was turned on (`true`) or off for a session (the host's live `CHAT` permission).
+    /// Sent once when the session starts and on every change.
+    ChatAvailability { session: SessionId, allowed: bool },
     // --- audio (TLP-audio) ---
-
+    /// Viewer side: the session's sound state changed (toolbar toggle and volume).
+    AudioState {
+        session: SessionId,
+        state: audio::AudioState,
+    },
+    /// Viewer side: the speakers could not be opened; sound was switched off.
+    AudioDeviceFailed { session: SessionId },
     // --- service: unattended access, secure desktop, Ctrl+Alt+Del, restart (TLP-service) ---
 
     // --- privacy mode (TLP-privacy) ---
@@ -360,6 +427,72 @@ pub enum BackendEvent {
     // --- perf: quality presets, latency overlay, all monitors (TLP-perf) ---
 
     // --- power: WOL, recording, tunnels, whiteboard, connection log, device info (TLP-power) ---
+
+    // --- unattended: permanent password, restart + reconnect, lock (TLP-unattended) ---
+    /// The permanent password's state (at startup and after every change).
+    PasswordState(unattended::PasswordState),
+    /// Answer to [`Backend::set_unattended_password`].
+    PasswordChanged(Result<unattended::PasswordChange, unattended::PasswordError>),
+    /// Viewer: the remote PC went down for the restart we asked for; the backend now waits
+    /// for it and reconnects with the ticket. The session stays open (no `SessionEnded`).
+    RemoteRestarting { session: SessionId },
+    /// Viewer: reconnect try number `attempt` (1-based) is starting.
+    ReconnectAttempt { session: SessionId, attempt: u32 },
+    /// Viewer: back in after the restart; frames arrive in the same [`FrameSlot`] again.
+    Reconnected {
+        session: SessionId,
+        permissions: Permissions,
+    },
+    /// Viewer: the remote PC did not come back (or refused the ticket). `SessionEnded` follows.
+    ReconnectFailed {
+        session: SessionId,
+        error: ConnectError,
+    },
+
+    // --- device info (TLP-cli-devinfo) ---
+    /// The host answered [`Backend::request_device_info`] (already sanitized).
+    DeviceInfo {
+        session: SessionId,
+        info: DeviceInfo,
+    },
+    /// Viewer side: the session's active port forwarding rules (full replacement; sent on
+    /// change and about once per second while bytes move).
+    Tunnels {
+        session: SessionId,
+        rules: Vec<tunnels::TunnelRow>,
+    },
+    /// Viewer side: a rule could not be added, or the host closed one (e.g. revoked).
+    TunnelProblem {
+        session: SessionId,
+        problem: tunnels::TunnelProblem,
+    },
+    /// Host side: whether a connected viewer may forward ports, and its open tunnels.
+    HostTunnels {
+        session: SessionId,
+        allowed: bool,
+        tunnels: Vec<tunnels::HostTunnelRow>,
+    },
+    // whiteboard (TLP-whiteboard)
+    /// Viewer side: the host sent a whiteboard op (its user cleared the drawings, or a
+    /// host-side stroke). Apply it to the session's whiteboard.
+    WhiteboardRemote {
+        session: SessionId,
+        op: WhiteboardOp,
+    },
+    // recording (TLP-recording)
+    /// Viewer side: the session is being recorded into `folder` (show the red indicator).
+    RecordingStarted {
+        session: SessionId,
+        folder: std::path::PathBuf,
+    },
+    /// Viewer side: recording ended (stopped, failed to start, or failed). `files` are the
+    /// recordings written (several if the remote screen size changed); `problem` says why it
+    /// ended early, if it did. May arrive after `SessionEnded`.
+    RecordingStopped {
+        session: SessionId,
+        files: Vec<std::path::PathBuf>,
+        problem: Option<recording::RecordingProblem>,
+    },
 }
 
 /// Why this device cannot act as a host.
@@ -421,22 +554,273 @@ pub trait Backend: Send + Sync {
     // `RealBackend` only change where the lane actually implements it.
     // =======================================================================================
     // --- files (TLP-files) ---
+    /// Runs one file-system operation on side (this PC or the remote PC of a viewer session)
+    /// without blocking; the answer arrives as [BackendEvent::FsResult]. None if this
+    /// backend has no file access.
+    fn fs_request(&self, side: files::FsSide, op: files::FsOp) -> Option<files::FsRequestId> {
+        let _ = (side, op);
+        None
+    }
+
+    /// Starts copying files between this PC and the remote PC of session. Problems (and the
+    /// start) are reported as [BackendEvent::FilesNotice].
+    fn fs_transfer(&self, session: SessionId, request: files::TransferRequest) {
+        tracing::debug!(
+            session = session.0,
+            ?request,
+            "file transfers not supported by this backend"
+        );
+    }
+
+    /// Viewer side: send local files and folders (recursively) to the host's default folder.
+    /// Progress arrives as [`BackendEvent::Transfer`].
+    fn send_files(&self, session: SessionId, paths: Vec<PathBuf>) {
+        let _ = (session, paths);
+        tracing::debug!("send_files: not supported by this backend");
+    }
+
+    /// Viewer side: download host files and folders (absolute host paths in one folder) into
+    /// the local folder `dest`.
+    fn download_files(&self, session: SessionId, remote_paths: Vec<String>, dest: PathBuf) {
+        let _ = (session, remote_paths, dest);
+        tracing::debug!("download_files: not supported by this backend");
+    }
+
+    /// Cancel a running transfer; partial data is kept so a retry resumes.
+    fn cancel_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
+
+    /// Continue a cancelled, paused or failed transfer from its partial data.
+    fn retry_transfer(&self, session: SessionId, id: files::TransferId) {
+        let _ = (session, id);
+    }
 
     // --- clipboard (TLP-clipboard) ---
+    /// Switch clipboard sync on or off for one viewer or host session ("Sync clipboard").
+    /// The host's `CLIPBOARD` permission still applies.
+    fn set_clipboard_sync(&self, session: SessionId, enabled: bool) {
+        tracing::debug!(
+            session = session.0,
+            enabled,
+            "clipboard sync toggle not supported"
+        );
+    }
 
-    // --- chat (TLP-ux) ---
+    /// Whether sessions started from now on sync the clipboard (settings default).
+    fn set_clipboard_default(&self, enabled: bool) {
+        tracing::debug!(enabled, "clipboard default not supported");
+    }
+
+    // --- chat (TLP-chat) ---
+    /// Send a chat message in a viewer or host session (queued, never blocks). Returns the
+    /// line to show in the conversation.
+    fn send_chat(
+        &self,
+        session: SessionId,
+        text: &str,
+    ) -> Result<chat::ChatLine, chat::ChatSendError> {
+        let _ = (session, text);
+        Err(chat::ChatSendError::Unavailable)
+    }
+
+    /// Host side: turn chat on or off for a connected viewer (live `CHAT` permission). The
+    /// change arrives as [`BackendEvent::ChatAvailability`].
+    fn set_chat_allowed(&self, session: SessionId, allowed: bool) {
+        tracing::debug!(
+            session = session.0,
+            allowed,
+            "chat permission not supported"
+        );
+    }
 
     // --- audio (TLP-audio) ---
+    /// Viewer side: hear the remote computer's sound in this session (toolbar toggle). Sound
+    /// only flows while the host grants `AUDIO`; the state arrives as
+    /// [`BackendEvent::AudioState`].
+    fn set_audio_enabled(&self, session: SessionId, enabled: bool) {
+        tracing::debug!(
+            session = session.0,
+            enabled,
+            "audio not supported by this backend"
+        );
+    }
+
+    /// Viewer side: playback volume of this session's sound, `0.0..=1.0`.
+    fn set_audio_volume(&self, session: SessionId, volume: f32) {
+        tracing::debug!(
+            session = session.0,
+            volume,
+            "audio not supported by this backend"
+        );
+    }
+
+    /// Whether new viewer sessions ask for the remote sound right away (setting).
+    fn set_audio_on_connect(&self, enabled: bool) {
+        tracing::debug!(enabled, "audio not supported by this backend");
+    }
 
     // --- service (TLP-service) ---
 
     // --- privacy mode (TLP-privacy) ---
 
     // --- settings / ux (TLP-ux) ---
+    /// Apply host settings now (TLP-settings-tray): the allow-list (empty while incoming
+    /// connections are paused) and the live host options (default permissions, accept
+    /// timeout, one-time code on/off, local-input grace, pointer marker). They apply to the
+    /// next connection; running sessions keep their permissions.
+    fn apply_host_settings(&self, settings: &crate::settings::HostSettings) {
+        tracing::debug!(
+            ?settings,
+            "apply_host_settings not supported by this backend"
+        );
+    }
+
+    /// Viewer side (TLP-settings-tray): ask the host for a quality preset
+    /// (`Message::SetQuality`). The host's encoder (TLP-perf) decides what it means.
+    fn request_quality(&self, session: SessionId, quality: tlp_desk_proto::QualitySettings) {
+        tracing::debug!(
+            session = session.0,
+            ?quality,
+            "request_quality not supported by this backend"
+        );
+    }
 
     // --- perf (TLP-perf) ---
+    /// Viewer side: ask the host to stream every monitor as one picture of its virtual desktop.
+    /// Confirmed by [`BackendEvent::MonitorsChanged`] with `active == u32::MAX`.
+    fn select_all_monitors(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "select_all_monitors not supported by this backend"
+        );
+    }
 
     // --- power (TLP-power) ---
+
+    // --- unattended (TLP-unattended) ---
+    /// Start connecting with the host's permanent unattended-access password (never logged).
+    /// Same events as [`Backend::connect`]. Backends without password support fall back to
+    /// asking the host user to accept.
+    fn connect_with_password(&self, target: ConnectTarget, password: String) -> AttemptId {
+        drop(password);
+        self.connect(target, None)
+    }
+
+    /// Host side: set (`new: Some`) or remove (`new: None`) the permanent password. `current`
+    /// must match the stored one unless none is set or this process is elevated. The result
+    /// arrives as [`BackendEvent::PasswordChanged`] and a new [`BackendEvent::PasswordState`].
+    fn set_unattended_password(&self, current: Option<String>, new: Option<String>) {
+        let _ = (current, new);
+        tracing::debug!("set_unattended_password not supported by this backend");
+    }
+
+    /// Current state of the permanent password (also pushed as `PasswordState`).
+    fn unattended_password_state(&self) -> unattended::PasswordState {
+        unattended::PasswordState::default()
+    }
+
+    /// Viewer side: ask the host to restart / lock / press Ctrl+Alt+Del. The UI asks for
+    /// confirmation first; the host enforces `RESTART` / `SYSTEM`.
+    fn system_action(&self, session: SessionId, action: unattended::SystemAction) {
+        tracing::debug!(
+            session = session.0,
+            ?action,
+            "system_action not supported by this backend"
+        );
+    }
+
+    /// Viewer side: stop waiting for a restarting PC. `SessionEnded { Local }` follows.
+    fn cancel_reconnect(&self, session: SessionId) {
+        self.disconnect(session);
+    }
+
+    // --- address book + Wake-on-LAN (TLP-addressbook) ---
+    /// MAC address of the LAN neighbour `ip`, read from the OS neighbour (ARP) cache. Reads
+    /// a local table only and sends nothing; `None` when it is not cached.
+    fn neighbor_mac(&self, ip: IpAddr) -> Option<[u8; 6]> {
+        tracing::debug!(%ip, "neighbor_mac not supported by this backend");
+        None
+    }
+
+    /// Short fingerprint of the key pinned for `id` in the known-hosts store, if any.
+    fn pinned_fingerprint(&self, id: DeviceId) -> Option<String> {
+        tracing::debug!(%id, "pinned_fingerprint not supported by this backend");
+        None
+    }
+
+    /// Send a Wake-on-LAN magic packet for `mac`, aimed at the subnets of `last_ips` (all
+    /// interfaces when none matches). One UDP datagram per target, so it returns at once.
+    /// The error is a detail string for the user-facing message.
+    fn wake_on_lan(&self, mac: [u8; 6], last_ips: &[IpAddr]) -> Result<(), String> {
+        tracing::debug!(?mac, ?last_ips, "wake_on_lan not supported by this backend");
+        Err("not supported".into())
+    }
+
+    /// Viewer side: start forwarding a local port to `host:port` on the remote side. The
+    /// rule appears in [`BackendEvent::Tunnels`], or a [`BackendEvent::TunnelProblem`] says
+    /// why not.
+    fn add_tunnel(&self, session: SessionId, request: tunnels::TunnelRequest) {
+        tracing::debug!(
+            session = session.0,
+            ?request,
+            "port forwarding not supported"
+        );
+    }
+
+    /// Viewer side: stop a forwarding rule.
+    fn stop_tunnel(&self, session: SessionId, id: u64) {
+        tracing::debug!(session = session.0, id, "port forwarding not supported");
+    }
+
+    /// Host side: allow or forbid port forwarding for a connected viewer (live; forbidding
+    /// closes its tunnels). Confirmed by [`BackendEvent::HostTunnels`].
+    fn allow_tunnels(&self, session: SessionId, allowed: bool) {
+        tracing::debug!(
+            session = session.0,
+            allowed,
+            "port forwarding not supported"
+        );
+    }
+
+    // whiteboard (TLP-whiteboard)
+    /// Viewer side: send whiteboard ops (strokes, clear) to the host, in order. The host
+    /// enforces `WHITEBOARD`; the UI only offers drawing while it is granted.
+    fn send_whiteboard(&self, session: SessionId, ops: Vec<WhiteboardOp>) {
+        tracing::debug!(
+            session = session.0,
+            ops = ops.len(),
+            "whiteboard not supported by this backend"
+        );
+    }
+
+    // recording (TLP-recording)
+    /// Viewer side: start recording the session's video to a file in the recordings folder.
+    /// Answered by [`BackendEvent::RecordingStarted`] or [`BackendEvent::RecordingStopped`].
+    fn start_recording(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "recording not supported by this backend"
+        );
+    }
+
+    /// Viewer side: stop recording; [`BackendEvent::RecordingStopped`] follows.
+    fn stop_recording(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "recording not supported by this backend"
+        );
+    }
+
+    // --- device info (TLP-cli-devinfo) ---
+    /// Viewer side: ask the host for its OS, CPU, RAM, disks and uptime. The answer arrives as
+    /// [`BackendEvent::DeviceInfo`]; the host needs `VIEW` to answer.
+    fn request_device_info(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "device info not supported by this backend"
+        );
+    }
 }
 
 #[cfg(test)]

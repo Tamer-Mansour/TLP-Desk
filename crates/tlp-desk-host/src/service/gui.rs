@@ -197,7 +197,9 @@ impl GuiHub {
                 GuiEvent::Status(status)
             }
             HostEvent::SessionEnded { id, .. } => GuiEvent::SessionEnded { id: id.0 },
-            HostEvent::AuthFailed { .. } | HostEvent::Feature { .. } => return,
+            HostEvent::AuthFailed { .. }
+            | HostEvent::InputBlocked { .. }
+            | HostEvent::Feature { .. } => return,
         };
         self.publish(gui);
     }

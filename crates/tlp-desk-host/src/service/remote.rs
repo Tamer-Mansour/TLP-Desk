@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 
 use tlp_desk_capture::{
-    BgraFrame, CaptureError, CursorShape, CursorState, MonitorInfo, ScreenCapturer,
+    BgraFrame, CaptureError, CaptureOptions, CursorShape, CursorState, MonitorInfo, ScreenCapturer,
 };
 use tlp_desk_input::{InputError, InputEvent, InputInjector, MonitorRect};
 
@@ -170,8 +170,9 @@ impl AgentLink {
     /// the agent, frames capped at `max_size`.
     pub fn capturer_factory(self: &Arc<Self>, max_size: Option<(u32, u32)>) -> CapturerFactory {
         let link = self.clone();
-        Arc::new(move |monitor| {
-            RemoteCapturer::open(&link, monitor, max_size)
+        Arc::new(move |monitor, options: CaptureOptions| {
+            // The quality preset's cap wins over the link default (adaptive resolution steps).
+            RemoteCapturer::open(&link, monitor, options.max_size.or(max_size))
                 .map(|c| Box::new(c) as Box<dyn ScreenCapturer>)
         })
     }
@@ -669,7 +670,7 @@ mod tests {
     fn frames_and_cursor_cross_the_pipe() {
         let (link, _agent) = setup();
         let factory = link.capturer_factory(Some((32, 16)));
-        let mut cap = factory(1).unwrap();
+        let mut cap = factory(1, CaptureOptions::default()).unwrap();
         assert_eq!(cap.monitor().index, 1);
         assert_eq!(cap.monitor().x, 64);
         assert_eq!(cap.frame_size(), (32, 16));
@@ -687,14 +688,14 @@ mod tests {
         // Third request: no change.
         assert!(cap.next_frame(Duration::from_millis(5)).unwrap().is_none());
         // Unknown monitor.
-        assert!(matches!(factory(7), Err(CaptureError::NoSuchMonitor(7))));
+        assert!(matches!(factory(7, CaptureOptions::default()), Err(CaptureError::NoSuchMonitor(7))));
     }
 
     #[test]
     fn desktop_switch_reopens_capture_on_the_secure_desktop() {
         let (link, agent) = setup();
         let factory = link.capturer_factory(None);
-        let mut cap = factory(0).unwrap();
+        let mut cap = factory(0, CaptureOptions::default()).unwrap();
         assert!(cap.next_frame(Duration::ZERO).unwrap().is_some());
         // Lock screen / UAC: the input desktop becomes Winlogon.
         *lock(&agent.os.desktop) = "Winlogon".into();
@@ -708,7 +709,7 @@ mod tests {
             cap.next_frame(Duration::ZERO),
             Err(CaptureError::SurfaceLost)
         ));
-        let mut cap = factory(0).unwrap();
+        let mut cap = factory(0, CaptureOptions::default()).unwrap();
         assert!(cap.next_frame(Duration::ZERO).unwrap().is_some());
         let opened = lock(&agent.os.opened).clone();
         assert_eq!(
@@ -721,14 +722,14 @@ mod tests {
     fn agent_restart_is_survived() {
         let (link, agent) = setup();
         let factory = link.capturer_factory(None);
-        let mut cap = factory(0).unwrap();
+        let mut cap = factory(0, CaptureOptions::default()).unwrap();
         assert!(cap.next_frame(Duration::ZERO).is_ok());
         let mut inj = link.injector_factory()(MonitorRect::new(0, 0, 64, 32)).unwrap();
         inj.inject(&InputEvent::MouseMove { x: 1, y: 2 }).unwrap();
         // The agent goes away (logoff): the link is cleared and connections break.
         agent.dead.store(true, Ordering::SeqCst);
         link.set(None);
-        assert!(matches!(factory(0), Err(CaptureError::Platform(_))));
+        assert!(matches!(factory(0, CaptureOptions::default()), Err(CaptureError::Platform(_))));
         assert!(link.list_monitors().is_err());
         // A new agent comes up.
         let os = agent.os.clone();
@@ -738,7 +739,7 @@ mod tests {
             dead: AtomicBool::new(false),
         });
         link.set(Some(agent2.clone()));
-        assert!(factory(0).unwrap().next_frame(Duration::ZERO).is_ok());
+        assert!(factory(0, CaptureOptions::default()).unwrap().next_frame(Duration::ZERO).is_ok());
         assert_eq!(link.list_monitors().unwrap().len(), 2);
         drop(cap);
     }
@@ -802,7 +803,7 @@ mod tests {
             link.open(AgentChannel::Command),
             Err(HostError::NoAgent)
         ));
-        assert!(link.capturer_factory(None)(0).is_err());
+        assert!(link.capturer_factory(None)(0, CaptureOptions::default()).is_err());
         assert!(link.lock_workstation().is_err());
         let mut inj = link.injector_factory()(MonitorRect::new(0, 0, 1, 1)).unwrap();
         assert!(inj.inject(&InputEvent::ReleaseAll).is_err());
@@ -882,7 +883,7 @@ mod tests {
         }
         let link = AgentLink::new();
         link.set(Some(Arc::new(Liar)));
-        let mut cap = link.capturer_factory(None)(0).unwrap();
+        let mut cap = link.capturer_factory(None)(0, CaptureOptions::default()).unwrap();
         assert!(matches!(
             cap.next_frame(Duration::ZERO),
             Err(CaptureError::SurfaceLost)
