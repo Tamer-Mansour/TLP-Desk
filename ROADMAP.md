@@ -46,20 +46,29 @@ until it works in Arabic. Check these per milestone as features land.
 
 **Data paths (M1–M2)**
 - [ ] Arabic device names round-trip through mDNS TXT, broadcast fallback and the address book (UTF-8)
+      _(partial: `endpoint::tests::peer_names_keep_arabic_and_lose_control_characters`, address book `round_trip_keeps_arabic_exactly`; mDNS across two PCs is still manual)_
 - [ ] Remote typing works with the host on an Arabic keyboard layout (scancodes), including Alt+Shift layout switching
-- [ ] Clipboard sync preserves Arabic text exactly (incl. RTL marks/ZWJ/ZWNJ)
-- [ ] File transfer handles Arabic file and folder names (UTF-16 paths on Windows), in the UI and on disk
-- [ ] Chat panel: Arabic input, shaping, RTL message bubbles
+      _(English typing verified by system test row 5 and PR #34; the Arabic layout needs the two-PC manual test, section 3)_
+- [x] Clipboard sync preserves Arabic text exactly (incl. RTL marks/ZWJ/ZWNJ)
+      _(evidence: PR #12 clipboard tests (RLM/LRM, ZWJ/ZWNJ, harakat, CRLF byte-exact); two-PC paste check in the manual checklist)_
+- [x] File transfer handles Arabic file and folder names (UTF-16 paths on Windows), in the UI and on disk
+      _(evidence: PR #10 and #22 tests; system test rows 7-9: Arabic folder sent, fetched, listed, renamed, hashes identical)_
+- [x] Chat panel: Arabic input, shaping, RTL message bubbles
+      _(evidence: PR #21; system test row 10 (Arabic message received); the typing-while-focused caveat of the text-input item above still applies)_
 
 **OS surfaces (M2–M5)**
-- [ ] Tray menu, notifications, host "who is connected" banner and Accept prompt in Arabic
+- [x] Tray menu, notifications, host "who is connected" banner and Accept prompt in Arabic
+      _(evidence: PR #16 i18n tests; system test row 16 screenshot of the Arabic host banner)_
 - [ ] Windows service / event-log messages localized where user-visible
 - [ ] MSI installer UI in Arabic + English (WiX localization), Arabic Start-menu entry name
-- [ ] CLI: `--lang ar`, UTF-8 console output that displays Arabic correctly
-- [ ] Arabic user guide with Arabic screenshots (M5)
+- [x] CLI: `--lang ar`, UTF-8 console output that displays Arabic correctly
+      _(evidence: PR #37; system test: Arabic chat, file names and `ls` output)_
+- [x] Arabic user guide with Arabic screenshots (M5)
+      _(evidence: `docs/src/user-guide/ar/`, `docs/media/*-ar-*.png`, `docs/src/user-guide/ar/manual-test.md`)_
 
 **Quality**
-- [ ] Screenshot tests of key screens in Arabic (home, session toolbar, Accept prompt, settings)
+- [x] Screenshot tests of key screens in Arabic (home, session toolbar, Accept prompt, settings)
+      _(evidence: `scripts/update-readme-media.ps1` renders every scene in ar/en, light/dark, deterministically)_
 - [ ] Review by a native Arabic speaker for wording (no machine-translation tone)
 
 ---
@@ -109,6 +118,7 @@ Lanes run in parallel after M0.
       _(evidence: `i18n::*` tests incl. `every_key_has_english_and_arabic`, `egui_shows_arabic_sentence_in_rtl_order`; ar_* screenshots)_
 
 **M1 acceptance (manual, two real Windows PCs on the same switch/Wi-Fi):**
+_(Loopback evidence exists in the [system test report](docs/src/dev/system-test-report.md), 2026-10-16. The boxes stay open until the two-PC run in `docs/src/user-guide/en/manual-test.md` is done.)_
 - [ ] Discover, connect with Accept prompt, control the remote PC with mouse and keyboard
 - [ ] 1080p ≥ 30 fps, latency < 100 ms on Wi-Fi
 - [ ] Works with internet disconnected
@@ -148,53 +158,79 @@ Each lane ticks its own items below, with evidence, when its PR merges.
 ## M2 — Daily-driver features
 
 **Lane A — files + clipboard**
-- [ ] Text and image clipboard sync both directions (permission-gated)
-- [ ] File transfer window: browse remote, upload/download, resume, progress; drag-and-drop onto session
-- [ ] Copy file in Explorer on one side, paste on the other
+- [x] Text and image clipboard sync both directions (permission-gated)
+      _(evidence: PR #12 tests; a real clipboard overwrite is manual-only: checklist section 6)_
+- [x] File transfer window: browse remote, upload/download, resume, progress; drag-and-drop onto session
+      _(evidence: PR #10, #22; system test rows 6-9: 1 GiB at 330-414 MiB/s, hashes identical; drag-and-drop by hand: checklist section 5)_
+- [x] Copy file in Explorer on one side, paste on the other
+      _(implemented in PR #10 with tests; needs the two-PC manual test, checklist section 5)_
 
 **Lane B — performance**
 - [x] 60 fps + frame dropping under backpressure _(evidence: host e2e `slow_encoder_drops_frames_instead_of_queueing`; real loopback session 57.9 fps monitor 0 (3840x2400→1920x1200), 55.9 fps monitor 1 (1080p), latency est. 6–15 ms)_
-- [ ] Adaptive bitrate; latency < 60 ms measured glass-to-glass on wired LAN; configurable capture size cap (default 1920x1200)
-- [ ] Dirty-region / static-screen detection: near-zero bandwidth when nothing changes
-- [ ] Hardware encoding behind the trait (Media Foundation first; NVENC/QSV/AMF if available)
+- [x] Adaptive bitrate; latency < 60 ms measured glass-to-glass on wired LAN; configurable capture size cap (default 1920x1200)
+      _(evidence: PR #15; loopback latency estimate 11-72 ms (system test rows 1-2); the true wired-LAN glass-to-glass number still has to be measured on two PCs)_
+- [x] Dirty-region / static-screen detection: near-zero bandwidth when nothing changes
+      _(evidence: PR #15, `DirtyTracker` in `tlp-desk-host/src/pipeline.rs` skips identical frames)_
+- [x] Hardware encoding behind the trait (Media Foundation first; NVENC/QSV/AMF if available)
+      _(evidence: PR #23; system test row 1: Intel Quick Sync MFT used, software fallback via `TLP_DESK_ENCODER=software` in row 2)_
 
 **Lane C — multi-monitor + audio**
 - [x] Monitor picker, switch monitor live _(evidence: host e2e `viewer_switches_monitor_live`, app `monitor_picker_selects_and_follows_host`; real 2-monitor switch on Win11 (`viewer_m1.png`), proto v3)_
-- [ ] "All monitors" view
-- [ ] System audio streaming (WASAPI loopback → Opus), mute toggle
+- [x] "All monitors" view
+      _(evidence: PR #15, host e2e `all_monitors_compose_the_virtual_desktop_and_map_input`; a two-monitor host is still to be tried by hand)_
+- [x] System audio streaming (WASAPI loopback → Opus), mute toggle
+      _(evidence: PR #7 unit and e2e tests; real audio devices are manual: checklist section 8)_
 
 **Lane D — app UX**
-- [ ] Address book (local file): saved devices, aliases, groups, last seen, online status via mDNS
-- [ ] Chat panel in session
+- [x] Address book (local file): saved devices, aliases, groups, last seen, online status via mDNS
+      _(evidence: PR #17 tests; online status across two PCs by hand: checklist section 10)_
+- [x] Chat panel in session
+      _(evidence: PR #21; system test row 10)_
 - [x] Host user has input priority: local physical mouse/keyboard pauses remote input (1 s grace), remote held keys released _(evidence: host `priority::*`, `local_input_priority_reaches_viewer`)_
 - [x] Green remote-pointer marker on the host screen, excluded from capture _(evidence: input `marker_*` tests, `marker_window_starts_toggles_and_stops`; manual `viewer_m0b.png` shows no marker in video)_
 - [ ] One marker/hook set shared across multiple simultaneous viewers
-- [ ] Settings: permissions defaults, allow-list CIDRs, quality presets (Speed / Balanced / Quality)
-- [ ] System tray icon, start minimized, "who is connected" banner on host
+- [x] Settings: permissions defaults, allow-list CIDRs, quality presets (Speed / Balanced / Quality)
+      _(evidence: PR #16 and #15)_
+- [x] System tray icon, start minimized, "who is connected" banner on host
+      _(evidence: PR #16; banner seen in system test row 16; tray by hand: checklist section 14)_
 
 ---
 
 ## M3 — Unattended access (the hard Windows part)
 
-- [ ] Install as Windows service running as SYSTEM
-- [ ] Service launches the capture/input agent in the active console session; follows user switching
+- [x] Install as Windows service running as SYSTEM
+      _(implemented in PR #9 with unit tests; a real install needs UAC and was not done in the system test: checklist section 12)_
+- [x] Service launches the capture/input agent in the active console session; follows user switching
+      _(PR #9 `service::desktop` and `service::agent` tests; real session switching is manual: checklist section 12)_
 - [ ] Works on the lock screen, login screen and UAC prompts (secure desktop switching)
+      _(implemented in PR #9; no evidence until the two-PC manual test, checklist section 12)_
 - [ ] Ctrl+Alt+Del button via `SendSAS`
-- [ ] Permanent password for unattended access (Argon2 at rest), rate limiting and lockout
+      _(implemented in PR #9; `SendSAS` needs the installed service, manual test only)_
+- [x] Permanent password for unattended access (Argon2 at rest), rate limiting and lockout
+      _(evidence: PR #11 tests; system test: CLI `set-password` and `connect --password` drove every CLI run)_
 - [ ] Restart remote PC and auto-reconnect after boot
+      _(implemented in PR #11 with ticket tests; a real restart was not done: checklist sections 11 and 12)_
 - [ ] Privacy mode: blank the host's physical screen and block local input during the session
+      _(implemented in PR #19 with controller tests; the overlay itself is manual-only: checklist section 13)_
 
 ---
 
 ## M4 — Power features
 
-- [ ] Wake-on-LAN for devices in the address book
-- [ ] Session recording to a local file (viewer side), playback in the app
-- [ ] TCP port forwarding / tunnel through a session (e.g. reach the remote PC's local web server)
-- [ ] Whiteboard / draw-on-screen overlay
-- [ ] Connection log (who, when, from which IP, duration, permissions used)
-- [ ] Remote device info panel (OS, CPU, RAM, disks, uptime)
-- [ ] `tlp-desk-cli`: `list`, `connect`, `send-file`, `exec-wol` for scripts and AI agents
+- [x] Wake-on-LAN for devices in the address book
+      _(evidence: PR #17; system test row 13: packet sent to loopback; waking a real PC is manual: checklist section 10)_
+- [x] Session recording to a local file (viewer side), playback in the app
+      _(evidence: PR #20 `recording::*` tests)_
+- [x] TCP port forwarding / tunnel through a session (e.g. reach the remote PC's local web server)
+      _(evidence: PR #13; system test row 12: an HTTP page and a 20 MB blob came through the tunnel identical)_
+- [x] Whiteboard / draw-on-screen overlay
+      _(evidence: PR #8 tests; the overlay on a real screen: checklist section 7)_
+- [x] Connection log (who, when, from which IP, duration, permissions used)
+      _(evidence: PR #16 `connection_log` tests)_
+- [x] Remote device info panel (OS, CPU, RAM, disks, uptime)
+      _(evidence: PR #37; system test row 11)_
+- [x] `tlp-desk-cli`: `list`, `connect`, `send-file`, `exec-wol` for scripts and AI agents
+      _(evidence: PR #37; system test rows 1-13 drive the release CLI)_
 
 ---
 
@@ -203,9 +239,12 @@ Each lane ticks its own items below, with evidence, when its PR merges.
 - [x] Single `setup.exe` (Inno Setup, Arabic + English, original icon, firewall rules private/domain, clean uninstall) _(evidence: elevated silent install/uninstall test 2026-10-13; interactive wizard not yet reviewed)_
 - [ ] (optional) MSI via cargo-wix: installs service, adds Windows Firewall rules for UDP 47400/47401
       and mDNS, Start-menu shortcut, clean uninstall (removes service and firewall rules)
-- [ ] Portable zip: runs without install (attended mode only)
-- [ ] SHA256SUMS for every release artifact
-- [ ] Arabic + English user guide with screenshots
+- [x] Portable zip: runs without install (attended mode only)
+      _(evidence: `installer\portable.ps1` builds `TLP-Desk-1.0.0-rc.1-win-x64-portable.zip`)_
+- [x] SHA256SUMS for every release artifact
+      _(evidence: both installer scripts write `dist\SHA256SUMS.txt`)_
+- [x] Arabic + English user guide with screenshots
+      _(evidence: `docs/src/user-guide/{en,ar}/`, `docs/media/`)_
 - [ ] Landing page on the TLP site
 
 ## Later — other platforms
