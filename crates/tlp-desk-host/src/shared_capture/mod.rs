@@ -573,7 +573,11 @@ mod tests {
         next(&mut a);
         let mut b = (r.factory)(0, CaptureOptions::default()).unwrap();
         next(&mut b);
-        assert_eq!(r.opened.load(Ordering::SeqCst), 2, "reopened for the newcomer");
+        assert_eq!(
+            r.opened.load(Ordering::SeqCst),
+            2,
+            "reopened for the newcomer"
+        );
         // The reopened picture reaches the first session too, then the still screen sends
         // nothing more.
         next(&mut a);

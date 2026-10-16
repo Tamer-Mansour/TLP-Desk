@@ -236,14 +236,20 @@ mod tests {
                 total += i32::from(dy);
             }
         }
-        assert_eq!(wheel_event(egui::MouseWheelUnit::Point, vec2(0.0, 0.1)), None);
+        assert_eq!(
+            wheel_event(egui::MouseWheelUnit::Point, vec2(0.0, 0.1)),
+            None
+        );
         assert!((total - 120).abs() <= 1, "{total}");
         // Whole notches pass straight through, horizontal flipped like `wheel_event`.
         assert_eq!(
             acc.event(egui::MouseWheelUnit::Line, vec2(1.0, -2.0)),
             wheel_event(egui::MouseWheelUnit::Line, vec2(1.0, -2.0))
         );
-        assert_eq!(acc.event(egui::MouseWheelUnit::Line, vec2(f32::NAN, 0.0)), None);
+        assert_eq!(
+            acc.event(egui::MouseWheelUnit::Line, vec2(f32::NAN, 0.0)),
+            None
+        );
     }
 
     /// The pointer is sent as a fraction of the displayed image, not in video pixels, so a

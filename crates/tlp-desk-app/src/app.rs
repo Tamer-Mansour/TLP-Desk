@@ -804,12 +804,8 @@ impl App {
                                 || self.host_input.is_paused(*session)
                                 || self.host_input.is_view_only(*session)
                             {
-                                self.host_input.controls(
-                                    ui,
-                                    tx,
-                                    self.backend.as_ref(),
-                                    *session,
-                                );
+                                self.host_input
+                                    .controls(ui, tx, self.backend.as_ref(), *session);
                             }
                             // chat (TLP-chat)
                             if let Some(chat) = self.host_chats.get(session) {

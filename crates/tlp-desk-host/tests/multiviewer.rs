@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 
 use tlp_desk_capture::{BgraFrame, CaptureError, CursorState, MonitorInfo, ScreenCapturer};
 use tlp_desk_crypto::Identity;
+use tlp_desk_host::EndReason as HostEnd;
 use tlp_desk_host::{ConnectedViewer, Host, HostConfig, HostEvent, HostEvents, SessionId};
 use tlp_desk_input::{InputError, InputEvent, InputInjector, LocalActivity, MonitorRect};
 use tlp_desk_net::{Endpoint, EndpointConfig};
-use tlp_desk_host::EndReason as HostEnd;
 use tlp_desk_proto::{ByeReason, Permissions, RejectReason};
 use tlp_desk_viewer::{
     AuthMethod, ConnectTarget, DecodedFrame, EndReason as ViewerEnd, FeatureSet, HeldTicket,
@@ -237,15 +237,19 @@ async fn join(
 ) -> (ViewerSession, ViewerEvents, ConnectedViewer) {
     let (viewer, target) = (v.clone(), rig.target.clone());
     let conn = tokio::spawn(async move { viewer.connect(target, AuthMethod::AcceptPrompt).await });
-    let HostEvent::IncomingRequest(req) =
-        host_event(&mut rig.events, |e| matches!(e, HostEvent::IncomingRequest(_))).await
+    let HostEvent::IncomingRequest(req) = host_event(&mut rig.events, |e| {
+        matches!(e, HostEvent::IncomingRequest(_))
+    })
+    .await
     else {
         unreachable!()
     };
     assert!(rig.host.accept(req.id, Some(perms)));
     let (session, events) = conn.await.unwrap().expect("connect");
-    let HostEvent::SessionStarted(cv) =
-        host_event(&mut rig.events, |e| matches!(e, HostEvent::SessionStarted(_))).await
+    let HostEvent::SessionStarted(cv) = host_event(&mut rig.events, |e| {
+        matches!(e, HostEvent::SessionStarted(_))
+    })
+    .await
     else {
         unreachable!()
     };
@@ -351,8 +355,10 @@ async fn two_viewers_with_full_control_at_once() {
 
     // A leaves; B keeps streaming and, once control is given back, controlling.
     sa.disconnect();
-    let HostEvent::SessionEnded { id, .. } =
-        host_event(&mut rig.events, |e| matches!(e, HostEvent::SessionEnded { .. })).await
+    let HostEvent::SessionEnded { id, .. } = host_event(&mut rig.events, |e| {
+        matches!(e, HostEvent::SessionEnded { .. })
+    })
+    .await
     else {
         unreachable!()
     };
@@ -371,7 +377,10 @@ async fn two_viewers_with_full_control_at_once() {
     .await;
     sb.send_input(mv(2200));
     wait_recorded(&rig.recorded, |r| has(r, &mv(2200))).await;
-    assert!(sb.end_reason().is_none(), "B must not be affected by A leaving");
+    assert!(
+        sb.end_reason().is_none(),
+        "B must not be affected by A leaving"
+    );
 }
 
 /// Each session has its own capture pipeline: one viewer switching monitors does not move
@@ -525,7 +534,10 @@ impl Colleague {
     fn drop_network(&mut self, name: &str) {
         self.ep.close();
         self.ep = endpoint_as(self.identity.clone(), false, name);
-        self.viewer = viewer_on(self.ep.clone(), FeatureSet::new().with(self.keeper.feature()));
+        self.viewer = viewer_on(
+            self.ep.clone(),
+            FeatureSet::new().with(self.keeper.feature()),
+        );
     }
 }
 
@@ -550,9 +562,10 @@ async fn held_ticket(keeper: &ReconnectTickets, s: &ViewerSession) {
 }
 
 async fn connection_lost(rig: &mut Rig, id: SessionId) {
-    let ev = host_event(&mut rig.events, |e| {
-        matches!(e, HostEvent::SessionEnded { id: i, .. } if *i == id)
-    })
+    let ev = host_event(
+        &mut rig.events,
+        |e| matches!(e, HostEvent::SessionEnded { id: i, .. } if *i == id),
+    )
     .await;
     let HostEvent::SessionEnded { reason, .. } = ev else {
         unreachable!()
@@ -599,9 +612,15 @@ async fn viewer_resumes_after_a_network_drop_without_a_new_accept() {
     )
     .await
     .expect("resumed");
-    assert_eq!(sa2.permissions(), reduced, "revoked keyboard must stay revoked");
-    let HostEvent::SessionStarted(cv) =
-        host_event(&mut rig.events, |e| matches!(e, HostEvent::SessionStarted(_))).await
+    assert_eq!(
+        sa2.permissions(),
+        reduced,
+        "revoked keyboard must stay revoked"
+    );
+    let HostEvent::SessionStarted(cv) = host_event(&mut rig.events, |e| {
+        matches!(e, HostEvent::SessionStarted(_))
+    })
+    .await
     else {
         unreachable!()
     };

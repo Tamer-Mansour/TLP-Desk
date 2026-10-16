@@ -578,5 +578,4 @@ mod tests {
             Err(TicketRejected::Expired)
         );
     }
-
 }

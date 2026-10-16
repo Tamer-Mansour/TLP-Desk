@@ -42,7 +42,11 @@ impl Inner {
             current.union(INPUT)
         };
         if new != current {
-            tracing::info!(session = session.0, view_only, "host user changed view-only");
+            tracing::info!(
+                session = session.0,
+                view_only,
+                "host user changed view-only"
+            );
             host.set_permissions(id, new);
         }
     }

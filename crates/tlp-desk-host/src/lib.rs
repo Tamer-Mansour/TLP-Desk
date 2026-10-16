@@ -66,8 +66,8 @@ mod priority;
 mod privacy;
 mod refine;
 mod resume;
-mod shared_capture;
 pub mod service;
+mod shared_capture;
 mod tunnel;
 mod unattended;
 mod whiteboard;
@@ -103,11 +103,11 @@ pub use device_info::{
     SystemInfoSource, DEVICE_INFO_FEATURE,
 };
 pub use live::LiveOptions;
-pub use resume::RESUME_TICKET_TTL;
 pub use privacy::{
     PrivacyCause, PrivacyFeature, PrivacyStatus, PrivacyTextFn, PrivacyViewer, ShieldFactory,
     FEATURE_NAME as PRIVACY_FEATURE,
 };
+pub use resume::RESUME_TICKET_TTL;
 pub use tlp_desk_input::{PrivacyScreenText, ScreenLine};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 pub use unattended::{SystemPower, UnattendedEvent, UnattendedFeature, WindowsPower};

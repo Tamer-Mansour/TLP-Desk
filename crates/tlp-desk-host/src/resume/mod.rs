@@ -140,10 +140,7 @@ mod tests {
     #[test]
     fn renewal_is_well_inside_the_ttl() {
         assert_eq!(renew_every(RESUME_TICKET_TTL), Duration::from_secs(30));
-        assert_eq!(
-            renew_every(Duration::from_secs(1)),
-            Duration::from_secs(5)
-        );
+        assert_eq!(renew_every(Duration::from_secs(1)), Duration::from_secs(5));
         assert!(RESUME_TICKET_TTL - renew_every(RESUME_TICKET_TTL) >= Duration::from_secs(120));
     }
 
