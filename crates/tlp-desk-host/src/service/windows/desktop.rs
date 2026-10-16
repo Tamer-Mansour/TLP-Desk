@@ -2,8 +2,9 @@
 //! `UOI_NAME`, `SetThreadDesktop`, "Desktops").
 
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::System::StationsAndDesktops::{
-    CloseDesktop, GetUserObjectInformationW, OpenInputDesktop, SetThreadDesktop,
+    CloseDesktop, GetThreadDesktop, GetUserObjectInformationW, OpenInputDesktop, SetThreadDesktop,
     DESKTOP_ACCESS_FLAGS, DESKTOP_CONTROL_FLAGS, DESKTOP_CREATEMENU, DESKTOP_CREATEWINDOW,
     DESKTOP_ENUMERATE, DESKTOP_HOOKCONTROL, DESKTOP_JOURNALPLAYBACK, DESKTOP_READOBJECTS,
     DESKTOP_WRITEOBJECTS, HDESK, UOI_NAME,
@@ -65,6 +66,9 @@ fn close(desk: HDESK) {
 pub struct WinDesktopSource {
     /// The desktop handle assigned to the thread, as an integer so the struct is `Send`.
     attached: Option<isize>,
+    /// The attaching thread and the desktop it had before the first attach (restored on drop
+    /// so `attached` can be closed).
+    original: Option<(u32, isize)>,
 }
 
 impl WinDesktopSource {
@@ -90,6 +94,10 @@ impl DesktopSource for WinDesktopSource {
                 return Err(e);
             }
         };
+        // SAFETY: plain calls; GetThreadDesktop returns a handle we must not close.
+        let thread = unsafe { GetCurrentThreadId() };
+        // SAFETY: as above.
+        let original = unsafe { GetThreadDesktop(thread) }.unwrap_or_default();
         // SAFETY: `desk` is a valid desktop handle; SetThreadDesktop affects only the calling
         // thread and fails (no harm) if the thread owns windows or hooks.
         if let Err(e) = unsafe { SetThreadDesktop(desk) } {
@@ -98,8 +106,31 @@ impl DesktopSource for WinDesktopSource {
         }
         if let Some(old) = self.attached.replace(desk.0 as isize) {
             close(HDESK(old as *mut core::ffi::c_void));
+        } else {
+            self.original = Some((thread, original.0 as isize));
         }
         Ok(name)
+    }
+}
+
+impl Drop for WinDesktopSource {
+    /// Closes the desktop handle of the last [`DesktopSource::attach_thread`]: without this,
+    /// every capture/input thread that ends leaks one `OpenInputDesktop` handle (audit F3).
+    /// A desktop still assigned to a thread cannot be closed, so on the attaching thread the
+    /// thread's original desktop is restored first.
+    fn drop(&mut self) {
+        let Some(attached) = self.attached.take() else {
+            return;
+        };
+        if let Some((thread, original)) = self.original.take() {
+            // SAFETY: plain call without arguments.
+            if unsafe { GetCurrentThreadId() } == thread {
+                // SAFETY: `original` came from GetThreadDesktop on this thread; such handles
+                // stay valid for the thread's lifetime and are not closed by us.
+                let _ = unsafe { SetThreadDesktop(HDESK(original as *mut core::ffi::c_void)) };
+            }
+        }
+        close(HDESK(attached as *mut core::ffi::c_void));
     }
 }
 
@@ -114,5 +145,42 @@ mod tests {
     fn reads_the_input_desktop_name() {
         let mut s = WinDesktopSource::new();
         assert_eq!(s.input_desktop().unwrap(), "Default");
+    }
+
+    fn handle_count() -> u32 {
+        use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+        let mut n = 0u32;
+        // SAFETY: the pseudo handle of the current process needs no closing; `n` is a valid
+        // out pointer.
+        unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut n) }.unwrap();
+        n
+    }
+
+    /// Regression test for audit F3: attaching fresh threads to the input desktop (the same
+    /// desktop they already use, so nothing visible happens) and dropping the source must
+    /// not leak the desktop handle. Needs an interactive desktop, so it is ignored in CI.
+    #[test]
+    #[ignore = "needs the interactive input desktop; run manually"]
+    fn dropping_the_source_closes_the_attached_desktop() {
+        let attach_and_drop = || {
+            std::thread::spawn(|| {
+                let mut s = WinDesktopSource::new();
+                s.attach_thread().unwrap();
+                drop(s);
+            })
+            .join()
+            .unwrap();
+        };
+        // Warm up (thread pool, loader) before measuring.
+        attach_and_drop();
+        let before = handle_count();
+        for _ in 0..50 {
+            attach_and_drop();
+        }
+        let after = handle_count();
+        assert!(
+            after < before + 10,
+            "desktop handles leak: {before} -> {after}"
+        );
     }
 }
