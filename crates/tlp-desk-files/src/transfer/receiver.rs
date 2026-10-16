@@ -23,7 +23,7 @@ use super::plan::{
 };
 use super::session::SessionState;
 use super::state::{lock, RangeSet, Transfer};
-use super::types::{TransferEvent, TransferState};
+use super::types::{FileState, TransferEvent, TransferState};
 
 /// How long a new stream may take to deliver its 12-byte header.
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -135,6 +135,13 @@ impl Receiving {
             u32::try_from(skipped).unwrap_or(u32::MAX),
             Ordering::Relaxed,
         );
+        for (i, target) in self.targets.iter().enumerate() {
+            match target {
+                Target::Skipped { .. } => t.item_state(i, FileState::Skipped),
+                Target::File { resume, .. } => t.item_resumed(i, *resume),
+                _ => {}
+            }
+        }
     }
 
     fn resume_of(&self, item: usize) -> u64 {
@@ -430,6 +437,7 @@ fn record(
         }
     }
     t.bytes_done.fetch_add(end - start, Ordering::Relaxed);
+    t.item_bytes(idx, end - start);
 }
 
 fn mark_rehash(rx: &Receiving, idx: usize) {
@@ -495,6 +503,7 @@ fn fail_item(
         return;
     }
     t.failed.fetch_add(1, Ordering::Relaxed);
+    t.item_state(item as usize, FileState::Failed);
     if tell_peer {
         state.send(Message::TransferError {
             id: t.wire,
@@ -552,6 +561,7 @@ fn maybe_finalize(state: &Arc<SessionState>, t: &Arc<Transfer>, rx: &Arc<Receivi
             Ok(()) => {
                 lock(st).phase = Phase::Done;
                 t.files_done.fetch_add(1, Ordering::Relaxed);
+                t.item_state(idx, FileState::Done);
                 item_settled(&state, &t, &rx);
             }
             Err(e) => {

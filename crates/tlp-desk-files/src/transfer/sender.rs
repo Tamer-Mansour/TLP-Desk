@@ -28,7 +28,7 @@ use super::path::{join_under, validate_rel_path};
 use super::scan::checked_abs;
 use super::session::SessionState;
 use super::state::{lock, Transfer};
-use super::types::{TransferEvent, TransferState};
+use super::types::{FileState, TransferEvent, TransferState};
 
 /// Answer to our offer: resume points, or why it was refused.
 pub type AcceptResult = Result<Vec<(u32, u64)>, FsError>;
@@ -95,6 +95,7 @@ impl Sending {
             }
         }
         t.failed.fetch_add(1, Ordering::Relaxed);
+        t.item_state(item as usize, FileState::Failed);
         state.emit(TransferEvent::ItemFailed {
             id: t.id,
             rel_path: it.rel_path.clone(),
@@ -204,6 +205,12 @@ async fn run(state: Arc<SessionState>, t: Arc<Transfer>, s: Arc<Sending>, resume
     let resumed = start.iter().sum();
     t.bytes_done.store(resumed, Ordering::Relaxed);
     t.resumed.store(resumed, Ordering::Relaxed);
+    for (i, (off, item)) in start.iter().zip(&s.items).enumerate() {
+        t.item_resumed(i, *off);
+        if *off == item.size && !item.is_dir && item.size > 0 {
+            t.item_state(i, FileState::Done);
+        }
+    }
     let mut queue = VecDeque::new();
     let mut items = Vec::with_capacity(s.items.len());
     for (i, item) in s.items.iter().enumerate() {
@@ -451,6 +458,7 @@ async fn pump(
         let data = buf.get(..n).unwrap_or_default();
         stream.write_all(data).await.map_err(|_| PieceError::Net)?;
         run.t.bytes_done.fetch_add(n as u64, Ordering::Relaxed);
+        run.t.item_bytes(item as usize, n as u64);
         throttle(run, n).await;
         spare = Some(buf);
     }
@@ -503,6 +511,7 @@ async fn finish_item(run: &Run, item: u32) {
     match hash {
         Ok(blake3) => {
             run.t.files_done.fetch_add(1, Ordering::Relaxed);
+            run.t.item_state(item as usize, FileState::Done);
             run.state.send(Message::TransferDone {
                 id: run.t.wire,
                 item,
@@ -534,6 +543,7 @@ fn item_failed(run: &Run, item: u32, error: FsError) {
         "file could not be sent"
     );
     run.t.failed.fetch_add(1, Ordering::Relaxed);
+    run.t.item_state(item as usize, FileState::Failed);
     run.state.send(Message::TransferError {
         id: run.t.wire,
         item: Some(item),

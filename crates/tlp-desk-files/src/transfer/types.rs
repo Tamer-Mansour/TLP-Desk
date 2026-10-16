@@ -130,6 +130,46 @@ impl TransferState {
     }
 }
 
+/// Where one file of a transfer stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileState {
+    /// Not started.
+    Pending,
+    /// Bytes are moving.
+    Active,
+    /// Transferred and verified (or already identical at the destination).
+    Done,
+    /// Failed (see [`TransferEvent::ItemFailed`]).
+    Failed,
+    /// Kept as it was at the destination ([`ConflictPolicy::Skip`]).
+    Skipped,
+}
+
+impl FileState {
+    pub(crate) fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Active,
+            2 => Self::Done,
+            3 => Self::Failed,
+            4 => Self::Skipped,
+            _ => Self::Pending,
+        }
+    }
+}
+
+/// One file of a transfer, for the per-file list (see [`crate::FileTransfer::file_rows`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRow {
+    /// `/`-separated path relative to the transfer's top-level folder.
+    pub rel_path: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// Bytes sent or written so far (including resumed bytes).
+    pub done_bytes: u64,
+    /// State.
+    pub state: FileState,
+}
+
 /// Point-in-time view of a transfer (see [`crate::FileTransfer::transfers`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferSnapshot {

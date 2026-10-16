@@ -61,8 +61,8 @@ pub use hash::PIECE;
 pub use path::{validate_component, validate_rel_path, MAX_DEPTH};
 pub use plan::{Decisions, META_SUFFIX, PART_SUFFIX};
 pub use types::{
-    ConflictPolicy, TransferConfig, TransferEvent, TransferId, TransferInfo, TransferRole,
-    TransferSnapshot, TransferState,
+    ConflictPolicy, FileRow, FileState, TransferConfig, TransferEvent, TransferId, TransferInfo,
+    TransferRole, TransferSnapshot, TransferState,
 };
 
 use receiver::Receiving;
@@ -98,6 +98,21 @@ enum Spec {
         local_dest: PathBuf,
         policy: ConflictPolicy,
     },
+}
+
+/// What a transfer started on this side was asked to copy (for "send again").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferOrigin {
+    /// `true` for an upload (local files to the host), `false` for a download.
+    pub upload: bool,
+    /// Uploads: the local files and folders that were sent.
+    pub local_paths: Vec<PathBuf>,
+    /// Uploads: the host folder they went to (empty = the host's default folder).
+    pub remote_dest: String,
+    /// Downloads: the host files and folders that were fetched.
+    pub remote_paths: Vec<String>,
+    /// Downloads: the local folder they went to.
+    pub local_dest: Option<PathBuf>,
 }
 
 /// Engine state shared by all sessions.
@@ -187,6 +202,44 @@ impl FileTransfer {
             .collect();
         out.sort_by_key(|s| s.info.id);
         out
+    }
+
+    /// The files of a transfer (folders are left out), `limit` of them from the `offset`-th,
+    /// with their progress. Empty if the transfer is unknown or its session ended.
+    pub fn file_rows(&self, id: TransferId, offset: usize, limit: usize) -> Vec<FileRow> {
+        self.find(id)
+            .map(|(_, t)| t.file_rows(offset, limit))
+            .unwrap_or_default()
+    }
+
+    /// What a transfer started on this side copies, even after its session ended.
+    pub fn origin(&self, id: TransferId) -> Option<TransferOrigin> {
+        let (_, spec) = lock(&self.inner.specs).get(&id).cloned()?;
+        Some(match spec {
+            Spec::Upload { local, remote_dest } => TransferOrigin {
+                upload: true,
+                local_paths: local,
+                remote_dest,
+                remote_paths: Vec::new(),
+                local_dest: None,
+            },
+            Spec::Download {
+                source_dir,
+                items,
+                local_dest,
+                ..
+            } => TransferOrigin {
+                upload: false,
+                local_paths: Vec::new(),
+                remote_dest: String::new(),
+                remote_paths: items
+                    .iter()
+                    .filter(|i| !i.rel_path.contains('/'))
+                    .map(|i| scan::join_remote(&source_dir, &i.rel_path))
+                    .collect(),
+                local_dest: Some(local_dest),
+            },
+        })
     }
 
     /// One transfer, if its session is still live.

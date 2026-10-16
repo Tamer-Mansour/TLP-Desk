@@ -1,7 +1,7 @@
 //! Shared per-transfer state used by the sender, the receiver and the session loop.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
@@ -9,7 +9,26 @@ use tokio::sync::watch;
 
 use super::receiver::Receiving;
 use super::sender::Sending;
-use super::types::{TransferId, TransferInfo, TransferSnapshot, TransferState};
+use super::types::{FileRow, FileState, TransferId, TransferInfo, TransferSnapshot, TransferState};
+
+/// Progress of one item, updated by the sender or receiver workers.
+pub struct ItemProgress {
+    rel_path: String,
+    size: u64,
+    is_dir: bool,
+    done: AtomicU64,
+    state: AtomicU8,
+}
+
+fn state_code(s: FileState) -> u8 {
+    match s {
+        FileState::Pending => 0,
+        FileState::Active => 1,
+        FileState::Done => 2,
+        FileState::Failed => 3,
+        FileState::Skipped => 4,
+    }
+}
 
 /// Locks a mutex, recovering from poisoning (a panicked holder must not take the transfer
 /// engine down with it).
@@ -51,6 +70,8 @@ pub struct Transfer {
     pub local_dest: Option<PathBuf>,
     /// Sender or receiver half.
     pub side: Side,
+    /// Per-item progress, in offer order.
+    files: Vec<ItemProgress>,
 }
 
 impl Transfer {
@@ -63,6 +84,20 @@ impl Transfer {
         side: Side,
     ) -> Self {
         let (stop, _) = watch::channel(false);
+        let items = match &side {
+            Side::Send(s) => &s.items,
+            Side::Recv(r) => &r.items,
+        };
+        let files = items
+            .iter()
+            .map(|i| ItemProgress {
+                rel_path: i.rel_path.clone(),
+                size: i.size,
+                is_dir: i.is_dir,
+                done: AtomicU64::new(0),
+                state: AtomicU8::new(0),
+            })
+            .collect();
         Self {
             id,
             wire,
@@ -77,7 +112,51 @@ impl Transfer {
             meter: Mutex::new((Instant::now(), 0)),
             local_dest,
             side,
+            files,
         }
+    }
+
+    /// `n` more bytes of item `idx` moved; the file becomes active.
+    pub fn item_bytes(&self, idx: usize, n: u64) {
+        if let Some(f) = self.files.get(idx) {
+            f.done.fetch_add(n, Ordering::Relaxed);
+            let _ = f
+                .state
+                .compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed);
+        }
+    }
+
+    /// Sets item `idx` to `state`; a finished file counts as fully transferred.
+    pub fn item_state(&self, idx: usize, state: FileState) {
+        if let Some(f) = self.files.get(idx) {
+            if state == FileState::Done {
+                f.done.store(f.size, Ordering::Relaxed);
+            }
+            f.state.store(state_code(state), Ordering::Relaxed);
+        }
+    }
+
+    /// Sets the starting bytes of item `idx` (resumed part).
+    pub fn item_resumed(&self, idx: usize, bytes: u64) {
+        if let Some(f) = self.files.get(idx) {
+            f.done.store(bytes.min(f.size), Ordering::Relaxed);
+        }
+    }
+
+    /// The files (not folders) from the `offset`-th on, at most `limit`.
+    pub fn file_rows(&self, offset: usize, limit: usize) -> Vec<FileRow> {
+        self.files
+            .iter()
+            .filter(|f| !f.is_dir)
+            .skip(offset)
+            .take(limit)
+            .map(|f| FileRow {
+                rel_path: f.rel_path.clone(),
+                size: f.size,
+                done_bytes: f.done.load(Ordering::Relaxed),
+                state: FileState::from_u8(f.state.load(Ordering::Relaxed)),
+            })
+            .collect()
     }
 
     /// Current state.
