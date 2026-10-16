@@ -382,6 +382,10 @@ async fn host_send(state: &Arc<SessionState>, offer: TransferOffer) -> Result<()
             src = dir;
         }
     }
+    if !src.is_empty() && !state.inner.path_allowed(std::path::Path::new(&src)) {
+        tracing::warn!("download outside the allowed folders refused");
+        return Err(FilesError::Remote(FsError::PermissionDenied));
+    }
     let items = offer.items.clone();
     let paths = tokio::task::spawn_blocking(move || sender::resolve_sources(&src, &items))
         .await
@@ -440,8 +444,20 @@ fn check_offer(offer: &TransferOffer, max_items: usize) -> Result<(), FilesError
 /// Where an upload goes on the host: the viewer's choice, or the configured default
 /// (Desktop, else home).
 fn upload_dest(inner: &Inner, dest_dir: &str) -> Result<PathBuf, FilesError> {
+    let dest = upload_dest_unchecked(inner, dest_dir)?;
+    if !inner.path_allowed(&dest) {
+        tracing::warn!("upload outside the allowed folders refused");
+        return Err(FilesError::Remote(FsError::PermissionDenied));
+    }
+    Ok(dest)
+}
+
+fn upload_dest_unchecked(inner: &Inner, dest_dir: &str) -> Result<PathBuf, FilesError> {
     if !dest_dir.is_empty() {
         return scan::checked_abs(dest_dir).map_err(FilesError::Remote);
+    }
+    if let Some(d) = lock(&inner.upload_dir).clone() {
+        return Ok(d);
     }
     if let Some(d) = &inner.cfg.default_upload_dir {
         return Ok(d.clone());
