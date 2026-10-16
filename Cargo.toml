@@ -19,6 +19,8 @@ tlp-desk-audio = { path = "crates/tlp-desk-audio", version = "0.1.0" }
 tlp-desk-files = { path = "crates/tlp-desk-files", version = "0.1.0" }
 tlp-desk-host = { path = "crates/tlp-desk-host", version = "0.1.0" }
 tlp-desk-viewer = { path = "crates/tlp-desk-viewer", version = "0.1.0" }
+# Dev-only test harness; only ever a [dev-dependencies] entry.
+tlp-desk-testkit = { path = "crates/tlp-desk-testkit" }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
 thiserror = "2"

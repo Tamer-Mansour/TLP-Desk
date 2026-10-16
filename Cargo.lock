@@ -2237,6 +2237,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "memory-stats"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c73f5c649995a115e1a0220b35e4df0a1294500477f97a91d0660fb5abeb574a"
+dependencies = [
+ "libc",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4419,6 +4429,7 @@ dependencies = [
  "tlp-desk-input",
  "tlp-desk-net",
  "tlp-desk-proto",
+ "tlp-desk-testkit",
  "tlp-desk-viewer",
  "tokio",
  "tracing",
@@ -4462,8 +4473,27 @@ name = "tlp-desk-proto"
 version = "0.1.0"
 dependencies = [
  "postcard",
+ "proptest",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tlp-desk-testkit"
+version = "0.1.0"
+dependencies = [
+ "memory-stats",
+ "tlp-desk-capture",
+ "tlp-desk-codec",
+ "tlp-desk-crypto",
+ "tlp-desk-host",
+ "tlp-desk-input",
+ "tlp-desk-net",
+ "tlp-desk-proto",
+ "tlp-desk-viewer",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

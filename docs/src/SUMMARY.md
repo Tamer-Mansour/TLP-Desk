@@ -97,6 +97,7 @@
   - [tlp-desk-viewer](dev/crates/viewer.md)
   - [tlp-desk-app](dev/crates/app.md)
   - [tlp-desk-cli](dev/crates/cli.md)
+  - [tlp-desk-testkit](dev/crates/testkit.md)
 - [Building on Windows](dev/building.md)
 - [Testing](dev/testing.md)
 - [Performance notes](dev/performance.md)

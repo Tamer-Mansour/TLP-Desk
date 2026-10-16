@@ -53,6 +53,7 @@ crates/
   tlp-desk-viewer    # viewer session logic, frame pipeline, input capture
   tlp-desk-app       # the single GUI binary (egui/eframe + wgpu), tray icon, settings
   tlp-desk-cli       # headless CLI (list devices, connect, send file) for scripts/agents
+  tlp-desk-testkit   # dev-only (publish = false): fakes + host/viewer pair harness for tests
 installer/           # Inno Setup setup.exe + portable zip build scripts
 docs/                # protocol.md, security.md, user-guide (Arabic + English)
 ```
@@ -65,7 +66,7 @@ section in the same commit.**
 | What | Where |
 |---|---|
 | Crate code | `crates/<crate>/src/`. One feature = one module folder `src/<feature>/mod.rs` (+ submodules); platform code in `src/<os>/` or `src/<feature>/windows.rs` |
-| Integration tests | `crates/<crate>/tests/*.rs` (shared helpers in `tests/common/mod.rs`); hardware tests `#[ignore]` |
+| Integration tests | `crates/<crate>/tests/*.rs` (shared helpers in `tests/common/mod.rs`; cross-crate fakes and the host+viewer pair in the dev-only `tlp-desk-testkit`); hardware tests `#[ignore]` |
 | Unit tests | `#[cfg(test)] mod tests` at the bottom of the file they test |
 | Dev examples, benchmarks | `crates/<crate>/examples/` |
 | App assets | `crates/tlp-desk-app/assets/{fonts,icon,icons}/` (licences next to the asset in `licenses/`) |

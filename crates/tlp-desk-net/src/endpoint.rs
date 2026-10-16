@@ -336,7 +336,7 @@ impl Endpoint {
             ),
             device_id: host_fp.device_id(),
             fingerprint: host_fp,
-            name: hello.device_name,
+            name: sanitize_peer_name(&hello.device_name),
         };
 
         // Only a human answering a prompt may take long; everything else is bounded.
@@ -440,6 +440,26 @@ impl Endpoint {
         ))
     }
 
+    /// Test/fuzzing aid: dials `addr` and completes only the mutually authenticated TLS
+    /// handshake (with `pin`), returning the raw QUIC connection before any `Hello`. Lets
+    /// tests play a peer that speaks the protocol wrong.
+    #[doc(hidden)]
+    pub async fn dial_raw(
+        &self,
+        addr: SocketAddr,
+        pin: Pin,
+    ) -> Result<quinn::Connection, NetError> {
+        let (cfg, _) = tls::client_config(&self.shared.identity, pin)?;
+        Ok(self.ep.connect_with(cfg, addr, "tlp-desk")?.await?)
+    }
+
+    /// Test aid: QUIC connections currently open on this endpoint (handshaking, pending,
+    /// in a session, or draining). Leak tests check it returns to zero.
+    #[doc(hidden)]
+    pub fn open_connections(&self) -> usize {
+        self.ep.open_connections()
+    }
+
     /// Stops accepting and closes all connections.
     pub fn close(&self) {
         self.ep.close(0u32.into(), b"shutdown");
@@ -451,13 +471,65 @@ impl Endpoint {
     }
 }
 
-fn unexpected(m: &Message) -> NetError {
-    let s = format!("{m:?}");
-    NetError::Unexpected(s.chars().take(80).collect())
+/// Longest self-reported peer name (`Hello::device_name`) kept, in characters; the rest is
+/// cut before the name reaches logs, prompts or the "who is connected" banner.
+pub const MAX_PEER_NAME_CHARS: usize = 64;
+
+/// Makes a peer's self-reported name safe to show: control characters (newlines, NUL, bell,
+/// escapes) are dropped, the length is capped at [`MAX_PEER_NAME_CHARS`] and the ends are
+/// trimmed. Letters of any script and bidi marks (RLM, ZWJ) are kept exactly.
+pub fn sanitize_peer_name(name: &str) -> String {
+    let cut: String = name
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_PEER_NAME_CHARS)
+        .collect();
+    cut.trim().to_owned()
 }
 
+/// `NetError::Unexpected` naming the message, formatted lazily and cut at 80 characters, so a
+/// hostile 16 MiB message is never rendered in full.
+fn unexpected(m: &Message) -> NetError {
+    use std::fmt::Write as _;
+    /// Collects at most `left` characters, then stops the formatter.
+    struct Capped {
+        out: String,
+        left: usize,
+    }
+    impl std::fmt::Write for Capped {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            for c in s.chars() {
+                if self.left == 0 {
+                    return Err(std::fmt::Error);
+                }
+                self.out.push(c);
+                self.left -= 1;
+            }
+            Ok(())
+        }
+    }
+    let mut w = Capped {
+        out: String::new(),
+        left: 80,
+    };
+    let _ = write!(w, "{m:?}");
+    NetError::Unexpected(w.out)
+}
+
+/// Hands incoming connections to [`Endpoint::accept`]. Ends when the [`Endpoint`] is dropped
+/// (its receiver closes `tx`): this task owns a `quinn::Endpoint` clone, and without that exit
+/// the UDP port stayed bound for the life of the process after the last `Endpoint` handle was
+/// gone (a restarted host could not rebind its port). Live sessions keep their own references,
+/// so they outlive the exit and release the socket when they end.
 async fn accept_loop(ep: quinn::Endpoint, shared: Arc<Shared>, tx: mpsc::Sender<PendingSession>) {
-    while let Some(incoming) = ep.accept().await {
+    loop {
+        let incoming = tokio::select! {
+            () = tx.closed() => break,
+            next = ep.accept() => match next {
+                Some(incoming) => incoming,
+                None => break,
+            },
+        };
         let addr = incoming.remote_address();
         let allowed = shared
             .allow
@@ -506,11 +578,17 @@ async fn host_handshake(
     let addr = SocketAddr::new(normalize(remote.ip()), remote.port());
     let (mut send, recv) = conn.accept_bi().await?;
     let mut rx = FramedRecv::new(recv);
-    let hello = match rx.next().await? {
-        Message::Hello(h) => h,
-        other => {
+    let hello = match rx.next().await {
+        Ok(Message::Hello(h)) => h,
+        Ok(other) => {
             conn.close(CLOSE_PROTOCOL.into(), b"expected Hello");
             return Err(unexpected(&other));
+        }
+        Err(e) => {
+            // Malformed or oversized frame (or the peer left): close explicitly instead of
+            // leaving it to the idle timeout.
+            conn.close(CLOSE_PROTOCOL.into(), b"bad Hello");
+            return Err(e);
         }
     };
     if hello.protocol_version != PROTOCOL_VERSION {
@@ -525,7 +603,14 @@ async fn host_handshake(
     }
     write_msg(&mut send, &shared.hello(Role::Host)).await?;
     // `payload`: the SPAKE2 message, or the reconnect ticket token.
-    let (kind, payload) = match rx.next().await? {
+    let request = match rx.next().await {
+        Ok(m) => m,
+        Err(e) => {
+            conn.close(CLOSE_PROTOCOL.into(), b"bad AuthRequest");
+            return Err(e);
+        }
+    };
+    let (kind, payload) = match request {
         Message::AuthRequest(AuthRequest::AcceptPrompt) => (AuthKind::AcceptPrompt, Vec::new()),
         Message::AuthRequest(AuthRequest::OneTimeCode { spake2_msg }) => {
             (AuthKind::OneTimeCode, spake2_msg)
@@ -558,7 +643,7 @@ async fn host_handshake(
         addr,
         device_id: viewer_fp.device_id(),
         fingerprint: viewer_fp,
-        name: hello.device_name,
+        name: sanitize_peer_name(&hello.device_name),
     };
     tracing::info!(peer = %peer.addr, device_id = %peer.device_id, name = %peer.name, ?kind, "incoming session request");
     Ok(Some(PendingSession {
@@ -804,6 +889,7 @@ impl PendingSession {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unreachable)]
     use super::*;
 
     /// A peer speaking another protocol version gets `Rejected(VersionMismatch)`.
@@ -986,5 +1072,40 @@ mod tests {
         let (host_session, viewer_session) = tokio::join!(host_side, viewer_side);
         assert_eq!(viewer_session.initial_permissions(), Permissions::VIEW);
         assert_eq!(host_session.peer().fingerprint, viewer_fp);
+    }
+
+    #[test]
+    fn peer_names_keep_arabic_and_lose_control_characters() {
+        assert_eq!(sanitize_peer_name("مكتب-1 office"), "مكتب-1 office");
+        // RLM and ZWJ are formatting characters (Cf), not controls: kept.
+        assert_eq!(
+            sanitize_peer_name("\u{200F}جهاز\u{200D}٣"),
+            "\u{200F}جهاز\u{200D}٣"
+        );
+        assert_eq!(sanitize_peer_name(" a\nb\r\0c\u{1b}[31m "), "abc[31m");
+        let long = "ب".repeat(1000);
+        assert_eq!(
+            sanitize_peer_name(&long).chars().count(),
+            MAX_PEER_NAME_CHARS
+        );
+        assert_eq!(sanitize_peer_name("\n\t"), "");
+    }
+
+    #[test]
+    fn unexpected_message_text_is_capped() {
+        let big = Message::ChatMessage {
+            id: 1,
+            text: "ح".repeat(1 << 20),
+            sent_unix_ms: 0,
+        };
+        let NetError::Unexpected(s) = unexpected(&big) else {
+            panic!("wrong error kind");
+        };
+        assert_eq!(s.chars().count(), 80);
+        assert!(s.starts_with("ChatMessage"), "{s}");
+        let NetError::Unexpected(s) = unexpected(&Message::RequestKeyframe) else {
+            panic!("wrong error kind");
+        };
+        assert_eq!(s, "RequestKeyframe");
     }
 }

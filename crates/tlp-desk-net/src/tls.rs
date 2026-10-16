@@ -206,9 +206,10 @@ fn cert_and_key(identity: &Identity) -> (Vec<CertificateDer<'static>>, PrivateKe
 pub(crate) fn transport_config() -> Arc<quinn::TransportConfig> {
     let mut t = quinn::TransportConfig::default();
     t.keep_alive_interval(Some(Duration::from_secs(4)));
-    t.max_idle_timeout(Some(
-        quinn::IdleTimeout::try_from(Duration::from_secs(15)).expect("15s fits"),
-    ));
+    // 15 s, in milliseconds (`IdleTimeout` from a `VarInt` is infallible).
+    t.max_idle_timeout(Some(quinn::IdleTimeout::from(quinn::VarInt::from_u32(
+        15_000,
+    ))));
     // Per-frame video streams plus parallel side streams (file ranges, tunnel connections).
     t.max_concurrent_uni_streams(256u32.into());
     t.max_concurrent_bidi_streams(256u32.into());

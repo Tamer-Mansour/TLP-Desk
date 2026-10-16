@@ -18,6 +18,7 @@ later without touching session logic.
 | [`tlp-desk-viewer`](viewer.md) | Viewer session: receive → decode → frames, input out, stats | Done for M1 |
 | [`tlp-desk-app`](app.md) | The GUI binary `TLP-Desk.exe` (egui/eframe + wgpu), i18n, settings | Done for M1 |
 | [`tlp-desk-cli`](cli.md) | The headless binary `TLP-Desk-cli.exe` (`id`, `list`, `serve`, `connect`) | M1 done; `send-file`, `exec-wol` planned |
+| [`tlp-desk-testkit`](testkit.md) | Dev-only: fakes and a host + viewer pair harness for tests (`publish = false`) | Available |
 
 ## Dependency graph
 

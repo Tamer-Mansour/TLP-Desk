@@ -30,8 +30,12 @@ typos              # spelling — see .typos.toml
 |---|---|---|---|
 | Unit tests | `src/**` `#[cfg(test)]` in every crate | nothing | yes |
 | Protocol round trips | `tlp-desk-proto/tests/roundtrip.rs` | nothing | yes |
+| Protocol properties | `tlp-desk-proto/tests/properties.rs` (`proptest`) | nothing | yes (long runs ignored) |
 | Network integration | `tlp-desk-net/tests/session.rs`, `tests/discovery.rs` | loopback UDP | yes (except mDNS) |
+| Hostile peer | `tlp-desk-net/tests/hostile.rs` | loopback UDP | yes |
 | End-to-end host ↔ viewer | `tlp-desk-host/tests/e2e.rs` | loopback; fake capturer | yes (except real capture) |
+| Hostile viewer | `tlp-desk-host/tests/hostile_viewer.rs` | loopback; `tlp-desk-testkit` | yes |
+| Soak / leak | `tlp-desk-host/tests/soak.rs` | loopback; minutes of CPU | **no** — run by hand |
 | Real backend | `tlp-desk-app/tests/real_backend.rs` | loopback; real QUIC, TLS, SPAKE2, H.264 | yes |
 | Headless UI | `tlp-desk-app/src/ui/session.rs`, `i18n/shaping.rs` | egui without a window | yes |
 | Hardware tests | marked `#[ignore = "..."]` | a real, unlocked Windows desktop | **no** — run by hand |
@@ -43,6 +47,70 @@ typos              # spelling — see .typos.toml
 pointer marker and monitor lister. The e2e tests plug in fakes and then run a real `Host` and a
 real `Viewer` over QUIC on `127.0.0.1`. That is how accept/reject, codes, rate limits, TOFU, the
 allow-list, monitor switching, local priority and frame dropping are all tested in CI.
+
+### The test kit (`tlp-desk-testkit`)
+
+New end-to-end tests should not copy those fakes: the dev-only crate
+[`tlp-desk-testkit`](crates/testkit.md) has them all (capturer, encoder, injector, local
+activity, pointer marker, clipboard, audio source), a `TestPair` that starts a real host and
+viewer in one call, a `ProbeFeature` that records what reaches session features, bounded waits,
+and memory/task counters. Add it to your crate's `[dev-dependencies]`:
+
+```toml
+[dev-dependencies]
+tlp-desk-testkit.workspace = true
+```
+
+```rust,ignore
+let mut pair = TestPair::start_with(|host, viewer| { /* register features, tweak config */ }).await;
+let conn = pair.connect(Permissions::ALL).await;   // prompt shown and accepted
+wait::next_frame(&conn.session).await;
+conn.session.disconnect();
+pair.all_released().await;                          // sessions gone, every fake dropped
+```
+
+### Hostile input
+
+Every decoder and every message handler must turn bad input into an error, never a panic
+(CODE_STYLE section 2). Three layers check that:
+
+- `tlp-desk-proto/tests/properties.rs` — random, truncated, mutated and oversized bytes into the
+  frame decoder; every message round-trips. The `*_long` tests run 200 000 cases each and stand in
+  for `cargo fuzz` (which needs nightly):
+  `cargo test --release -p tlp-desk-proto --test properties -- --ignored`.
+- `tlp-desk-net/tests/hostile.rs` — a peer with a valid key that sends garbage, the wrong order,
+  huge frames, stalls (slowloris), floods streams, connects and vanishes in a storm, or brute-forces
+  the password.
+- `tlp-desk-host/tests/hostile_viewer.rs` — an authorized viewer that sends what it has no
+  permission for, forges host-only messages, floods, and reconnects in a loop.
+
+Hostile inputs of the feature lanes live next to the feature (find them with the names below):
+
+| Input | Test |
+|---|---|
+| file paths: `..`, drive letters, devices, alternate data streams, shares | `files::transfer::path` and `files::fs::path` unit tests, `transfer::traversal_attempts_are_rejected` |
+| tunnel targets: public IPs and names | `host/tests/tunnel.rs` `internet_and_named_targets_are_refused`, `e2e::public_addresses_are_refused` |
+| chat length and flood | `host/tests/chat.rs` `length_cap_and_duplicates_are_enforced`, `peer_flood_is_rate_limited` |
+| clipboard size caps | `files::clipboard::wire` cap tests, `clipboard_e2e::oversized_text_is_refused_with_an_event` |
+| whiteboard stroke floods | `host/tests/whiteboard.rs` `hostile_strokes_are_capped` |
+| device-info spoofing | `host::device_info` `limit_*`, `viewer::device_info` `sanitize_caps_hostile_answers` |
+| hostile `Hello`, wrong order, huge frames, unknown stream kinds, storms, half-open streams, brute force | `net/tests/hostile.rs` |
+
+When your lane adds a message handler, add its malformed and unpermitted cases there (or next to
+your feature's tests with the test kit): wrong ids, Arabic and over-long text, `..` paths,
+absurd sizes.
+
+### Soak test
+
+`tlp-desk-host/tests/soak.rs` runs a host and a viewer (fake capture, real OpenH264) with
+continuous input and periodic reconnects, sampling resident memory and tokio tasks every 5 s. It
+fails if memory grows by more than 48 MiB between the first and the last third of the run, if
+video stalls, or if tasks, connections or per-session threads are left behind.
+
+```powershell
+$env:TLP_SOAK_SECS = "600"    # default 10 minutes
+cargo test --release -p tlp-desk-host --test soak -- --ignored --nocapture
+```
 
 ## Ignored hardware tests
 
@@ -58,6 +126,8 @@ item:
 | net | `mdns_advertise_and_browse` | needs a multicast-capable adapter | `cargo test -p tlp-desk-net --test discovery -- --ignored` |
 | host | `real_capture_end_to_end` | needs a real interactive desktop session | `cargo test -p tlp-desk-host --test e2e -- --ignored` |
 | net | `bulk_side_stream_throughput` | benchmark: moves several GB over loopback (target ≥ 1 GB/s) | `cargo test --release -p tlp-desk-net --test session -- --ignored --nocapture bulk_side_stream_throughput` |
+| proto | `every_message_roundtrips_long`, `random_bodies_never_panic_long`, `random_streams_never_panic_long`, `mutated_frames_never_panic_long` | 200 000 cases each (about a minute in release) | `cargo test --release -p tlp-desk-proto --test properties -- --ignored` |
+| host | `soak_host_and_viewer_stay_bounded` | runs for `TLP_SOAK_SECS` (default 600 s) | `cargo test --release -p tlp-desk-host --test soak -- --ignored --nocapture` |
 
 Tips:
 
@@ -84,3 +154,24 @@ usual names).
 - A hardware test gets `#[ignore = "<reason>"]` with a reason that says what it needs, and the
   command to run it in the file's doc comment.
 - Tests may `unwrap`, `expect` and index freely (`.clippy.toml` allows it in tests).
+
+## Hunting flaky tests
+
+A test that fails "about one run in three under load" is a bug until proven otherwise. Raise the
+load the way CI does, then run the single test many times at once:
+
+```powershell
+cargo test -p tlp-desk-files --test transfer --no-run
+$exe = (Get-ChildItem $env:CARGO_TARGET_DIR\debug\deps\transfer-*.exe | Sort LastWriteTime | Select -Last 1).FullName
+1..48 | % { Start-Job { param($e) & $e many_small_files 2>&1 | Out-String } -ArgumentList $exe } | Receive-Job -Wait
+```
+
+Set `RUST_LOG=tlp_desk_net=debug,tlp_desk_files=debug` on a failing run: the first `WARN` line is
+usually the cause. Two real bugs were found this way (both fixed, both with a regression test):
+
+- `many_small_files` hung: a side stream arriving while its per-kind queue (64) was full was
+  refused, but the sender had already `finish()`ed it, so the file vanished silently. The queue now
+  applies back-pressure (`slow_consumer_receives_every_stream`).
+- `unattended::restart_and_reconnect_with_ticket` could not rebind its port after `drop(host)`:
+  the endpoint's accept task kept the UDP socket bound for the life of the process
+  (`dropping_the_endpoint_releases_the_port`).

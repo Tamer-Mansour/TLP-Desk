@@ -13,3 +13,8 @@ workspace = true
 serde.workspace = true
 postcard.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+# Property tests and the fuzz-style long runs (tests/properties.rs). `std` only: no
+# fork/timeout machinery (every test has its own bounds).
+proptest = { version = "1", default-features = false, features = ["std"] }

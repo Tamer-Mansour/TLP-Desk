@@ -132,6 +132,10 @@ impl PakeSession {
             msg_b,
         ]);
         let mac = |label: &[u8]| -> [u8; 32] {
+            #[allow(
+                clippy::expect_used,
+                reason = "HMAC accepts keys of any length: new_from_slice cannot fail"
+            )]
             let mut m = <Hmac<Sha256> as Mac>::new_from_slice(&key).expect("HMAC takes any key");
             m.update(label);
             m.update(&transcript);

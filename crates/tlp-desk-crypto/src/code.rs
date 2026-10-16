@@ -72,7 +72,10 @@ impl OneTimeCode {
     /// Display form, e.g. `"042 917"`.
     pub fn display(&self) -> String {
         let c = self.current();
-        format!("{} {}", &c[..3], &c[3..])
+        match (c.get(..3), c.get(3..)) {
+            (Some(a), Some(b)) => format!("{a} {b}"),
+            _ => c,
+        }
     }
 
     /// Increments every time the code changes, so a GUI can cheaply notice rotation.

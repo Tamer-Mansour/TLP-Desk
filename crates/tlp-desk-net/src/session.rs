@@ -29,6 +29,11 @@ const STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 /// are dropped (see [`Session::send_video`]).
 pub const DEFAULT_MAX_VIDEO_IN_FLIGHT: usize = 3;
 
+/// Largest control frame accepted before the session is authorized (`Hello`, `AuthRequest`,
+/// `AuthResult` are all far smaller). An unauthenticated peer can therefore make us buffer at
+/// most this much per connection instead of `MAX_FRAME_LEN`.
+pub const HANDSHAKE_MAX_FRAME: usize = 16 * 1024;
+
 /// Frames the viewer buffers between the network and the decoder before dropping.
 const VIEWER_VIDEO_QUEUE: usize = 4;
 
@@ -83,12 +88,20 @@ pub(crate) struct FramedRecv {
 }
 
 impl FramedRecv {
+    /// A reader for an unauthenticated peer: frames above [`HANDSHAKE_MAX_FRAME`] are refused.
+    /// [`Session::new`] lifts the limit to `MAX_FRAME_LEN` once the session is authorized.
     pub(crate) fn new(recv: quinn::RecvStream) -> Self {
         Self {
             recv,
-            dec: FrameDecoder::new(),
+            dec: FrameDecoder::with_max_len(HANDSHAKE_MAX_FRAME),
             buf: vec![0u8; 64 * 1024],
         }
+    }
+
+    /// Accepts frames up to `MAX_FRAME_LEN` from now on.
+    fn authorized(mut self) -> Self {
+        self.dec.set_max_len(MAX_FRAME_LEN);
+        self
     }
 
     pub(crate) async fn next(&mut self) -> Result<Message, NetError> {
@@ -97,7 +110,8 @@ impl FramedRecv {
                 return Ok(m);
             }
             match self.recv.read(&mut self.buf).await? {
-                Some(n) => self.dec.push(&self.buf[..n]),
+                // `read` never reports more than the buffer holds.
+                Some(n) => self.dec.push(self.buf.get(..n).unwrap_or_default()),
                 None => return Err(NetError::Closed),
             }
         }
@@ -128,6 +142,8 @@ struct VideoRx {
 /// Incoming side streams of one kind wait here until a feature accepts them; beyond this the
 /// peer's streams are refused (`STREAM_REFUSED`) instead of piling up.
 const SIDE_QUEUE: usize = 64;
+/// How long a side stream may wait for room in a full queue before it is refused.
+const SIDE_QUEUE_WAIT: Duration = Duration::from_secs(10);
 
 /// An incoming typed side stream (see [`Session::accept_side_stream`]).
 #[derive(Debug)]
@@ -255,7 +271,7 @@ impl Session {
             peer,
             permissions,
             ctrl_tx: Mutex::new(ctrl_tx),
-            ctrl_rx: Mutex::new(ctrl_rx),
+            ctrl_rx: Mutex::new(ctrl_rx.authorized()),
             video_tx,
             video_rx,
             side_rx,
@@ -310,6 +326,12 @@ impl Session {
     #[doc(hidden)]
     pub async fn open_raw_uni(&self) -> Result<quinn::SendStream, NetError> {
         Ok(self.conn.open_uni().await?)
+    }
+
+    /// Test/fuzzing aid: opens a raw bidirectional stream without writing a header.
+    #[doc(hidden)]
+    pub async fn open_raw_bi(&self) -> Result<(quinn::SendStream, quinn::RecvStream), NetError> {
+        Ok(self.conn.open_bi().await?)
     }
 
     /// Our role in this session.
@@ -508,14 +530,25 @@ struct StreamRouter {
 }
 
 impl StreamRouter {
-    /// Queues a side stream for its feature, or refuses it if the queue is full.
-    fn route_side(&self, mut s: SideStream) {
-        let Some(tx) = self.side.get(&s.kind) else {
+    /// Queues a side stream for its feature. A full queue is back-pressure, not an error: a
+    /// feature that is merely slow (a busy machine, a burst of small files) gets
+    /// [`SIDE_QUEUE_WAIT`] to catch up while the stream stays unread; QUIC's stream limit bounds
+    /// how many of these waiting tasks a peer can create. Only a feature that stays stuck makes
+    /// the stream get refused. (Refusing straight away silently lost data that the sender had
+    /// already `finish()`ed, which hung file transfers of many small files under load.)
+    async fn route_side(&self, s: SideStream) {
+        let kind = s.kind;
+        let id = s.id;
+        let Some(tx) = self.side.get(&kind) else {
+            let mut s = s;
             return refuse(&mut s.recv, "unexpected side stream kind");
         };
-        if let Err(e) = tx.try_send(s) {
-            let mut s = e.into_inner();
-            tracing::warn!(kind = ?s.kind, id = s.id, "side stream queue full; refusing stream");
+        if let Err(e) = tx.send_timeout(s, SIDE_QUEUE_WAIT).await {
+            let mut s = match e {
+                mpsc::error::SendTimeoutError::Timeout(s)
+                | mpsc::error::SendTimeoutError::Closed(s) => s,
+            };
+            tracing::warn!(?kind, id, "side stream queue stuck; refusing stream");
             refuse(&mut s.recv, "side stream queue full");
         }
     }
@@ -565,12 +598,16 @@ async fn accept_uni_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
                     Some((tx, gap)) => read_video_frame(recv, tx, gap).await,
                     None => refuse(&mut recv, "video stream to a host"),
                 },
-                kind => router.route_side(SideStream {
-                    kind,
-                    id: header.id,
-                    send: None,
-                    recv,
-                }),
+                kind => {
+                    router
+                        .route_side(SideStream {
+                            kind,
+                            id: header.id,
+                            send: None,
+                            recv,
+                        })
+                        .await
+                }
             }
         });
     }
@@ -586,12 +623,14 @@ async fn accept_bi_loop(conn: quinn::Connection, router: Arc<StreamRouter>) {
                 Ok(h) if h.kind == StreamKind::Video => refuse(&mut recv, "video on a bidi stream"),
                 Ok(h) => {
                     let _ = send.set_priority(stream_priority(h.kind));
-                    router.route_side(SideStream {
-                        kind: h.kind,
-                        id: h.id,
-                        send: Some(send),
-                        recv,
-                    });
+                    router
+                        .route_side(SideStream {
+                            kind: h.kind,
+                            id: h.id,
+                            send: Some(send),
+                            recv,
+                        })
+                        .await;
                 }
                 Err(e) => refuse(&mut recv, &e.to_string()),
             }

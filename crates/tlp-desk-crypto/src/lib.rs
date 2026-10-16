@@ -12,6 +12,17 @@
 //! * [`PasswordStore`] / [`password_strength`]: the verifier file and the Settings strength meter.
 //! * [`TicketStore`]: single-use reconnect tickets for restart-and-reconnect (hashes only).
 #![forbid(unsafe_code)]
+// Never-crash set (docs/CODE_STYLE.md, "Lints"): this crate verifies peer-supplied keys,
+// messages and files from disk.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable,
+    clippy::indexing_slicing
+)]
 
 mod code;
 mod device_id;

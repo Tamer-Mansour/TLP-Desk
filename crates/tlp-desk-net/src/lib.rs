@@ -21,6 +21,16 @@
 //! `unsafe` is denied crate-wide; only the Windows neighbour-cache wrapper
 //! (`neighbor::windows`) opts back in, with a `// SAFETY:` note on every block.
 #![deny(unsafe_code)]
+// Never-crash set (docs/CODE_STYLE.md, "Lints"): every byte here comes from a peer.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+    clippy::unreachable,
+    clippy::indexing_slicing
+)]
 
 mod allow;
 mod chat;
@@ -43,8 +53,8 @@ pub use discovery::{
     DiscoveryConfig, DiscoveryEvent, PacketKind, BROADCAST_MAGIC, MDNS_SERVICE_TYPE,
 };
 pub use endpoint::{
-    default_device_name, AuthKind, AuthMethod, AwaitingAcceptFn, Endpoint, EndpointConfig,
-    PendingSession,
+    default_device_name, sanitize_peer_name, AuthKind, AuthMethod, AwaitingAcceptFn, Endpoint,
+    EndpointConfig, PendingSession, MAX_PEER_NAME_CHARS,
 };
 pub use error::NetError;
 pub use feature::{
@@ -54,7 +64,7 @@ pub use neighbor::{format_mac, neighbor_mac, neighbor_table, Neighbor};
 pub use quinn::{RecvStream, SendStream};
 pub use session::{
     stream_priority, PeerInfo, Session, SideStream, TransportStats, VideoSendStatus,
-    DEFAULT_MAX_VIDEO_IN_FLIGHT, STREAM_REFUSED,
+    DEFAULT_MAX_VIDEO_IN_FLIGHT, HANDSHAKE_MAX_FRAME, STREAM_REFUSED,
 };
 pub use tlp_desk_proto::{StreamHeader, StreamKind};
 pub use tls::{Pin, ALPN};

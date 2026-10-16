@@ -30,7 +30,9 @@ TLP-Desk peers is defined here. The crate is pure, synchronous Rust with no I/O.
   `MAX_FRAME_LEN`.
 - `FrameDecoder` — incremental decoder for a byte stream: `push(bytes)` then call
   `next_message()` until it returns `Ok(None)` (needs more bytes). It never panics on garbage;
-  bad input becomes a `ProtoError`.
+  bad input becomes a `ProtoError`. `FrameDecoder::with_max_len(n)` / `set_max_len(n)` use a
+  smaller body limit (clamped to `MAX_FRAME_LEN`); `tlp-desk-net` uses 16 KiB until the session
+  is authorized. `buffered_len()` reports the bytes held (at most one frame after draining).
 
 ### Messages (`messages.rs`)
 
@@ -123,8 +125,15 @@ Unknown kinds decode to `ProtoError::UnknownStreamKind`.
 
 ## Tests
 
-All tests run in CI (none are ignored).
+The crate root denies the never-crash lints (`unwrap_used`, `expect_used`, `panic`,
+`indexing_slicing`, ...).
 
+- `tests/properties.rs` (`proptest`): every variant round-trips; frame streams decode the same
+  under any chunking; random, mutated and truncated input never panics and never buffers more
+  than one frame; oversized prefixes are refused before the body; huge declared collection
+  lengths fail without allocating; a coverage test fails when a new variant is not generated.
+  The `*_long` variants (200 000 cases each, a stable-Rust stand-in for `cargo fuzz`) are
+  ignored: `cargo test --release -p tlp-desk-proto --test properties -- --ignored`.
 - `tests/roundtrip.rs`: `every_message_roundtrips`, `frames_decode_from_byte_by_byte_stream`,
   `oversized_length_prefix_is_rejected`, `garbage_body_is_an_error_not_a_panic`,
   `permissions_bit_ops`, `permission_bits_are_stable_and_distinct`,

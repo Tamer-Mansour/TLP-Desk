@@ -76,8 +76,12 @@ One `Endpoint` both listens (host) and dials (viewer); the GUI shares a single e
 
 1. The allow-list is checked on the *incoming* packet and non-matching peers are refused before
    any TLS work.
-2. Each connection gets its own task bounded by `handshake_timeout`.
-3. `Hello` is read: a different `protocol_version` → `Rejected(VersionMismatch)`; a
+2. Each connection gets its own task bounded by `handshake_timeout`. Until the session is
+   authorized, control frames are limited to `HANDSHAKE_MAX_FRAME` (16 KiB) instead of 16 MiB;
+   a malformed or oversized `Hello`/`AuthRequest` closes the connection with code 2 at once.
+3. `Hello` is read: the self-reported name goes through `sanitize_peer_name` (control
+   characters dropped, at most `MAX_PEER_NAME_CHARS` = 64 characters, Arabic and bidi marks kept)
+   on both sides. A different `protocol_version` → `Rejected(VersionMismatch)`; a
    `device_id` that does not match the client certificate, or the wrong role →
    `Rejected(NotAllowed)`.
 4. For code or password requests, a peer IP that is locked out gets `Rejected(RateLimited)`.
@@ -227,6 +231,13 @@ the wrong secret), `HostAuthFailed` (viewer: host's MAC was wrong), `RateLimited
   benchmark `bulk_side_stream_throughput` (moves several GB over loopback; target ≥ 1 GB/s on one
   stream — run with
   `cargo test --release -p tlp-desk-net --test session -- --ignored --nocapture bulk_side_stream_throughput`).
+- `tests/hostile.rs` (a TLS-authenticated peer that speaks the protocol wrong, through the hidden
+  test aids `Endpoint::dial_raw`, `Endpoint::open_connections`, `Session::open_raw_uni/bi`):
+  garbage, oversized or huge pre-auth frames, wrong message order, a peer claiming the host role,
+  slowloris handshakes, a connect/disconnect storm (connections drain to zero), password brute
+  force with malformed SPAKE2 messages (rate limited after 5), video streams from the viewer,
+  malformed side-stream headers, side-stream floods (64 queued, rest refused), half-open side
+  streams, garbage on video streams.
 - `tests/discovery.rs`: `broadcast_fallback_discovers_peer_and_expires_it`, and
   `mdns_advertise_and_browse` — **ignored** in CI because it needs a multicast-capable network
   adapter:

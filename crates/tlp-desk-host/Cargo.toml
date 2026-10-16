@@ -47,6 +47,7 @@ windows = { version = "0.62", features = [
 
 [dev-dependencies]
 tlp-desk-viewer.workspace = true
+tlp-desk-testkit.workspace = true
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
