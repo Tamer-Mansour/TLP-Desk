@@ -379,13 +379,11 @@ fn save(s: &State) -> Result<(), CryptoError> {
     write_private(path, text.as_bytes())
 }
 
-/// Atomically writes a small private file, creating (and hardening) its directory if needed.
+/// Atomically writes a small private file, creating its directory if needed and re-applying
+/// the private ACL every time ([`crate::ensure_private_dir`], audit F1).
 pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), CryptoError> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    if !dir.as_os_str().is_empty() && !dir.exists() {
-        fs::create_dir_all(dir)?;
-        crate::harden_dir(dir);
-    }
+    crate::ensure_private_dir(dir)?;
     let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
     tmp_name.push(".tmp");
     let tmp = path.with_file_name(tmp_name);

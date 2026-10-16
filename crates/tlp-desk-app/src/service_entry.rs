@@ -133,6 +133,12 @@ fn install() -> i32 {
 /// tickets) shared with the GUI and the CLI.
 fn service_options() -> win::ServiceOptions {
     let data_dir = tlp_desk_crypto::default_dir();
+    // Every start, before any secret is read or written: the folder may predate the install
+    // or carry a weaker ACL (audit F1). Owner -> Administrators, explicit ACEs dropped,
+    // SYSTEM + Administrators only.
+    if let Err(e) = tlp_desk_crypto::secure_service_dir(&data_dir) {
+        tracing::warn!(%e, dir = %data_dir.display(), "cannot secure the data directory");
+    }
     let tickets = TicketStore::load(&data_dir.join(TICKETS_FILE), DEFAULT_TICKET_TTL)
         .unwrap_or_else(|e| {
             tracing::warn!(%e, "cannot read reconnect tickets; starting empty");
