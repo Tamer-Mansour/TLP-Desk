@@ -16,6 +16,25 @@ protocol bump is called out below.
 - **Drop into the remote folder.** Files dropped from Explorer onto the **Remote PC** pane are copied into the folder open there (the pane shows where they go); dropped elsewhere on the session window they still go to the remote Desktop.
 - **Everything works when the host runs as the Windows service.** Explorer copy/paste, clipboard sync, file transfer (limited to the signed-in user's folder, arriving on their Desktop), chat, whiteboard, pointer marker, local priority, privacy mode and sound now work under the TLP-Desk service: a helper in the user's session does the desktop parts. The TLP-Desk window shows incoming transfers, "replace or keep both?" questions, chat and the service's sessions in the connection log. Changed host settings are applied by the service at once and saved machine-wide in `%ProgramData%\TLP-Desk\host-settings.json`. `service.log` rotates (4 MB, five older files), and `install-service` / `uninstall-service` print their outcome in a terminal. Local IPC version 2 (service, agent and GUI must be the same release); no wire change.
 - CLI `connect` statistics show the quantiser (`Q~`, `"qp"`) and a millisecond timestamp (`"t_ms"`). Hidden, development-only `connect --sim-loss`, `--sim-bandwidth-kbps` and `--sim-seconds` flags simulate a lossy or slow link for testing the adaptive quality on one PC.
+- **Several viewers with full control at once.** Two (or more) colleagues can control one PC at
+  the same time, each with their own picture, monitor choice, quality, permissions and pointer
+  marker; one leaving does not disturb the others. Sessions on the same monitor share one screen
+  capturer (each keeps its own encoder), so a second viewer does not double the capture work
+  (`HostConfig::share_capture`, `serve --no-shared-capture` to compare).
+- **Pause input and View only per viewer.** While several people are connected, each line of the
+  host banner can mute that person's mouse and keyboard (permissions unchanged) or make them
+  view-only, live (`Host::set_input_paused`).
+- **Automatic reconnect after a network drop.** Every session gets a single-use resume ticket
+  (bound to the viewer's key, valid 150 s, renewed every 30 s and on every permission change).
+  If the connection drops, the viewer reconnects on its own for up to two minutes without a new
+  Accept and with the permissions the host allows at that moment, behind a "Connection lost.
+  Reconnecting…" overlay (Arabic and English). Deliberate ends revoke the ticket. No wire change:
+  it reuses `ReconnectTicket`.
+
+### Changed
+
+- High-resolution wheel deltas (precision touchpads) keep their sub-notch remainder, so slow
+  scrolling is no longer lost to rounding.
 
 ### Fixed
 

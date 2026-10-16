@@ -335,6 +335,8 @@ pub struct SessionUnattended {
     requested_at: Option<Instant>,
     /// The remote PC went down; the backend is reconnecting.
     pub restarting: bool,
+    /// The reconnect is after a network drop, not a restart (TLP-multiviewer).
+    pub network_lost: bool,
     /// Reconnect try number (0 = waiting for the first one).
     pub attempt: u32,
     /// Why the reconnect failed (display text), shown when the session then ends.
@@ -351,9 +353,16 @@ impl SessionUnattended {
         self.requested_at = None;
     }
 
+    /// The connection dropped; the backend resumes the session (same overlay, other text).
+    pub fn on_network_lost(&mut self) {
+        self.on_restarting();
+        self.network_lost = true;
+    }
+
     /// Back in after the restart.
     pub fn on_reconnected(&mut self) {
         self.restarting = false;
+        self.network_lost = false;
         self.attempt = 0;
         self.requested_at = None;
     }
@@ -514,7 +523,12 @@ impl SessionUnattended {
                     theme::column(ui, tx.rtl(), |ui| {
                         theme::row(ui, tx.rtl(), |ui| {
                             ui.spinner();
-                            ui.label(RichText::new(tx.t(S::Restarting)).strong());
+                            let title = if self.network_lost {
+                                S::Reconnecting
+                            } else {
+                                S::Restarting
+                            };
+                            ui.label(RichText::new(tx.t(title)).strong());
                         });
                         if self.attempt > 0 {
                             let n = tx.digits(&self.attempt.to_string());
@@ -523,7 +537,12 @@ impl SessionUnattended {
                                 &tx.f(S::RestartingAttempt, &[("n", &n)]),
                             ));
                         }
-                        ui.label(theme::caption(ui, tx.t(S::RestartingNote)));
+                        let note = if self.network_lost {
+                            S::ReconnectingNote
+                        } else {
+                            S::RestartingNote
+                        };
+                        ui.label(theme::caption(ui, tx.t(note)));
                         ui.add_space(8.0);
                         if ui
                             .add(icons::icon_text_button(
@@ -723,5 +742,27 @@ mod tests {
         });
         s.on_reconnected();
         assert!(!s.blocks_input());
+    }
+
+    /// TLP-multiviewer: a network drop shows the same blocking overlay with the reconnect
+    /// text (Arabic and English), and getting back in clears it.
+    #[test]
+    fn network_drop_overlay_shows_reconnecting_in_both_languages() {
+        for lang in [Lang::Ar, Lang::En] {
+            let tx = Tx::new(lang, DigitStyle::Western);
+            let ctx = egui::Context::default();
+            let mut s = SessionUnattended::default();
+            s.on_network_lost();
+            assert!(s.restarting && s.network_lost && s.blocks_input());
+            assert!(!tx.t(S::Reconnecting).is_empty());
+            run(&ctx, |ui| {
+                let r = ui.max_rect();
+                assert!(!s.overlay(ui, tx, r));
+            });
+            s.on_reconnected();
+            assert!(!s.network_lost && !s.blocks_input());
+        }
+        let ar = Tx::new(Lang::Ar, DigitStyle::Western);
+        assert!(ar.t(S::Reconnecting).contains("الاتصال"));
     }
 }

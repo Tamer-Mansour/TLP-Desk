@@ -123,11 +123,15 @@ impl Inner {
             return;
         }
         tracing::info!(session = session.0, ?action, "system action requested");
+        if action == SystemAction::Restart {
+            self.state().restart_requested.insert(session);
+        }
         s.send_message(action.message());
     }
 
     /// Called when a viewer session ended. Returns `true` if a reconnect started instead of
-    /// ending the session for the UI (the host restarted and left us a ticket).
+    /// ending the session for the UI: the host restarted and left us a restart ticket, or the
+    /// connection dropped and the host's session-resume ticket lets us back in.
     pub(super) fn try_start_reconnect(
         self: &Arc<Self>,
         session: SessionId,
@@ -135,14 +139,24 @@ impl Inner {
         reason: &tlp_desk_viewer::EndReason,
         dst: Option<Arc<FrameSlot>>,
     ) -> bool {
-        if matches!(reason, tlp_desk_viewer::EndReason::Local) {
+        let restart = self.state().restart_requested.remove(&session);
+        let dropped = matches!(reason, tlp_desk_viewer::EndReason::ConnectionLost(_));
+        // A deliberate end (we closed, the host user disconnected us or revoked viewing) never
+        // reconnects; only a restart we asked for or a dropped connection does.
+        if matches!(reason, tlp_desk_viewer::EndReason::Local) || !(restart || dropped) {
             self.keeper.discard(old.feature_key());
             return false;
         }
         let (Some(ticket), Some(dst)) = (self.keeper.take(old.feature_key()), dst) else {
             return false;
         };
-        tracing::info!(session = session.0, host = %ticket.host, "remote PC restarting; waiting to reconnect");
+        let policy = if restart {
+            tracing::info!(session = session.0, host = %ticket.host, "remote PC restarting; waiting to reconnect");
+            ReconnectPolicy::default()
+        } else {
+            tracing::info!(session = session.0, host = %ticket.host, "connection lost; resuming the session");
+            ReconnectPolicy::network_blip()
+        };
         let me = Arc::clone(self);
         let mut st = self.state();
         let handle = self
@@ -156,14 +170,18 @@ impl Inner {
                     }
                 });
                 let result = viewer
-                    .reconnect_with_ticket(ticket, ReconnectPolicy::default(), Some(on_attempt))
+                    .reconnect_with_ticket(ticket, policy, Some(on_attempt))
                     .await;
                 me.reconnect_done(session, dst, result);
             })
             .abort_handle();
         st.reconnects.insert(session, handle);
         drop(st);
-        self.emit(BackendEvent::RemoteRestarting { session });
+        self.emit(if restart {
+            BackendEvent::RemoteRestarting { session }
+        } else {
+            BackendEvent::Reconnecting { session }
+        });
         true
     }
 

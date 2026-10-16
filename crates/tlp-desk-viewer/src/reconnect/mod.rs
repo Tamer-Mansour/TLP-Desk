@@ -185,6 +185,9 @@ pub struct ReconnectPolicy {
     pub max_delay: Duration,
     /// Limit for one connection try. Default 15 s.
     pub attempt_timeout: Duration,
+    /// Shortest wait between tries after the first. Default 12 s, which keeps a host that is
+    /// still refusing a restart ticket under its 5-attempts-per-minute limit.
+    pub min_delay: Duration,
 }
 
 impl Default for ReconnectPolicy {
@@ -194,19 +197,34 @@ impl Default for ReconnectPolicy {
             first_delay: Duration::from_secs(5),
             max_delay: Duration::from_secs(30),
             attempt_timeout: Duration::from_secs(15),
+            min_delay: Duration::from_secs(12),
         }
     }
 }
 
 impl ReconnectPolicy {
+    /// Resuming a running session after a network blip (session-resume ticket): try after
+    /// 1 s, then every 1.5 s growing to 5 s, for up to 2 minutes (or until the ticket
+    /// expires). Failed tries that never reach the host do not count against its rate limit,
+    /// and a refused ticket ends the attempts at once.
+    pub fn network_blip() -> Self {
+        Self {
+            give_up_after: Duration::from_secs(2 * 60),
+            first_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(5),
+            attempt_timeout: Duration::from_secs(5),
+            min_delay: Duration::from_millis(1500),
+        }
+    }
+
     /// Delay before try number `n` (0-based): `first_delay`, then growing by half each time,
-    /// never below 12 s after the first so the host's 5-per-minute limit is not hit, capped at
-    /// `max_delay`.
+    /// never below `min_delay` after the first (by default 12 s, so the host's 5-per-minute
+    /// limit is not hit), capped at `max_delay`.
     pub fn delay(&self, n: u32) -> Duration {
         if n == 0 {
             return self.first_delay;
         }
-        let floor = Duration::from_secs(12).min(self.max_delay);
+        let floor = self.min_delay.min(self.max_delay);
         let grown = self
             .first_delay
             .mul_f64(1.5f64.powi(i32::try_from(n).unwrap_or(i32::MAX)));
@@ -326,6 +344,15 @@ impl Viewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_blip_retries_quickly_for_two_minutes() {
+        let p = ReconnectPolicy::network_blip();
+        assert_eq!(p.delay(0), Duration::from_secs(1));
+        assert_eq!(p.delay(1), Duration::from_millis(1500));
+        assert!((2..100).all(|n| p.delay(n) <= Duration::from_secs(5)));
+        assert_eq!(p.give_up_after, Duration::from_secs(120));
+    }
 
     #[test]
     fn delays_grow_and_respect_the_rate_limit() {

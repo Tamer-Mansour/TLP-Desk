@@ -10,7 +10,8 @@
 //!   ticket. A permission change revokes it too, and so does an explicit disconnect (see
 //!   [`revoke_after_session`]).
 //! * After the reboot the viewer presents the ticket; [`redeem`] checks it against the same
-//!   store (loaded again from disk by the new process, see `HostConfig::reconnect_tickets`).
+//!   store (loaded again from disk by the new process, see `HostConfig::reconnect_tickets`);
+//!   the host's auth path does this in `resume::redeem`.
 //! * The OS calls sit behind [`SystemPower`]. [`WindowsPower`] restarts and locks the real
 //!   machine; tests use a fake and must never use it.
 //!
@@ -22,7 +23,7 @@ mod windows;
 use std::sync::Arc;
 
 use tlp_desk_crypto::{now_unix_ms, TicketRejected, TicketStore};
-use tlp_desk_net::{Feature, FeatureCtx, NetError, PendingSession, Session};
+use tlp_desk_net::{Feature, FeatureCtx};
 use tlp_desk_proto::{ByeReason, Message, Permissions, RejectReason};
 use tokio::sync::mpsc;
 
@@ -226,7 +227,7 @@ async fn lock(ctx: &FeatureCtx, power: &Arc<dyn SystemPower>) {
 
 /// Maps a ticket store verdict to what the viewer is told. Only "not restarted yet" invites a
 /// retry; everything else is a plain wrong credential.
-fn verdict(r: Result<u16, TicketRejected>) -> Result<Permissions, RejectReason> {
+pub(crate) fn verdict(r: Result<u16, TicketRejected>) -> Result<Permissions, RejectReason> {
     match r {
         Ok(bits) => Ok(Permissions(bits & Permissions::ALL.0)),
         Err(TicketRejected::NotRestartedYet) => Err(RejectReason::NotAllowed),
@@ -237,25 +238,6 @@ fn verdict(r: Result<u16, TicketRejected>) -> Result<Permissions, RejectReason> 
             | TicketRejected::NotPersisted,
         ) => Err(RejectReason::WrongCredentials),
     }
-}
-
-/// Authorizes a pending session of kind `ReconnectTicket` against `store` (`None` = tickets
-/// disabled: refused with `NotAllowed`).
-pub(crate) async fn redeem(
-    store: Option<&TicketStore>,
-    p: PendingSession,
-) -> Result<Session, NetError> {
-    p.redeem_ticket(|token, fp| match store {
-        Some(s) => {
-            let r = s.redeem(token, fp, now_unix_ms());
-            if let Err(why) = r {
-                tracing::warn!(?why, "reconnect ticket rejected");
-            }
-            verdict(r)
-        }
-        None => Err(RejectReason::NotAllowed),
-    })
-    .await
 }
 
 /// Revokes the peer's tickets when its session ended on purpose (host user disconnected it,

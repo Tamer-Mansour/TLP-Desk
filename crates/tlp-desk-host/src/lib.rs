@@ -15,8 +15,12 @@
 //!   Prompts are rate limited per peer IP.
 //! * One-time-code and password requests are verified automatically.
 //! * [`Host::sessions`] is the always-visible "who is connected" list; [`Host::disconnect`]
-//!   ends a session; [`Host::set_permissions`] changes permissions live.
-//! * Per session, capture + encode run on one std thread and input injection on another;
+//!   ends a session; [`Host::set_permissions`] changes permissions live and
+//!   [`Host::set_input_paused`] mutes one viewer's input without touching the others.
+//!   Every session is independent (own encoder, quality, monitor choice, input thread and
+//!   permissions), so several viewers can control the host at the same time.
+//! * Per session, encode runs on its own std thread and input injection on another; sessions
+//!   on the same monitor share one capture thread ([`HostConfig::share_capture`]);
 //!   nothing CPU-heavy runs on the tokio runtime. Factories in [`HostConfig`] let tests swap
 //!   in fake capturers, encoders and injectors.
 //!
@@ -61,7 +65,9 @@ mod pipeline;
 mod priority;
 mod privacy;
 mod refine;
+mod resume;
 pub mod service;
+mod shared_capture;
 mod tunnel;
 mod unattended;
 mod whiteboard;
@@ -101,6 +107,7 @@ pub use privacy::{
     PrivacyCause, PrivacyFeature, PrivacyStatus, PrivacyTextFn, PrivacyViewer, ShieldFactory,
     FEATURE_NAME as PRIVACY_FEATURE,
 };
+pub use resume::RESUME_TICKET_TTL;
 pub use tlp_desk_input::{PrivacyScreenText, ScreenLine};
 pub use tlp_desk_net::{AuthKind, Feature, FeatureCtx, FeatureEvent, FeatureSet, PeerInfo};
 pub use unattended::{SystemPower, UnattendedEvent, UnattendedFeature, WindowsPower};
@@ -191,6 +198,14 @@ pub struct HostConfig {
     /// Reconnect tickets (restart and reconnect): the same store must be given to the
     /// [`UnattendedFeature`] that issues them. None = ticket logins are refused.
     pub reconnect_tickets: Option<TicketStore>,
+    /// Session resume after a network blip: every session is sent a single-use ticket of
+    /// this lifetime (renewed while it runs) that lets the viewer reconnect without a new
+    /// Accept, with the session's current permissions (see the `resume` module). `None`
+    /// disables it. Default [`RESUME_TICKET_TTL`].
+    pub session_resume: Option<Duration>,
+    /// Sessions streaming the same monitor at the same size share one screen capturer (each
+    /// keeps its own encoder and quality); see the `shared_capture` module. Default on.
+    pub share_capture: bool,
     /// Name announced in discovery.
     pub device_name: String,
     /// Announce this host on the LAN (mDNS + broadcast). The advertisement is filled in from
@@ -227,6 +242,8 @@ impl Default for HostConfig {
             one_time_code: OneTimeCode::new(),
             password: None,
             reconnect_tickets: None,
+            session_resume: Some(RESUME_TICKET_TTL),
+            share_capture: true,
             device_name: default_device_name(),
             advertise: true,
             discovery: DiscoveryConfig::default(),
@@ -254,6 +271,8 @@ impl std::fmt::Debug for HostConfig {
             .field("allow_one_time_code", &self.allow_one_time_code)
             .field("password", &self.password.is_some())
             .field("reconnect_tickets", &self.reconnect_tickets.is_some())
+            .field("session_resume", &self.session_resume)
+            .field("share_capture", &self.share_capture)
             .field("device_name", &self.device_name)
             .field("advertise", &self.advertise)
             .field("local_input_grace", &self.local_input_grace)
@@ -417,6 +436,9 @@ struct SessionCtl {
     perms: AtomicU16,
     stop: Notify,
     perms_changed: Notify,
+    /// The host user paused this viewer's input ([`Host::set_input_paused`]).
+    input_paused: AtomicBool,
+    pause_changed: Notify,
 }
 
 struct Inner {
@@ -433,6 +455,8 @@ struct Inner {
     shutting_down: AtomicBool,
     /// Local-activity monitor and pointer marker shared by all sessions.
     hooks: Arc<hooks::SharedHooks>,
+    /// Session-resume tickets (`HostConfig::session_resume`), in memory only.
+    resume: Option<TicketStore>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -476,8 +500,11 @@ impl Host {
     /// Only one `Host` per endpoint: it consumes [`Endpoint::accept`].
     pub async fn start(
         endpoint: Arc<Endpoint>,
-        cfg: HostConfig,
+        mut cfg: HostConfig,
     ) -> Result<(Host, HostEvents), HostError> {
+        if cfg.share_capture {
+            cfg.capturer_factory = shared_capture::share(cfg.capturer_factory.clone());
+        }
         let port = endpoint.local_addr()?.port();
         let (tx, rx) = mpsc::unbounded_channel();
         let discovery = if cfg.advertise {
@@ -501,6 +528,7 @@ impl Host {
             cfg.local_activity_factory.clone(),
             cfg.pointer_marker_factory.clone(),
         );
+        let cfg_resume = cfg.session_resume;
         let inner = Arc::new(Inner {
             endpoint,
             password: Mutex::new(cfg.password.clone()),
@@ -513,6 +541,7 @@ impl Host {
             sessions: Mutex::default(),
             shutting_down: AtomicBool::new(false),
             hooks,
+            resume: cfg_resume.map(TicketStore::session_resume),
         });
         let accept_task = tokio::spawn(accept_loop(inner.clone()));
         tracing::info!(
@@ -628,6 +657,25 @@ impl Host {
         true
     }
 
+    /// Pauses (or resumes) one viewer's mouse and keyboard without changing its permissions:
+    /// the host user mutes one colleague while the others keep control. Held keys/buttons of
+    /// that viewer are released, and the viewer is shown the "host has priority" notice while
+    /// paused. Returns `false` for an unknown session.
+    pub fn set_input_paused(&self, id: SessionId, paused: bool) -> bool {
+        let Some(ctl) = lock(&self.inner.sessions).get(&id).cloned() else {
+            return false;
+        };
+        ctl.input_paused.store(paused, Ordering::Release);
+        ctl.pause_changed.notify_one();
+        true
+    }
+
+    /// Whether the session's input is paused; `None` for an unknown session.
+    pub fn input_paused(&self, id: SessionId) -> Option<bool> {
+        let ctl = lock(&self.inner.sessions).get(&id).cloned()?;
+        Some(ctl.input_paused.load(Ordering::Acquire))
+    }
+
     /// The rectangle (physical virtual-desktop pixels) a session currently streams and maps
     /// input to; `None` before capture started or for an unknown session.
     pub fn streamed_monitor(&self, id: SessionId) -> Option<MonitorRect> {
@@ -735,7 +783,12 @@ async fn handle_pending(inner: Arc<Inner>, p: PendingSession) {
             finish_auth(inner, peer, kind, res).await;
         }
         AuthKind::ReconnectTicket => {
-            let res = unattended::redeem(inner.cfg.reconnect_tickets.as_ref(), p).await;
+            let res = resume::redeem(
+                inner.resume.as_ref(),
+                inner.cfg.reconnect_tickets.as_ref(),
+                p,
+            )
+            .await;
             finish_auth(inner, peer, kind, res).await;
         }
     }
@@ -898,6 +951,8 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         perms: AtomicU16::new(perms.0),
         stop: Notify::new(),
         perms_changed: Notify::new(),
+        input_paused: AtomicBool::new(false),
+        pause_changed: Notify::new(),
     });
     if inner.shutting_down.load(Ordering::Acquire) {
         session.close(ByeReason::UserClosed).await;
@@ -984,6 +1039,16 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     monitor_poll.reset();
     let mut active_open = true;
     let mut priority_open = true;
+    // What the viewer was last told about input priority: the local user's priority or the
+    // host user's pause, whichever holds.
+    let mut local_active = false;
+    let mut paused = false;
+    // Session resume: a fresh ticket now and on every renewal / permission change.
+    let mut resume_store = inner.resume.clone();
+    let mut resume_tick = tokio::time::interval(resume::renew_every(
+        inner.cfg.session_resume.unwrap_or(RESUME_TICKET_TTL),
+    ));
+    resume_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let reason = loop {
         // Publish the monitor list whenever it (or the active monitor) differs from what the
         // viewer last saw.
@@ -1014,14 +1079,44 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 // The list is re-sent at the top of the loop if the active index differs.
             }
             p = prio_rx.recv(), if priority_open => match p {
-                Some(local_active) => {
-                    tracing::info!(session = id.0, local_active, "host input priority changed");
-                    if let Err(e) = session.send(&Message::HostInputPriority { local_active }).await {
-                        break EndReason::ConnectionLost(e.to_string());
+                Some(active) => {
+                    tracing::info!(session = id.0, local_active = active, "host input priority changed");
+                    let was = local_active || paused;
+                    local_active = active;
+                    if was != (local_active || paused) {
+                        let msg = Message::HostInputPriority { local_active: local_active || paused };
+                        if let Err(e) = session.send(&msg).await {
+                            break EndReason::ConnectionLost(e.to_string());
+                        }
                     }
                 }
                 None => priority_open = false,
             },
+            _ = ctl.pause_changed.notified() => {
+                let now = ctl.input_paused.load(Ordering::Acquire);
+                if now == paused {
+                    continue;
+                }
+                tracing::info!(session = id.0, paused = now, "host user changed input pause");
+                let was = local_active || paused;
+                paused = now;
+                if paused {
+                    let _ = input_tx.send(InputEvent::ReleaseAll);
+                }
+                if was != (local_active || paused) {
+                    let msg = Message::HostInputPriority { local_active: local_active || paused };
+                    if let Err(e) = session.send(&msg).await {
+                        break EndReason::ConnectionLost(e.to_string());
+                    }
+                }
+            }
+            _ = resume_tick.tick(), if resume_store.is_some() => {
+                if let Some(store) = &resume_store {
+                    if let Err(e) = resume::send_ticket(store, &session, current).await {
+                        break EndReason::ConnectionLost(e.to_string());
+                    }
+                }
+            }
             Some(()) = blocked_rx.recv() => {
                 inner.emit(HostEvent::InputBlocked { id });
             }
@@ -1054,10 +1149,18 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 if let Err(e) = session.send(&Message::Permissions(new)).await {
                     break EndReason::ConnectionLost(e.to_string());
                 }
+                // The held resume ticket must not grant the old permissions.
+                if let Some(store) = &resume_store {
+                    if let Err(e) = resume::send_ticket(store, &session, current).await {
+                        break EndReason::ConnectionLost(e.to_string());
+                    }
+                }
             }
             msg = session.recv() => match msg {
                 Ok(Message::InputEvent(ev)) => {
-                    if input_allowed(current, &ev) {
+                    if paused {
+                        tracing::trace!(?ev, "input dropped: paused by the host user");
+                    } else if input_allowed(current, &ev) {
                         let _ = input_tx.send(ev);
                     } else {
                         tracing::trace!(?ev, "input blocked by permissions");
@@ -1087,6 +1190,13 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
                 Ok(other) => match perf.handle(&session, current, other).await {
+                    Ok(Some(msg @ Message::RestartRemote { reconnect: true })) => {
+                        // The restart ticket must stay the one the viewer holds.
+                        if let Some(store) = resume_store.take() {
+                            store.revoke_peer(&peer.fingerprint);
+                        }
+                        route_to_feature(&features, current, id, msg);
+                    }
                     Ok(None) => {}
                     Ok(Some(other)) => route_to_feature(&features, current, id, other),
                     Err(e) => break EndReason::ConnectionLost(e.to_string()),
@@ -1105,6 +1215,12 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     lock(&inner.sessions).remove(&id);
     unattended::revoke_after_session(
         inner.cfg.reconnect_tickets.as_ref(),
+        &peer,
+        &reason,
+        inner.shutting_down.load(Ordering::Acquire),
+    );
+    resume::after_session(
+        inner.resume.as_ref(),
         &peer,
         &reason,
         inner.shutting_down.load(Ordering::Acquire),

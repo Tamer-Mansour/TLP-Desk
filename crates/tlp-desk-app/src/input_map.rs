@@ -185,10 +185,72 @@ pub fn wheel_event(unit: egui::MouseWheelUnit, delta: Vec2) -> Option<InputEvent
     (dx != 0 || dy != 0).then_some(InputEvent::MouseWheel { dx, dy })
 }
 
+/// Wheel events with the sub-unit remainder carried over (TLP-multiviewer): precision
+/// touchpads and smooth-scrolling mice report many tiny steps, and rounding each one to whole
+/// `WHEEL_DELTA` units on its own would lose slow scrolling. Every event is still sent at
+/// once (never coalesced per frame).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct WheelAccumulator {
+    rest: Vec2,
+}
+
+impl WheelAccumulator {
+    /// The wheel event for this delta, including what earlier events left over.
+    pub fn event(&mut self, unit: egui::MouseWheelUnit, delta: Vec2) -> Option<InputEvent> {
+        let notches = match unit {
+            egui::MouseWheelUnit::Line => delta,
+            egui::MouseWheelUnit::Point => delta / POINTS_PER_NOTCH,
+            egui::MouseWheelUnit::Page => delta * 3.0,
+        };
+        let raw = notches * WHEEL_DELTA + self.rest;
+        if !raw.x.is_finite() || !raw.y.is_finite() {
+            self.rest = Vec2::ZERO;
+            return None;
+        }
+        let whole = Vec2::new(
+            raw.x.round().clamp(-32767.0, 32767.0),
+            raw.y.round().clamp(-32767.0, 32767.0),
+        );
+        // Only a sub-unit remainder is kept: a clamped huge delta does not pile up.
+        self.rest = (raw - whole).clamp(Vec2::splat(-0.5), Vec2::splat(0.5));
+        let (dx, dy) = (-(whole.x as i16), whole.y as i16);
+        (dx != 0 || dy != 0).then_some(InputEvent::MouseWheel { dx, dy })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use eframe::egui::{pos2, vec2};
+
+    /// Many tiny touchpad steps add up to the same scroll as one big one.
+    #[test]
+    fn tiny_wheel_steps_are_not_lost_to_rounding() {
+        let mut acc = WheelAccumulator::default();
+        let mut total = 0i32;
+        // 0.1 point steps: each is 0.3 WHEEL_DELTA units, zero when rounded alone.
+        for _ in 0..400 {
+            if let Some(InputEvent::MouseWheel { dy, .. }) =
+                acc.event(egui::MouseWheelUnit::Point, vec2(0.0, 0.1))
+            {
+                total += i32::from(dy);
+            }
+        }
+        assert_eq!(
+            wheel_event(egui::MouseWheelUnit::Point, vec2(0.0, 0.1)),
+            None
+        );
+        assert!((total - 120).abs() <= 1, "{total}");
+        // Whole notches pass straight through, horizontal flipped like `wheel_event`.
+        assert_eq!(
+            acc.event(egui::MouseWheelUnit::Line, vec2(1.0, -2.0)),
+            wheel_event(egui::MouseWheelUnit::Line, vec2(1.0, -2.0))
+        );
+        assert_eq!(
+            acc.event(egui::MouseWheelUnit::Line, vec2(f32::NAN, 0.0)),
+            None
+        );
+    }
 
     /// The pointer is sent as a fraction of the displayed image, not in video pixels, so a
     /// 1920x1200 video of a 3840x2400 host monitor still clicks the right physical pixel.

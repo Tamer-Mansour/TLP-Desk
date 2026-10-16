@@ -13,6 +13,7 @@
 //!
 //! Nothing here contacts anything outside the local network.
 
+mod multiviewer;
 mod unattended;
 
 use std::collections::HashMap;
@@ -218,6 +219,9 @@ struct State {
     reconnects: HashMap<SessionId, AbortHandle>,
     /// Who is behind each open accept prompt (to log declines and timeouts).
     request_peers: HashMap<HostRequestId, tlp_desk_net::PeerInfo>,
+    /// Viewer sessions that asked their host to restart: their ticket is a restart ticket
+    /// (TLP-multiviewer: any other ticket only resumes after a network drop).
+    restart_requested: std::collections::HashSet<SessionId>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -1642,6 +1646,14 @@ impl Backend for RealBackend {
             (None, Some(id)) => self.inner.chat.send_host(id.0, text),
             (None, None) => Err(ChatSendError::Unavailable),
         }
+    }
+
+    fn host_set_input_paused(&self, session: SessionId, paused: bool) {
+        self.inner.set_input_paused(session, paused);
+    }
+
+    fn host_set_view_only(&self, session: SessionId, view_only: bool) {
+        self.inner.set_view_only(session, view_only);
     }
 
     fn set_chat_allowed(&self, session: SessionId, allowed: bool) {

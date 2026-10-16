@@ -478,6 +478,10 @@ pub enum BackendEvent {
         session: SessionId,
         error: ConnectError,
     },
+    /// Viewer (TLP-multiviewer): the connection dropped without a goodbye; the backend is
+    /// resuming the session with the host's resume ticket (no new Accept). `ReconnectAttempt`,
+    /// `Reconnected` and `ReconnectFailed` follow as for a restart.
+    Reconnecting { session: SessionId },
 
     // --- device info (TLP-cli-devinfo) ---
     /// The host answered [`Backend::request_device_info`] (already sanitized).
@@ -850,6 +854,19 @@ pub trait Backend: Send + Sync {
             allowed,
             "port forwarding not supported"
         );
+    }
+
+    // multi-viewer (TLP-multiviewer)
+    /// Host side: pause (or resume) one connected viewer's mouse and keyboard without
+    /// changing its permissions; the other viewers keep control.
+    fn host_set_input_paused(&self, session: SessionId, paused: bool) {
+        tracing::debug!(session = session.0, paused, "input pause not supported");
+    }
+
+    /// Host side: take mouse and keyboard away from one connected viewer (`true`) or give
+    /// both back (`false`), live.
+    fn host_set_view_only(&self, session: SessionId, view_only: bool) {
+        tracing::debug!(session = session.0, view_only, "view-only not supported");
     }
 
     // whiteboard (TLP-whiteboard)

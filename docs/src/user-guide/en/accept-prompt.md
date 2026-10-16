@@ -69,4 +69,27 @@ As long as anyone is connected to your PC, a coloured bar stays at the top of th
   resumes about one second after you stop. Anything they were holding down (a key, a mouse button)
   is released. They see a message that you are using the PC.
 
+## Several people at once
+
+Two or more colleagues can be connected and in control at the same time. Each one has their own
+picture (they can even watch different monitors), their own permissions and their own pointer
+marker; one leaving does not disturb the others. While more than one person is connected, each
+line of the banner has two extra switches:
+
+- **View only** takes the mouse and keyboard away from that person. They still see the screen.
+  Untick it to give control back.
+- **Pause input** ignores that person's mouse and keyboard for now without changing what they are
+  allowed to do; they see the same "the other person is using the PC" message. Untick it to let
+  them continue.
+
+Your own mouse and keyboard still win over everyone.
+
+## Long sessions and network hiccups
+
+Nothing ends a session by itself: no time limit, no idle timeout. If the network drops for a
+moment, the session simply continues. If it stays down for longer (more than about 15 seconds),
+the viewer reconnects on its own for up to two minutes, **without a new Accept**, and with exactly
+the permissions you allow at that moment. Ending a session yourself (End session, View permission
+removed, closing TLP-Desk) always ends it for good: that person needs a new Accept to come back.
+
 To stop the session for good, click **End session** — or simply close TLP-Desk.

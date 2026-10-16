@@ -88,6 +88,8 @@ struct State {
     path: Option<PathBuf>,
     ttl: Duration,
     instance: u64,
+    /// Session-resume store ([`TicketStore::session_resume`]): the issuing process may redeem.
+    resume: bool,
     entries: Vec<Entry>,
 }
 
@@ -145,9 +147,20 @@ impl TicketStore {
                 path: None,
                 ttl,
                 instance: new_instance(),
+                resume: false,
                 entries: Vec::new(),
             })),
         }
+    }
+
+    /// A store for resuming a running session after a network blip: in memory only, and,
+    /// unlike [`TicketStore::in_memory`], tickets are redeemed by the same process that issued
+    /// them (there is no restart to wait for). All other rules hold: hashed, single use,
+    /// bound to the viewer's fingerprint, expiring after `ttl`.
+    pub fn session_resume(ttl: Duration) -> Self {
+        let store = Self::in_memory(ttl);
+        store.lock().resume = true;
+        store
     }
 
     /// Loads the store persisted at `path` (missing file = empty). Expired and malformed lines
@@ -162,6 +175,7 @@ impl TicketStore {
                 path: Some(path.to_owned()),
                 ttl,
                 instance: new_instance(),
+                resume: false,
                 entries,
             })),
         })
@@ -258,7 +272,7 @@ impl TicketStore {
         let Some(entry) = s.entries.get(pos).cloned() else {
             return Err(TicketRejected::Unknown);
         };
-        if entry.instance == s.instance && entry.peer == *peer {
+        if !s.resume && entry.instance == s.instance && entry.peer == *peer {
             return Err(TicketRejected::NotRestartedYet);
         }
         s.entries.remove(pos);
@@ -339,6 +353,7 @@ impl TicketStore {
                 path: s.path.clone(),
                 ttl: s.ttl,
                 instance: new_instance(),
+                resume: false,
                 entries,
             })),
         }
@@ -624,5 +639,30 @@ mod tests {
         let shown = format!("{t:?} {store:?}");
         assert!(!shown.contains(&Fingerprint(t.token).to_hex()));
         assert!(!shown.contains(&format!("{:?}", t.token)));
+    }
+
+    #[test]
+    fn session_resume_tickets_work_in_the_same_process_once() {
+        let store = TicketStore::session_resume(Duration::from_secs(120));
+        let viewer = Fingerprint([7; 32]);
+        let other = Fingerprint([8; 32]);
+        let now = now_unix_ms();
+        let t = store.issue(&viewer, 0b111, now).unwrap();
+        assert_eq!(store.redeem(&t.token, &viewer, now), Ok(0b111));
+        assert_eq!(
+            store.redeem(&t.token, &viewer, now),
+            Err(TicketRejected::Unknown),
+            "single use"
+        );
+        let t = store.issue(&viewer, 1, now).unwrap();
+        assert_eq!(
+            store.redeem(&t.token, &other, now),
+            Err(TicketRejected::WrongPeer)
+        );
+        let t = store.issue(&viewer, 1, now).unwrap();
+        assert_eq!(
+            store.redeem(&t.token, &viewer, now + 121_000),
+            Err(TicketRejected::Expired)
+        );
     }
 }

@@ -98,6 +98,13 @@ folder. The host must allow files for the session. From a script:
 `TLP-Desk-cli send-file <target> <paths…> --to <host folder>` and
 `TLP-Desk-cli get-file <target> <host paths…> --to <folder>`.
 
+## If the connection drops
+
+If the network drops for longer than a moment, the picture dims and **Connection lost.
+Reconnecting…** appears. TLP-Desk reconnects on its own for up to two minutes, without asking the
+other person to accept again, and the session continues where it was. Click **Stop waiting** to
+give up. If the other person ended the session on purpose, you are not reconnected.
+
 ## Ending the session
 
 Click **Disconnect** (red, at the end of the toolbar). If the other side ends the session, you see

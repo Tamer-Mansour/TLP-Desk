@@ -149,6 +149,8 @@ pub struct App {
     pub recordings: RecordingsUi,
     /// Recent clipboard activity of host sessions (banner indicator, TLP-clipboard).
     pub host_clipboard: crate::ui::clipboard::HostClipboard,
+    /// Per-viewer Pause input / View only toggles in the banner (TLP-multiviewer).
+    pub host_input: crate::ui::viewer_input::HostInputControls,
     /// "These files already exist" questions (viewer downloads, viewer uploads to this host).
     pub conflicts: crate::ui::transfer_conflict::ConflictDialogs,
     /// Files moving to and from this host: list, window and notices (TLP-transfer-ux).
@@ -222,6 +224,7 @@ impl App {
             conn_log: Default::default(),
             recordings: RecordingsUi::default(),
             host_clipboard: Default::default(),
+            host_input: Default::default(),
             conflicts: Default::default(),
             host_transfers: Default::default(),
             accept_popups: Default::default(),
@@ -473,6 +476,7 @@ impl App {
                 }
                 BackendEvent::SessionEnded { session, reason } => {
                     self.host_sessions.retain(|(id, _)| *id != session);
+                    self.host_input.retain(|s| s != session);
                     if self.host_sessions.is_empty() {
                         // Privacy mode never outlives the last session.
                         self.host_privacy = false;
@@ -548,6 +552,11 @@ impl App {
                 BackendEvent::RemoteRestarting { session } => {
                     if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
                         s.unattended.on_restarting();
+                    }
+                }
+                BackendEvent::Reconnecting { session } => {
+                    if let Some(s) = self.session.as_mut().filter(|s| s.id == session) {
+                        s.unattended.on_network_lost();
                     }
                 }
                 BackendEvent::ReconnectAttempt { session, attempt } => {
@@ -802,6 +811,14 @@ impl App {
                                 *session,
                                 self.host_tunnels.get(session),
                             );
+                            // several viewers at once (TLP-multiviewer)
+                            if self.host_sessions.len() > 1
+                                || self.host_input.is_paused(*session)
+                                || self.host_input.is_view_only(*session)
+                            {
+                                self.host_input
+                                    .controls(ui, tx, self.backend.as_ref(), *session);
+                            }
                             // chat (TLP-chat)
                             if let Some(chat) = self.host_chats.get(session) {
                                 if chat_ui::chat_toggle(ui, tx, chat) {

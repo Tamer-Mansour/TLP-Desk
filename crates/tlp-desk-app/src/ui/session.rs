@@ -96,6 +96,8 @@ pub struct ViewerSession {
     pub audio: super::audio::AudioControls,
     /// Scancode / Unicode-text routing of typed characters (`text_route`).
     pub typing: TextRouter,
+    /// High-resolution wheel remainder (TLP-multiviewer).
+    wheel: input_map::WheelAccumulator,
     /// Where the toolbar put its items in the last frame (responsive layout, tests).
     pub toolbar_layout: toolbar::ToolbarLayout,
 }
@@ -155,6 +157,7 @@ impl ViewerSession {
             transfers: TransferPanel::new(),
             audio: Default::default(),
             typing: TextRouter::default(),
+            wheel: Default::default(),
             toolbar_layout: Default::default(),
         }
     }
@@ -694,7 +697,7 @@ impl ViewerSession {
                 }
                 egui::Event::MouseWheel { unit, delta, .. } if mouse_ok => {
                     if hover.is_some_and(|p| visible.contains(p)) {
-                        if let Some(w) = input_map::wheel_event(unit, delta) {
+                        if let Some(w) = self.wheel.event(unit, delta) {
                             self.send(backend, w);
                         }
                     }
