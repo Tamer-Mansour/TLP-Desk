@@ -5,6 +5,7 @@
 //! [`PcmSource`] on the device's own clock. Both stop when their handle is dropped.
 
 pub mod fake;
+mod monitor;
 mod system;
 
 use tokio::sync::mpsc;

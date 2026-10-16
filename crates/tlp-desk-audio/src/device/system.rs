@@ -1,4 +1,5 @@
-//! The real sound card through `cpal`: WASAPI on Windows.
+//! The real sound card through `cpal`: WASAPI on Windows, ALSA (PulseAudio/PipeWire through
+//! their ALSA plugins) on Linux.
 //!
 //! Loopback capture is WASAPI's documented way to record "what you hear": an *input* stream
 //! opened on a *render* (output) endpoint, which cpal maps to `AUDCLNT_STREAMFLAGS_LOOPBACK`
@@ -68,11 +69,7 @@ pub struct SystemCapture;
 impl AudioCapture for SystemCapture {
     fn start(&self, sink: PcmSink) -> Result<DeviceHandle, AudioError> {
         run_device("audio-loopback", move || {
-            let host = cpal::default_host();
-            let device = host
-                .default_output_device()
-                .ok_or(AudioError::NoDevice("output"))?;
-            let supported = device.default_output_config().map_err(dev_err)?;
+            let (device, supported) = loopback_device(&cpal::default_host())?;
             let config = supported.config();
             tracing::info!(
                 rate = config.sample_rate,
@@ -90,6 +87,50 @@ impl AudioCapture for SystemCapture {
             }
         })
     }
+}
+
+/// The device whose input stream is "what the speakers play": the default render endpoint
+/// itself on Windows (WASAPI loopback).
+#[cfg(not(target_os = "linux"))]
+fn loopback_device(
+    host: &cpal::Host,
+) -> Result<(cpal::Device, cpal::SupportedStreamConfig), AudioError> {
+    let device = host
+        .default_output_device()
+        .ok_or(AudioError::NoDevice("output"))?;
+    let supported = device.default_output_config().map_err(dev_err)?;
+    Ok((device, supported))
+}
+
+/// On Linux the loopback is a PulseAudio/PipeWire *monitor source*, which ALSA applications
+/// see as an ordinary capture device. See [`super::monitor`] for how it is chosen; without one
+/// the capture fails instead of recording the microphone.
+#[cfg(target_os = "linux")]
+fn loopback_device(
+    host: &cpal::Host,
+) -> Result<(cpal::Device, cpal::SupportedStreamConfig), AudioError> {
+    let devices: Vec<cpal::Device> = host.input_devices().map_err(dev_err)?.collect();
+    let names: Vec<String> = devices
+        .iter()
+        .map(|d| {
+            d.description()
+                .map(|d| d.name().to_string())
+                .unwrap_or_default()
+        })
+        .collect();
+    let hint = std::env::var(super::monitor::SOURCE_ENV).ok();
+    let idx = super::monitor::pick_monitor(&names, hint.as_deref()).ok_or_else(|| {
+        AudioError::Device(format!(
+            "no monitor capture device found for the system sound (set {} to a device name,              see docs/src/dev/linux.md)",
+            super::monitor::SOURCE_ENV
+        ))
+    })?;
+    let device = devices
+        .into_iter()
+        .nth(idx)
+        .ok_or(AudioError::NoDevice("monitor"))?;
+    let supported = device.default_input_config().map_err(dev_err)?;
+    Ok((device, supported))
 }
 
 fn open_capture<T>(
