@@ -563,10 +563,13 @@ impl ViewerSession {
             ));
             lines.push((S::StatBitrate, format::bitrate(s.bitrate_kbps, tx.lang, d)));
         }
-        lines.push((
-            S::StatResolution,
-            tx.digits(&format!("{}×{}", self.frame_size[0], self.frame_size[1])),
-        ));
+        // "1280×800 · Q≈24": the size the host currently streams (the adaptive controller
+        // lowers it before it lets the picture get blurry) and how finely it is quantised.
+        let mut resolution = format!("{}×{}", self.frame_size[0], self.frame_size[1]);
+        if let Some(qp) = self.stats.map(|s| s.qp).filter(|&q| q > 0) {
+            resolution.push_str(&format!(" · Q≈{qp}"));
+        }
+        lines.push((S::StatResolution, tx.digits(&resolution)));
         lines.push((
             S::StatDuration,
             ltr_isolate(&format::duration(

@@ -11,6 +11,7 @@
 //! * `--encoder` picks OpenH264 (`sw`, default), the Media Foundation hardware encoder (`hw`,
 //!   on the GPU chosen by `--adapter`), or `auto` (what the host uses: hardware with fallback).
 //!   `--threads`, `--complexity`, `--downscale` and `--screen` only apply to `sw`.
+//! * `--quality` measures PSNR/SSIM on text-heavy scenes at several bitrates (see `quality.rs`).
 //! * `--synthetic 1920x1080` skips screen capture entirely and encodes generated desktop-like
 //!   frames (gradient, scrolling text block, moving box; `--noise` adds a scrolling noise block
 //!   that saturates the bitrate). It reports encode time, the CPU used during encode calls,
@@ -49,6 +50,8 @@ use tlp_desk_codec::{
     H264Complexity, H264Decoder, H264Encoder, H264Tuning, VideoDecoder, VideoEncoder,
 };
 
+#[cfg(windows)]
+mod quality;
 mod synthetic;
 
 /// NVIDIA Optimus laptops only let a process open the NVIDIA encoder MFT when the process runs
@@ -90,6 +93,10 @@ struct Args {
     pipelined: bool,
     animate: bool,
     conv: bool,
+    quality: bool,
+    frames: u32,
+    bpps: Vec<f64>,
+    scene: Option<String>,
 }
 
 fn parse_size(v: &str, flag: &str) -> (u32, u32) {
@@ -118,6 +125,10 @@ fn parse_args() -> Args {
         pipelined: false,
         animate: false,
         conv: false,
+        quality: false,
+        frames: 90,
+        bpps: Vec::new(),
+        scene: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -162,6 +173,23 @@ fn parse_args() -> Args {
             "--pipelined" => a.pipelined = true,
             "--animate" => a.animate = true,
             "--conv" => a.conv = true,
+            "--quality" => a.quality = true,
+            "--frames" => a.frames = val().parse().expect("--frames"),
+            "--scene" => a.scene = Some(val()),
+            "--bpp" => {
+                a.bpps = val()
+                    .split(',')
+                    .map(|v| v.trim().parse().expect("--bpp list of numbers"))
+                    .collect()
+            }
+            "--qp" => {
+                let v = val();
+                let (lo, hi) = v.split_once(':').expect("--qp MIN:MAX");
+                a.tuning.qp = tlp_desk_codec::QpBounds {
+                    min: lo.parse().expect("--qp min"),
+                    max: hi.parse().expect("--qp max"),
+                };
+            }
             "--downscale" => {
                 a.tuning.downscale = match val().as_str() {
                     "auto" => Downscale::Auto,
@@ -392,7 +420,8 @@ fn make_encoder(args: &Args, config: EncoderConfig) -> (Box<dyn VideoEncoder>, (
         #[cfg(windows)]
         EncoderChoice::Hardware => {
             let adapter = tlp_desk_codec::HwAdapter::parse(&args.adapter).expect("--adapter");
-            let enc = tlp_desk_codec::MfEncoder::new(config, adapter).expect("hardware encoder");
+            let enc = tlp_desk_codec::MfEncoder::with_qp(config, adapter, args.tuning.qp)
+                .expect("hardware encoder");
             println!("hardware encoder: {:?}", enc.info());
             let size = enc.encoded_size();
             (Box::new(enc), size)
@@ -407,6 +436,7 @@ fn make_encoder(args: &Args, config: EncoderConfig) -> (Box<dyn VideoEncoder>, (
             #[allow(clippy::needless_update)]
             let options = EncoderOptions {
                 preference: EncoderPreference::Auto,
+                qp: args.tuning.qp,
                 ..EncoderOptions::from_env()
             };
             let enc = new_encoder_with(config, &options).expect("encoder");
@@ -421,6 +451,11 @@ fn main() {
     let args = parse_args();
     #[cfg(windows)]
     make_dpi_aware();
+    #[cfg(windows)]
+    if args.quality {
+        quality::run(&args, args.synthetic.unwrap_or((1920, 1080)));
+        return;
+    }
     if let Some(size) = args.synthetic {
         synthetic::run(&args, size);
         return;

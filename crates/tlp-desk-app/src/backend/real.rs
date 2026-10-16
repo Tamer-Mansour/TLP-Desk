@@ -1171,6 +1171,7 @@ impl Inner {
                         latency_ms: s.latency_ms,
                         latency_synced: s.latency_synced,
                         bitrate_kbps: s.bitrate_kbps.max(0.0).round() as u32,
+                        qp: s.qp.clamp(0.0, 51.0).round() as u8,
                     },
                 }),
                 ViewerEvent::HostInputPriority(local_active) => {

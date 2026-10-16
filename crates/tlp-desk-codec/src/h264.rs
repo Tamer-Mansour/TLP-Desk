@@ -27,6 +27,8 @@ pub struct H264Tuning {
     /// OpenH264's screen-content mode: noticeably smaller output for text/UI, but 2-3x the
     /// CPU per frame and it does not use multiple threads. Off by default (latency first).
     pub screen_content: bool,
+    /// Quantiser limits; [`QpBounds::FLOOR`] by default.
+    pub qp: crate::QpBounds,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +56,7 @@ impl Default for H264Tuning {
             complexity: H264Complexity::Low,
             downscale: Downscale::Auto,
             screen_content: false,
+            qp: crate::QpBounds::FLOOR,
         }
     }
 }
@@ -131,6 +134,7 @@ impl H264Encoder {
             threads,
             complexity: tuning.complexity,
             screen_content: tuning.screen_content,
+            qp: tuning.qp,
         })?;
         Ok(Self {
             config,
@@ -258,6 +262,7 @@ mod ffi {
         pub threads: u16,
         pub complexity: H264Complexity,
         pub screen_content: bool,
+        pub qp: crate::QpBounds,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,6 +394,11 @@ mod ffi {
             // big content changes into IDRs, which cost latency, so keep it off.
             params.bEnableSceneChangeDetect = p.screen_content;
             params.bEnableLongTermReference = false;
+            // Quality floor: rate control never quantises coarser than max_qp (H.264 range
+            // 0..=51; OpenH264 itself accepts 0..=51 with min <= max).
+            let max_qp = i32::from(p.qp.max.clamp(1, 51));
+            params.iMaxQp = max_qp;
+            params.iMinQp = i32::from(p.qp.min).clamp(0, max_qp);
             params.iEntropyCodingModeFlag = 0; // CAVLC (constrained baseline)
 
             let layer = &mut params.sSpatialLayers[0];
