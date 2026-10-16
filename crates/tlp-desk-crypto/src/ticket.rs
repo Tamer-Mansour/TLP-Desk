@@ -156,27 +156,7 @@ impl TicketStore {
     /// # Errors
     /// The file exists but cannot be read.
     pub fn load(path: &Path, ttl: Duration) -> Result<Self, CryptoError> {
-        let text = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(e.into()),
-        };
-        let now = now_unix_ms();
-        let mut entries = Vec::new();
-        for (n, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            match parse_line(line) {
-                Some(e) if e.expires_unix_ms > now => entries.push(e),
-                Some(_) => {}
-                None => tracing::warn!(line = n + 1, "ignoring malformed reconnect ticket line"),
-            }
-            if entries.len() >= MAX_TICKETS {
-                break;
-            }
-        }
+        let entries = read_entries(path)?;
         Ok(Self {
             inner: Arc::new(Mutex::new(State {
                 path: Some(path.to_owned()),
@@ -185,6 +165,28 @@ impl TicketStore {
                 entries,
             })),
         })
+    }
+
+    /// Re-reads a persisted store from its file (audit F5: credentials changed by another
+    /// process while the service runs). Tickets no longer on file are dropped (revocations
+    /// count); tickets this process issued keep their instance, so they still cannot be
+    /// redeemed before the restart. No-op for an in-memory store.
+    ///
+    /// # Errors
+    /// The file exists but cannot be read (the store is left unchanged).
+    pub fn reload(&self) -> Result<(), CryptoError> {
+        let mut s = self.lock();
+        let Some(path) = s.path.clone() else {
+            return Ok(());
+        };
+        let mut fresh = read_entries(&path)?;
+        for e in &mut fresh {
+            if let Some(old) = s.entries.iter().find(|o| ct_eq(&o.hash, &e.hash)) {
+                e.instance = old.instance;
+            }
+        }
+        s.entries = fresh;
+        Ok(())
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -341,6 +343,32 @@ impl TicketStore {
             })),
         }
     }
+}
+
+/// The unexpired, well-formed entries of the store file (missing file = none).
+fn read_entries(path: &Path) -> Result<Vec<Entry>, CryptoError> {
+    let text = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let now = now_unix_ms();
+    let mut entries = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        match parse_line(line) {
+            Some(e) if e.expires_unix_ms > now => entries.push(e),
+            Some(_) => {}
+            None => tracing::warn!(line = n + 1, "ignoring malformed reconnect ticket line"),
+        }
+        if entries.len() >= MAX_TICKETS {
+            break;
+        }
+    }
+    Ok(entries)
 }
 
 fn parse_line(line: &str) -> Option<Entry> {
@@ -539,6 +567,30 @@ mod tests {
             rebooted.redeem(&t.token, &fp(4), now + 2),
             Err(TicketRejected::Unknown)
         );
+    }
+
+    /// Audit F5: a reload honours revocations written by another process and keeps the
+    /// "not before the restart" rule for tickets this instance issued.
+    #[test]
+    fn reload_drops_revoked_tickets_and_keeps_own_instance() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(TICKETS_FILE);
+        let store = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        let now = now_unix_ms();
+        let mine = store.issue(&fp(1), 1, now).unwrap();
+        store.issue(&fp(2), 2, now).unwrap();
+        // Another process revokes peer 2 on disk.
+        let other = TicketStore::load(&path, DEFAULT_TICKET_TTL).unwrap();
+        assert_eq!(other.revoke_peer(&fp(2)), 1);
+        store.reload().unwrap();
+        assert_eq!(store.len(), 1);
+        assert!(!store.has_ticket(&fp(2), now));
+        assert_eq!(
+            store.redeem(&mine.token, &fp(1), now + 1),
+            Err(TicketRejected::NotRestartedYet)
+        );
+        // In-memory stores have nothing to reload.
+        TicketStore::in_memory(DEFAULT_TICKET_TTL).reload().unwrap();
     }
 
     #[test]
