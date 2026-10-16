@@ -13,11 +13,13 @@
 //! The card itself is drawn by [`crate::ui::accept_window`], which the main window also uses
 //! for its fallback dialog.
 
+pub mod launcher;
 pub mod protocol;
 pub mod run;
 #[cfg(windows)]
 mod windows;
 
+pub use launcher::{AcceptPopups, PopupResult, PromptHandle, PromptPoll, PromptSpawner};
 pub use protocol::{Outcome, PromptAuth, PromptDecision, PromptRequest, PromptTheme};
 pub use run::{dispatch, ACCEPT_PROMPT_ARG};
 
