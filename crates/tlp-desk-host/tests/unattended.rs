@@ -366,7 +366,9 @@ async fn restart_and_reconnect_with_ticket() {
         "127.0.0.1:0".parse().unwrap(),
         tickets,
         power.clone(),
-        |_| {},
+        // Only the restart ticket here: a session-resume ticket (sent at session start) would
+        // be the first `TicketReceived` this test waits for.
+        |c| c.session_resume = None,
     )
     .await;
     let addr = host.endpoint().local_addr().unwrap();
