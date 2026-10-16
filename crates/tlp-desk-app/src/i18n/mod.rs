@@ -191,6 +191,7 @@ strings! {
     PermissionViewOnly => "The host allows viewing only.", "المضيف يسمح بالعرض فقط.";
     HostUsingInput => "The person at the other device is using the mouse or keyboard. Your control resumes when they stop.", "الشخص على الجهاز الآخر يستخدم الفأرة أو لوحة المفاتيح. يُستأنف تحكمك عندما يتوقف.";
     Screens => "Screen", "الشاشة";
+    AllScreens => "All screens", "كل الشاشات";
     ScreenTooltip => "Screen {n}: {res}", "الشاشة {n}: {res}";
     ScreenPrimary => "Main screen", "الشاشة الرئيسية";
 

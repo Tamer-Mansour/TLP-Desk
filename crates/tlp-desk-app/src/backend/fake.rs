@@ -399,6 +399,7 @@ impl Inner {
                 let stats = SessionStats {
                     fps: window_frames as f32 / elapsed.as_secs_f32(),
                     latency_ms: 14.0 + jitter * 9.0,
+                    latency_synced: true,
                     bitrate_kbps: 9_000 + (jitter * 4_000.0) as u32,
                 };
                 self.emit(BackendEvent::Stats { session, stats });
@@ -649,6 +650,23 @@ impl Backend for FakeBackend {
             session,
             monitors: fake_monitors(),
             active: index,
+        });
+    }
+
+    fn select_all_monitors(&self, session: SessionId) {
+        {
+            let st = self.inner.state();
+            let Some(ctl) = st.sessions.get(&session) else {
+                return;
+            };
+            let mut r = ctl.remote.lock().unwrap_or_else(|e| e.into_inner());
+            r.monitor = crate::ui::perf::ALL_MONITORS;
+            r.cursor = (0, 0);
+        }
+        self.inner.emit(BackendEvent::MonitorsChanged {
+            session,
+            monitors: fake_monitors(),
+            active: crate::ui::perf::ALL_MONITORS,
         });
     }
 
@@ -977,6 +995,13 @@ mod tests {
         assert_eq!((frame.width, frame.height), (1024, 768));
         // Unknown index: nothing happens.
         backend.select_monitor(session, 9);
+        // The "All" view is reported as the sentinel index and can go back to one monitor.
+        backend.select_all_monitors(session);
+        let (_, active) = next_monitors(&mut rx);
+        assert_eq!(active, crate::ui::perf::ALL_MONITORS);
+        backend.select_monitor(session, 0);
+        let (_, active) = next_monitors(&mut rx);
+        assert_eq!(active, 0);
         backend.disconnect(session);
     }
 

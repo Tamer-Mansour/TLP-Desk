@@ -344,6 +344,9 @@ impl App {
                             .on_session_started(&peer, self.backend.as_ref(), self.tx);
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
                         view.clipboard.sync = !self.settings.clipboard_sync_off;
+                        view.quality = self.settings.quality;
+                        self.backend
+                            .request_quality(session, self.settings.quality.to_proto());
                         if let Some(grab) =
                             SystemKeyGrab::start(Arc::downgrade(&self.backend), session, self.hwnd)
                         {

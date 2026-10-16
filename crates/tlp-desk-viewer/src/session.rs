@@ -7,10 +7,13 @@ use std::time::{Duration, Instant};
 use tlp_desk_net::{
     FeatureDispatch, FeatureEvent, FeatureEventSink, FeatureSet, NetError, PeerInfo, Session,
 };
-use tlp_desk_proto::{ByeReason, InputEvent, Message, MonitorDesc, Permissions, VideoFrame};
+use tlp_desk_proto::{
+    ByeReason, InputEvent, Message, MonitorDesc, Permissions, QualitySettings, VideoFrame,
+};
 use tokio::sync::{mpsc, watch, Notify};
 
 use crate::frame::{convert, DecodedFrame, FrameSlot, PixelFormat};
+use crate::perf::{FeedbackWindow, LatencyClock};
 use crate::RepaintFn;
 
 /// Why a viewer session ended.
@@ -36,10 +39,14 @@ pub struct ViewerStats {
     pub bitrate_kbps: f32,
     /// QUIC smoothed round-trip time.
     pub rtt_ms: f32,
-    /// Approximate glass-to-glass latency without display time: host change -> decoded.
-    /// Estimated as RTT/2 + queueing delay above the best frame seen + decode time (the two
-    /// clocks are not synchronized, so this is an estimate).
+    /// Approximate glass-to-glass latency. When [`ViewerStats::latency_synced`]: measured from
+    /// the host capturing the change to the UI taking the frame to draw it, with the two
+    /// clocks synchronized by latency probes (see the `perf` module docs). Otherwise an
+    /// estimate up to "decoded": RTT/2 + queueing delay above the best frame seen + decode
+    /// time.
     pub latency_ms: f32,
+    /// `latency_ms` is the clock-synchronized capture-to-display measurement.
+    pub latency_synced: bool,
     /// Average decode time per frame.
     pub decode_ms: f32,
     pub frames_received: u64,
@@ -98,6 +105,10 @@ struct Shared {
     on_frame: Option<RepaintFn>,
     format: PixelFormat,
     started: Instant,
+    /// Host clock offset from latency probes.
+    clock: Mutex<LatencyClock>,
+    /// What the next `ViewerFeedback` reports.
+    feedback: Mutex<FeedbackWindow>,
     /// Sees every received frame before decoding (session recording).
     tap: Mutex<Option<crate::recording::VideoTap>>,
 }
@@ -110,6 +121,11 @@ impl Shared {
     fn emit(&self, ev: ViewerEvent) {
         let _ = self.events.send(ev);
         self.repaint();
+    }
+
+    /// Microseconds since the session started (the viewer clock of latency probes).
+    fn now_us(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_micros()).unwrap_or(u64::MAX)
     }
 
     fn repaint(&self) {
@@ -189,6 +205,8 @@ impl ViewerSession {
             on_frame,
             format,
             started: Instant::now(),
+            clock: Mutex::new(LatencyClock::new()),
+            feedback: Mutex::new(FeedbackWindow::default()),
             tap: Mutex::new(None),
         });
         let (input_tx, input_rx) = mpsc::unbounded_channel();
@@ -229,6 +247,7 @@ impl ViewerSession {
         tokio::spawn(control_task(shared.clone(), dispatch));
         tokio::spawn(input_task(shared.clone(), input_rx, end_rx.clone()));
         tokio::spawn(stats_task(shared.clone(), end_rx.clone()));
+        tokio::spawn(perf_task(shared.clone(), end_rx.clone()));
 
         (
             ViewerSession {
@@ -287,6 +306,19 @@ impl ViewerSession {
     /// host. Returns `false` once the session has ended.
     pub fn select_monitor(&self, index: u32) -> bool {
         self.ended.borrow().is_none() && self.input.send(Message::SelectMonitor { index }).is_ok()
+    }
+
+    /// Asks the host to stream all monitors as one picture of its virtual desktop
+    /// (non-blocking). Confirmed by [`ViewerEvent::MonitorsChanged`] with `active ==
+    /// u32::MAX`; [`ViewerSession::select_monitor`] goes back to one monitor.
+    pub fn select_all_monitors(&self) -> bool {
+        self.ended.borrow().is_none() && self.input.send(Message::SelectAllMonitors).is_ok()
+    }
+
+    /// Asks the host for another quality preset / size cap / frame rate / bitrate
+    /// (non-blocking; applied live by the host).
+    pub fn set_quality(&self, quality: QualitySettings) -> bool {
+        self.ended.borrow().is_none() && self.input.send(Message::SetQuality(quality)).is_ok()
     }
 
     /// Key identifying this session to features (`FeatureCtx::session_key`,
@@ -360,6 +392,7 @@ async fn video_task(shared: Arc<Shared>, jobs: mpsc::Sender<Job>) {
                 break;
             }
         };
+        lock(&shared.feedback).on_received(frame.seq);
         let arrival = shared.started.elapsed().as_micros() as i64;
         let offset = arrival - frame.timestamp_us as i64;
         let min = min_offset.map_or(offset, |m| m.min(offset));
@@ -398,6 +431,7 @@ fn decode_thread(shared: Arc<Shared>, mut jobs: mpsc::Receiver<Job>, rt: tokio::
     let mut need_keyframe = false;
     while let Some(job) = jobs.blocking_recv() {
         if need_keyframe && !job.frame.keyframe {
+            lock(&shared.feedback).on_skipped();
             continue;
         }
         let t0 = Instant::now();
@@ -409,9 +443,10 @@ fn decode_thread(shared: Arc<Shared>, mut jobs: mpsc::Receiver<Job>, rt: tokio::
                 decoder.recycle(bgra);
                 let done = Instant::now();
                 let c = &shared.counters;
+                let decode_us = (done - t0).as_micros() as u64;
                 c.decoded.fetch_add(1, Ordering::Relaxed);
-                c.decode_us
-                    .fetch_add((done - t0).as_micros() as u64, Ordering::Relaxed);
+                c.decode_us.fetch_add(decode_us, Ordering::Relaxed);
+                lock(&shared.feedback).on_decoded(decode_us);
                 let rtt_half = shared.session.rtt().as_micros() as u64 / 2;
                 let latency =
                     rtt_half + job.queue_delay_us + (done - job.received).as_micros() as u64;
@@ -429,12 +464,17 @@ fn decode_thread(shared: Arc<Shared>, mut jobs: mpsc::Receiver<Job>, rt: tokio::
                     (u64::from(frame.width) << 32) | u64::from(frame.height),
                     Ordering::Relaxed,
                 );
-                shared.frames.publish(frame);
+                // When the host captured this content, on our clock (once probes synced it).
+                let captured = lock(&shared.clock)
+                    .to_viewer_us(job.frame.timestamp_us)
+                    .and_then(|us| shared.started.checked_add(Duration::from_micros(us)));
+                shared.frames.publish_captured(frame, captured);
                 shared.repaint();
             }
             Ok(None) => {}
             Err(e) => {
                 tracing::debug!(%e, seq = job.frame.seq, "decode failed; waiting for a keyframe");
+                lock(&shared.feedback).on_skipped();
                 need_keyframe = true;
                 let session = shared.session.clone();
                 rt.spawn(async move {
@@ -469,6 +509,10 @@ async fn control_task(shared: Arc<Shared>, features: FeatureDispatch) {
                     tracing::debug!(count = monitors.len(), active, "host monitor list");
                     *lock(&shared.monitors) = (monitors.clone(), active);
                     shared.emit(ViewerEvent::MonitorsChanged { monitors, active });
+                }
+                Ok(Message::LatencyEcho { t_viewer_us, t_host_capture_us }) => {
+                    let now = shared.now_us();
+                    lock(&shared.clock).on_echo(t_viewer_us, t_host_capture_us, now);
                 }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
                 Ok(other) => {
@@ -510,6 +554,43 @@ async fn input_task(
     }
 }
 
+/// How often `ViewerFeedback` goes to the host (the controller ticks at the same rate).
+const FEEDBACK_EVERY: Duration = Duration::from_millis(250);
+/// A `LatencyProbe` goes out every this many feedback ticks (every 500 ms).
+const PROBE_EVERY_TICKS: u32 = 2;
+
+/// Sends adaptive-bitrate feedback and latency probes until the session ends.
+async fn perf_task(shared: Arc<Shared>, mut ended: watch::Receiver<Option<EndReason>>) {
+    let mut tick = tokio::time::interval(FEEDBACK_EVERY);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut n = 0u32;
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = wait_ended(&mut ended) => break,
+        }
+        if n % PROBE_EVERY_TICKS == 0 {
+            let probe = Message::LatencyProbe {
+                t_viewer_us: shared.now_us(),
+            };
+            if shared.session.send(&probe).await.is_err() {
+                break;
+            }
+        }
+        n = n.wrapping_add(1);
+        let (decode_us, frames_dropped) = lock(&shared.feedback).take();
+        let rtt_us = u32::try_from(shared.session.rtt().as_micros()).unwrap_or(u32::MAX);
+        let feedback = Message::ViewerFeedback {
+            decode_us,
+            frames_dropped,
+            rtt_us,
+        };
+        if shared.session.send(&feedback).await.is_err() {
+            break;
+        }
+    }
+}
+
 async fn stats_task(shared: Arc<Shared>, mut ended: watch::Receiver<Option<EndReason>>) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     tick.tick().await;
@@ -540,8 +621,12 @@ async fn stats_task(shared: Arc<Shared>, mut ended: watch::Receiver<Option<EndRe
         if frames > 0 {
             s.decode_ms = (dec_us - last_dec_us) as f32 / 1000.0 / frames as f32;
         }
-        if lat_frames > 0 {
+        if let Some(us) = shared.frames.take_display_latency() {
+            s.latency_ms = us as f32 / 1000.0;
+            s.latency_synced = true;
+        } else if lat_frames > 0 {
             s.latency_ms = (lat - last_lat) as f32 / 1000.0 / lat_frames as f32;
+            s.latency_synced = false;
         }
         s.frames_received = c.received.load(Ordering::Relaxed);
         s.frames_decoded = dec;

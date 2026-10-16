@@ -279,7 +279,7 @@ async fn connect(perms: Permissions) -> Harness {
     )));
     let cfg = HostConfig {
         advertise: false,
-        capturer_factory: Arc::new(|_| {
+        capturer_factory: Arc::new(|_, _| {
             Ok(Box::new(FakeCapturer {
                 mon: monitor(),
                 next_at: Instant::now(),

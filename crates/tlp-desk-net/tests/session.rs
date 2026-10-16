@@ -226,6 +226,12 @@ async fn frames_flow_on_control_and_video_streams() {
     assert!(v.send_video(frame(9, true, 1)).is_err());
     assert!(h.recv_video().await.is_err());
 
+    // transport statistics for adaptive bitrate: the host sent the frames above.
+    let st = h.transport_stats();
+    assert!(st.sent_bytes >= 640_000, "{st:?}");
+    assert!(st.sent_packets > 0 && st.cwnd > 0, "{st:?}");
+    assert!(st.rtt.as_nanos() > 0, "{st:?}");
+
     // graceful close
     v.close(ByeReason::UserClosed).await;
     match timeout(T, h.recv()).await.unwrap() {

@@ -13,6 +13,7 @@ use super::chat::{self, ChatState};
 use super::file_browser::FileBrowser;
 use super::icons::{self, Icon};
 use super::key_forward::KeyForwarder;
+use super::perf;
 use super::transfers::{self, TransferPanel};
 use super::whiteboard::WhiteboardUi;
 use super::{theme, widgets};
@@ -20,6 +21,7 @@ use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, Sessi
 use crate::i18n::{format, ltr_isolate, Tx, S};
 use crate::input_map;
 use crate::keygrab::KeyGrab;
+use crate::settings::QualityChoice;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
@@ -61,6 +63,8 @@ pub struct ViewerSession {
     /// Host monitors (picker shown when there are two or more) and the streamed one.
     monitors: Vec<MonitorDesc>,
     active_monitor: u32,
+    /// Quality preset requested from the host (toolbar menu; starts as the Settings default).
+    pub quality: QualityChoice,
     /// Remote device-info window (toolbar button).
     pub device_info: super::device_info::DeviceInfoPanel,
     /// Port forwarding window (TLP-tunnel).
@@ -119,6 +123,7 @@ impl ViewerSession {
             host_input_priority: false,
             monitors: Vec::new(),
             active_monitor: 0,
+            quality: QualityChoice::default(),
             device_info: Default::default(),
             tunnels: Default::default(),
             whiteboard: WhiteboardUi::new(),
@@ -444,10 +449,17 @@ impl ViewerSession {
                     if chat::chat_toggle(ui, tx, &self.chat) {
                         self.chat.set_open(!self.chat.is_open());
                     }
-                    if let Some(index) = self.monitor_picker(ui, tx) {
+                    if let Some(pick) = self.monitor_picker(ui, tx) {
                         // Nothing may stay pressed on the old screen.
                         self.release_all(backend);
-                        backend.select_monitor(self.id, index);
+                        match pick {
+                            Some(index) => backend.select_monitor(self.id, index),
+                            None => backend.select_all_monitors(self.id),
+                        }
+                    }
+                    if let Some(q) = perf::quality_menu(ui, tx, self.quality) {
+                        self.quality = q;
+                        backend.request_quality(self.id, q.to_proto());
                     }
                     if self.grab_on {
                         ui.separator();
@@ -515,10 +527,11 @@ impl ViewerSession {
         }
     }
 
-    /// Buttons "1", "2", ... for the host's monitors (hidden with a single monitor). Returns
-    /// the index the user picked, if it differs from the active one. The active monitor is
-    /// highlighted only once the host confirms the switch.
-    fn monitor_picker(&self, ui: &mut egui::Ui, tx: Tx) -> Option<u32> {
+    /// Buttons "1", "2", ... for the host's monitors plus "All" (hidden with a single
+    /// monitor). Returns what the user picked if it differs from the active view: `Some(index)`
+    /// for one monitor, `None` inside for all of them. The active one is highlighted only once
+    /// the host confirms the switch.
+    fn monitor_picker(&self, ui: &mut egui::Ui, tx: Tx) -> Option<Option<u32>> {
         if self.monitors.len() < 2 {
             return None;
         }
@@ -551,8 +564,11 @@ impl ViewerSession {
                 )
                 .on_hover_text(tip);
             if resp.clicked() && !active {
-                picked = Some(m.index);
+                picked = Some(Some(m.index));
             }
+        }
+        if perf::all_monitors_button(ui, tx, self.active_monitor == perf::ALL_MONITORS) {
+            picked = Some(None);
         }
         picked
     }
@@ -638,10 +654,12 @@ impl ViewerSession {
                     tx.raw(S::UnitFps)
                 ),
             ));
+            // "~" marks the coarse estimate used until the clocks are synchronized.
+            let approx = if s.latency_synced { "" } else { "~" };
             lines.push((
                 S::StatLatency,
                 format!(
-                    "{} {}",
+                    "{approx}{} {}",
                     format::number(f64::from(s.latency_ms), 0, d),
                     tx.raw(S::UnitMs)
                 ),

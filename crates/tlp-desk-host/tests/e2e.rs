@@ -182,7 +182,7 @@ async fn harness(real_capture: bool, tweak: impl FnOnce(&mut HostConfig)) -> Har
     };
     if !real_capture {
         cfg.capturer_factory =
-            Arc::new(|_| Ok(Box::new(FakeCapturer::new()) as Box<dyn ScreenCapturer>));
+            Arc::new(|_, _| Ok(Box::new(FakeCapturer::new()) as Box<dyn ScreenCapturer>));
         cfg.monitor_lister = Arc::new(|| Ok(vec![fake_monitor()]));
     }
     tweak(&mut cfg);
@@ -784,7 +784,7 @@ async fn frame_of_size(s: &ViewerSession, w: u32, h: u32) -> DecodedFrame {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn viewer_switches_monitor_live() {
     let mut h = harness(false, |c| {
-        c.capturer_factory = Arc::new(|i| match i {
+        c.capturer_factory = Arc::new(|i, _| match i {
             0 => Ok(Box::new(FakeCapturer::on(fake_monitor())) as Box<dyn ScreenCapturer>),
             1 => Ok(Box::new(FakeCapturer::on(fake_monitor_2())) as Box<dyn ScreenCapturer>),
             _ => Err(CaptureError::Unsupported),
@@ -985,7 +985,7 @@ async fn slow_encoder_drops_frames_instead_of_queueing() {
     let (p1, p2, log2) = (produced.clone(), produced.clone(), log.clone());
     let mut h = harness(false, move |c| {
         c.fps = 60;
-        c.capturer_factory = Arc::new(move |_| {
+        c.capturer_factory = Arc::new(move |_, _| {
             Ok(Box::new(NumberedCapturer {
                 mon: fake_monitor(),
                 produced: p1.clone(),

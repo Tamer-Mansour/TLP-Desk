@@ -150,7 +150,7 @@ async fn connect(host_limits: ChatLimits) -> Chat {
     let cfg = HostConfig {
         advertise: false,
         default_permissions: DEFAULT_PERMISSIONS | Permissions::CHAT,
-        capturer_factory: Arc::new(|_| {
+        capturer_factory: Arc::new(|_, _| {
             Ok(Box::new(IdleCapturer(monitor())) as Box<dyn ScreenCapturer>)
         }),
         monitor_lister: Arc::new(|| Ok(vec![monitor()])),

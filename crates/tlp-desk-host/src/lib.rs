@@ -30,11 +30,18 @@
 //!   core does not handle go to the feature that claims them, after the permission check
 //!   `Message::required_permissions`. Features report to the UI with [`HostEvent::Feature`].
 //! * **Monitors**: the viewer gets `Message::MonitorList` (after accept, on hot-plug and on
-//!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`.
+//!   switches) and may switch the streamed/controlled monitor with `Message::SelectMonitor`,
+//!   or stream the whole virtual desktop as one picture with `Message::SelectAllMonitors`
+//!   (`MonitorList::active` is then `ALL_MONITORS`; input maps across the bounding box).
+//! * **Performance**: `SetQuality` presets apply live, `ViewerFeedback` and send-side QUIC
+//!   signals drive the adaptive bitrate / frame rate / resolution controller (see
+//!   [`Controller`]), frames identical to the previous one are not encoded, and
+//!   `LatencyProbe` is answered on the session clock of `VideoFrame::timestamp_us`.
 //!
 //! All methods except [`Host::start`] are non-blocking and may be called from any thread.
 #![forbid(unsafe_code)]
 
+mod adapt;
 mod cursor;
 mod device_info;
 mod input;
@@ -49,7 +56,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
-use tlp_desk_capture::{CaptureError, MonitorInfo, ScreenCapturer};
+use tlp_desk_capture::{CaptureError, CaptureOptions, MonitorInfo, ScreenCapturer};
 use tlp_desk_codec::{CodecError, EncoderConfig, VideoEncoder};
 use tlp_desk_crypto::{
     DeviceId, Fingerprint, OneTimeCode, PasswordVerifier, RateLimitConfig, RateLimiter,
@@ -65,6 +72,10 @@ use tlp_desk_proto::{ByeReason, Message, MonitorDesc, Permissions, RejectReason}
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::task::JoinHandle;
 
+pub use adapt::{
+    capture_cap, AdaptDecision, BitrateMode, Congestion, Controller, ControllerConfig,
+    QualityTarget, Signals, ViewerReport,
+};
 pub use cursor::{composite_cursor, scale_shape, CursorOverlay, CursorPatch};
 pub use device_info::{
     limit as limit_device_info, DeviceInfoFeature, DeviceInfoServed, DeviceInfoSource,
@@ -76,8 +87,10 @@ pub use tunnel::{HostTunnelEvent, HostTunnelInfo, HostTunnels, TunnelHostConfig,
 
 pub use whiteboard::{OverlayFactory, WhiteboardHost, WhiteboardHostEvent};
 /// Creates the screen capturer for a monitor index (default: [`open_default_capturer`]).
+/// `CaptureOptions::max_size` carries the size cap of the current quality preset (and the
+/// adaptive resolution step); fakes may ignore it, the encoder follows the frames.
 pub type CapturerFactory =
-    Arc<dyn Fn(u32) -> Result<Box<dyn ScreenCapturer>, CaptureError> + Send + Sync>;
+    Arc<dyn Fn(u32, CaptureOptions) -> Result<Box<dyn ScreenCapturer>, CaptureError> + Send + Sync>;
 /// Creates the video encoder (default: [`tlp_desk_codec::new_encoder`]).
 pub type EncoderFactory =
     Arc<dyn Fn(EncoderConfig) -> Result<Box<dyn VideoEncoder>, CodecError> + Send + Sync>;
@@ -99,17 +112,23 @@ pub type StreamedMonitorFn = Arc<dyn Fn(u64) -> Option<MonitorRect> + Send + Syn
 /// Lists the host's monitors (default: [`tlp_desk_capture::list_monitors`]).
 pub type MonitorLister = Arc<dyn Fn() -> Result<Vec<MonitorInfo>, CaptureError> + Send + Sync>;
 
-/// Largest video frame the default capturer delivers. Bigger monitors are downscaled on the GPU
-/// before readback (3840x2400 -> 1920x1200), which keeps capture + encode well above 60 fps.
+/// Default capture size cap ([`HostConfig::max_capture_size`]). Bigger monitors are downscaled
+/// on the GPU before readback (3840x2400 -> 1920x1200), which keeps capture + encode well above
+/// 60 fps.
 pub const MAX_CAPTURE_SIZE: (u32, u32) = (1920, 1200);
 
 /// The default [`CapturerFactory`]: Windows.Graphics.Capture (DXGI fallback) with frames capped
-/// at [`MAX_CAPTURE_SIZE`]. [`ScreenCapturer::monitor`] still reports the real monitor size.
-pub fn open_default_capturer(monitor: u32) -> Result<Box<dyn ScreenCapturer>, CaptureError> {
-    tlp_desk_capture::open_capturer_opts(
-        monitor,
-        tlp_desk_capture::CaptureOptions::max_size(MAX_CAPTURE_SIZE.0, MAX_CAPTURE_SIZE.1),
-    )
+/// at `options.max_size` ([`MAX_CAPTURE_SIZE`] when `None`). [`ScreenCapturer::monitor`] still
+/// reports the real monitor size.
+pub fn open_default_capturer(
+    monitor: u32,
+    options: CaptureOptions,
+) -> Result<Box<dyn ScreenCapturer>, CaptureError> {
+    let options = CaptureOptions {
+        max_size: Some(options.max_size.unwrap_or(MAX_CAPTURE_SIZE)),
+        ..options
+    };
+    tlp_desk_capture::open_capturer_opts(monitor, options)
 }
 
 /// How often the monitor list is re-read for hot-plug.
@@ -126,6 +145,9 @@ pub struct HostConfig {
     pub monitor: u32,
     /// Target frame rate (default 60).
     pub fps: u32,
+    /// Capture size cap before any `SetQuality` (the `Balanced` preset); frames of bigger
+    /// monitors are scaled down to fit. Default [`MAX_CAPTURE_SIZE`] (1920x1200).
+    pub max_capture_size: (u32, u32),
     /// Permissions for sessions authorized by code/password, and for [`Host::accept`] with
     /// `None`.
     pub default_permissions: Permissions,
@@ -169,6 +191,7 @@ impl Default for HostConfig {
         Self {
             monitor: 0,
             fps: 60,
+            max_capture_size: MAX_CAPTURE_SIZE,
             default_permissions: DEFAULT_PERMISSIONS,
             accept_timeout: Duration::from_secs(60),
             prompt_rate_limit: RateLimitConfig::default(),
@@ -197,6 +220,7 @@ impl std::fmt::Debug for HostConfig {
         f.debug_struct("HostConfig")
             .field("monitor", &self.monitor)
             .field("fps", &self.fps)
+            .field("max_capture_size", &self.max_capture_size)
             .field("default_permissions", &self.default_permissions)
             .field("accept_timeout", &self.accept_timeout)
             .field("allow_one_time_code", &self.allow_one_time_code)
@@ -847,13 +871,20 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     let (fatal_tx, mut fatal_rx) = mpsc::unbounded_channel();
     let (select_tx, select_rx) = watch::channel(inner.cfg.monitor);
     let (active_tx, mut active_rx) = watch::channel(inner.cfg.monitor);
+    // Quality presets, viewer feedback and latency probes (see `adapt`).
+    let (perf, quality_rx) = adapt::PerfControl::new(adapt::QualityTarget::host_default(
+        inner.cfg.max_capture_size,
+        inner.cfg.fps,
+    ));
     let ctx = pipeline::PipelineCtx {
         capturer_factory: inner.cfg.capturer_factory.clone(),
         encoder_factory: inner.cfg.encoder_factory.clone(),
+        monitor_lister: inner.cfg.monitor_lister.clone(),
         monitor: inner.cfg.monitor,
         select: select_rx,
         active: active_tx,
-        fps: inner.cfg.fps,
+        quality: quality_rx,
+        adapt: perf.shared.clone(),
         session: session.clone(),
         keyframe: keyframe.clone(),
         stop: stop.clone(),
@@ -967,8 +998,22 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                         tracing::warn!(session = id.0, index, "viewer selected an unknown monitor; ignoring");
                     }
                 }
+                Ok(Message::SelectAllMonitors) => {
+                    // The whole virtual desktop in one picture; `MonitorList::active` becomes
+                    // `ALL_MONITORS` once the pipeline switched.
+                    if monitors.as_ref().is_some_and(|l| !l.is_empty()) {
+                        tracing::info!(session = id.0, "viewer selected all monitors");
+                        select_tx.send_replace(tlp_desk_capture::ALL_MONITORS);
+                    } else {
+                        tracing::warn!(session = id.0, "all monitors asked for, but the monitor list is unknown; ignoring");
+                    }
+                }
                 Ok(Message::Bye(b)) => break EndReason::Remote(b.reason),
-                Ok(other) => route_to_feature(&features, current, id, other),
+                Ok(other) => match perf.handle(&session, current, other).await {
+                    Ok(None) => {}
+                    Ok(Some(other)) => route_to_feature(&features, current, id, other),
+                    Err(e) => break EndReason::ConnectionLost(e.to_string()),
+                },
                 Err(NetError::Closed) => break EndReason::ConnectionLost("control stream closed".into()),
                 Err(e) => break EndReason::ConnectionLost(e.to_string()),
             }

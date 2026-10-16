@@ -182,7 +182,7 @@ async fn rig_with(perms: Permissions, host_cfg: TunnelHostConfig) -> Rig {
         advertise: false,
         fps: 5,
         default_permissions: perms,
-        capturer_factory: Arc::new(|_| {
+        capturer_factory: Arc::new(|_, _| {
             Ok(Box::new(StillCapturer {
                 mon: monitor(),
                 next_at: Instant::now(),

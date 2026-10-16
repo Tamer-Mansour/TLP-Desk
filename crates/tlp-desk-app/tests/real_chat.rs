@@ -75,7 +75,7 @@ impl Peer {
             known_hosts: KnownHostsStore::File(dir.path().join("known_hosts")),
             host: HostConfig {
                 advertise: false,
-                capturer_factory: Arc::new(|_| {
+                capturer_factory: Arc::new(|_, _| {
                     Ok(Box::new(IdleCapturer(monitor())) as Box<dyn ScreenCapturer>)
                 }),
                 injector_factory: Arc::new(|_| Ok(Box::new(NoInput) as Box<dyn InputInjector>)),

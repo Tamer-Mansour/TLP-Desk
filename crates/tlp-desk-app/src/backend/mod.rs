@@ -287,6 +287,9 @@ pub struct SessionStats {
     pub fps: f32,
     /// Estimated glass-to-glass latency in milliseconds.
     pub latency_ms: f32,
+    /// `latency_ms` is the clock-synchronized capture-to-display measurement (otherwise a
+    /// coarser estimate).
+    pub latency_synced: bool,
     /// Video bitrate in kilobits per second.
     pub bitrate_kbps: u32,
 }
@@ -631,6 +634,14 @@ pub trait Backend: Send + Sync {
     }
 
     // --- perf (TLP-perf) ---
+    /// Viewer side: ask the host to stream every monitor as one picture of its virtual desktop.
+    /// Confirmed by [`BackendEvent::MonitorsChanged`] with `active == u32::MAX`.
+    fn select_all_monitors(&self, session: SessionId) {
+        tracing::debug!(
+            session = session.0,
+            "select_all_monitors not supported by this backend"
+        );
+    }
 
     // --- power (TLP-power) ---
 
