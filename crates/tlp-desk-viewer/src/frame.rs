@@ -1,6 +1,7 @@
 //! Latest-frame mailbox between the decode thread and the UI.
 
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use tlp_desk_capture::BgraFrame;
 
@@ -33,8 +34,12 @@ pub struct DecodedFrame {
 /// when it paints. Frames the UI never took are dropped, so latency cannot build up.
 #[derive(Debug, Default)]
 pub struct FrameSlot {
-    latest: Mutex<Option<DecodedFrame>>,
+    /// The frame and, when the clocks are synchronized, when its content was captured (on
+    /// this machine's clock).
+    latest: Mutex<Option<(DecodedFrame, Option<Instant>)>>,
     spare: Mutex<Option<Vec<u8>>>,
+    /// Capture-to-display latency of the frames taken so far: (sum in microseconds, count).
+    shown: Mutex<(u64, u64)>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -48,14 +53,37 @@ impl FrameSlot {
 
     /// Replaces the pending frame; an unconsumed older frame is dropped (its buffer reused).
     pub fn publish(&self, frame: DecodedFrame) {
-        if let Some(old) = lock(&self.latest).replace(frame) {
+        self.publish_captured(frame, None);
+    }
+
+    /// [`FrameSlot::publish`] with the instant (local clock) the frame's content was captured
+    /// on the host, for the capture-to-display latency measured in [`FrameSlot::take`].
+    pub(crate) fn publish_captured(&self, frame: DecodedFrame, captured: Option<Instant>) {
+        if let Some((old, _)) = lock(&self.latest).replace((frame, captured)) {
             self.recycle(old.pixels);
         }
     }
 
     /// Takes the newest frame if one arrived since the last call.
+    ///
+    /// Taking a frame counts as displaying it for the latency overlay: call it when the frame
+    /// is about to be drawn.
     pub fn take(&self) -> Option<DecodedFrame> {
-        lock(&self.latest).take()
+        let (frame, captured) = lock(&self.latest).take()?;
+        if let Some(at) = captured {
+            let us = u64::try_from(at.elapsed().as_micros()).unwrap_or(u64::MAX);
+            let mut shown = lock(&self.shown);
+            shown.0 = shown.0.saturating_add(us);
+            shown.1 += 1;
+        }
+        Some(frame)
+    }
+
+    /// Average capture-to-display latency (microseconds) of the frames taken since the
+    /// previous call; `None` if none was measured.
+    pub(crate) fn take_display_latency(&self) -> Option<u64> {
+        let (sum, n) = std::mem::take(&mut *lock(&self.shown));
+        sum.checked_div(n)
     }
 
     /// Optionally hand a frame's buffer back after uploading it, to avoid an allocation.
@@ -107,6 +135,34 @@ mod tests {
         assert_eq!(slot.take().map(|f| f.seq), Some(2));
         assert!(slot.take().is_none());
         assert_eq!(slot.take_spare().len(), 4, "dropped frame buffer is reused");
+    }
+
+    #[test]
+    fn taking_a_frame_measures_capture_to_display_latency() {
+        let slot = FrameSlot::new();
+        let frame = |seq| DecodedFrame {
+            width: 1,
+            height: 1,
+            format: PixelFormat::Bgra,
+            pixels: vec![0; 4],
+            seq,
+            host_timestamp_us: 0,
+        };
+        assert_eq!(slot.take_display_latency(), None);
+        // Without a synchronized clock nothing is measured.
+        slot.publish(frame(0));
+        assert!(slot.take().is_some());
+        assert_eq!(slot.take_display_latency(), None);
+        let captured = Instant::now()
+            .checked_sub(std::time::Duration::from_millis(30))
+            .unwrap();
+        slot.publish_captured(frame(1), Some(captured));
+        // A frame replaced before display is not counted.
+        slot.publish_captured(frame(2), Some(captured));
+        assert_eq!(slot.take().map(|f| f.seq), Some(2));
+        let us = slot.take_display_latency().unwrap();
+        assert!((30_000..5_000_000).contains(&us), "{us}");
+        assert_eq!(slot.take_display_latency(), None);
     }
 
     #[test]
