@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn marks_stay_after_their_base_in_screen_order() {
         let line = bidi_line("بَت", BaseDir::Auto).expect("rtl");
-        // Logical: beh(0) fatha(1) teh(2). Screen: teh, then beh with its fatha after it.
+        // Logical: beh(0) fatha(1) taa(2). Screen: taa, then beh with its fatha after it.
         assert_eq!(line.visual_logical, vec![2, 0, 1]);
     }
 }

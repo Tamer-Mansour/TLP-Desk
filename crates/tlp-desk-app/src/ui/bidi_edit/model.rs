@@ -642,7 +642,7 @@ mod tests {
 
     #[test]
     fn backspace_and_delete_remove_whole_clusters() {
-        // beh + fatha + teh: Backspace at the end removes teh, then the beh-with-fatha pair.
+        // beh + fatha + taa: Backspace at the end removes taa, then the beh-with-fatha pair.
         let l = layout("بَت");
         assert_eq!(l.back_range(3), Some(2..3));
         assert_eq!(l.back_range(2), Some(0..2));
