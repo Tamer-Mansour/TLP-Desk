@@ -30,8 +30,8 @@ until it works in Arabic. Check these per milestone as features land.
 - [x] Correct shaping: letters join (initial/medial/final/isolated forms), lam-alef ligatures, harakat (diacritics) render
 - [x] Bidi: mixed Arabic + English/numbers/IDs/IPs display in correct visual order (Unicode Bidi Algorithm)
       _(evidence: `egui_shapes_with_joining_ligatures_and_harakat`, `egui_mixed_arabic_latin_and_ip`)_
-- [ ] Text input fields accept and display Arabic correctly (device names, addresses, chat, search)
-      _(partial: correct when not focused + live "shown as" preview; while typing, egui orders words LTR — egui limitation)_
+- [x] Text input fields accept and display Arabic correctly (device names, addresses, chat, search)
+      _(evidence: PR #39 `ui::bidi_edit` editor + `i18n::bidi_line` tests; no IME pre-edit inside Arabic fields — ADR 0007)_
 
 **Layout & language (M1)**
 - [x] Full RTL mirroring in Arabic: layouts, toolbars, lists, dialogs, alignment, icons with direction (back/forward arrows)
@@ -42,13 +42,14 @@ until it works in Arabic. Check these per milestone as features land.
       _(evidence: `lang_parse_and_locale_detection`, `settings_roundtrip_and_defaults`)_
 - [x] Digits setting: Western (0-9) or Arabic-Indic (٠-٩) for display; IDs/codes/IPs always copy as Western digits
       _(evidence: `digits_roundtrip`, `digit_style_applies_to_numbers_only`)_
-- [ ] Arabic date/time and number formatting in logs, connection history, file sizes
+- [x] Arabic date/time and number formatting in logs, connection history, file sizes
+      _(evidence: `i18n::format` tests, `ui::connection_log` tests (PR #16), `ui::transfers` Arabic-Indic status tests (PR #22))_
 
 **Data paths (M1–M2)**
 - [ ] Arabic device names round-trip through mDNS TXT, broadcast fallback and the address book (UTF-8)
       _(partial: `endpoint::tests::peer_names_keep_arabic_and_lose_control_characters`, address book `round_trip_keeps_arabic_exactly`; mDNS across two PCs is still manual)_
 - [ ] Remote typing works with the host on an Arabic keyboard layout (scancodes), including Alt+Shift layout switching
-      _(English typing verified by system test row 5 and PR #34; the Arabic layout needs the two-PC manual test, section 3)_
+      _(English typing verified by system test row 5 and PR #34; Alt+Shift / Win+Space reach the host as scancodes: `session::tests::layout_switch_hotkeys_reach_the_host_as_scancodes`, `grab_logic::tests::layout_switch_hotkeys_reach_the_host` (PR #39); layout-independent Arabic via protocol v6 `InputEvent::Text`; the Arabic host layout still needs the two-PC manual test, section 3)_
 - [x] Clipboard sync preserves Arabic text exactly (incl. RTL marks/ZWJ/ZWNJ)
       _(evidence: PR #12 clipboard tests (RLM/LRM, ZWJ/ZWNJ, harakat, CRLF byte-exact); two-PC paste check in the manual checklist)_
 - [x] File transfer handles Arabic file and folder names (UTF-16 paths on Windows), in the UI and on disk
@@ -59,8 +60,9 @@ until it works in Arabic. Check these per milestone as features land.
 **OS surfaces (M2–M5)**
 - [x] Tray menu, notifications, host "who is connected" banner and Accept prompt in Arabic
       _(evidence: PR #16 i18n tests; system test row 16 screenshot of the Arabic host banner)_
-- [ ] Windows service / event-log messages localized where user-visible
-- [ ] MSI installer UI in Arabic + English (WiX localization), Arabic Start-menu entry name
+- [x] Windows service / event-log messages localized where user-visible
+      _(evidence: PR #39 audit — service notices are typed events localized in the GUI, SCM name/description localized; Event Log not used, `service.log` is an English diagnostic log, documented in `docs/src/dev/i18n.md`)_
+- [x] ~~MSI installer UI in Arabic + English~~ — not planned: the Inno Setup `setup.exe` ships Arabic + English UI and an Arabic-aware Start-menu entry instead (ADR 0008)
 - [x] CLI: `--lang ar`, UTF-8 console output that displays Arabic correctly
       _(evidence: PR #37; system test: Arabic chat, file names and `ls` output)_
 - [x] Arabic user guide with Arabic screenshots (M5)
@@ -188,7 +190,8 @@ Each lane ticks its own items below, with evidence, when its PR merges.
       _(evidence: PR #21; system test row 10)_
 - [x] Host user has input priority: local physical mouse/keyboard pauses remote input (1 s grace), remote held keys released _(evidence: host `priority::*`, `local_input_priority_reaches_viewer`)_
 - [x] Green remote-pointer marker on the host screen, excluded from capture _(evidence: input `marker_*` tests, `marker_window_starts_toggles_and_stops`; manual `viewer_m0b.png` shows no marker in video)_
-- [ ] One marker/hook set shared across multiple simultaneous viewers
+- [x] One marker/hook set shared across multiple simultaneous viewers
+      _(evidence: PR #39 `tlp-desk-host` `hooks::tests` (SharedHooks, ActivityLease, MarkerLease); marker label lists up to 3 movers)_
 - [x] Settings: permissions defaults, allow-list CIDRs, quality presets (Speed / Balanced / Quality)
       _(evidence: PR #16 and #15)_
 - [x] System tray icon, start minimized, "who is connected" banner on host
@@ -237,18 +240,20 @@ Each lane ticks its own items below, with evidence, when its PR merges.
 ## M5 — Ship it
 
 - [x] Single `setup.exe` (Inno Setup, Arabic + English, original icon, firewall rules private/domain, clean uninstall) _(evidence: elevated silent install/uninstall test 2026-10-13; interactive wizard not yet reviewed)_
-- [ ] (optional) MSI via cargo-wix: installs service, adds Windows Firewall rules for UDP 47400/47401
-      and mDNS, Start-menu shortcut, clean uninstall (removes service and firewall rules)
+- [x] ~~(optional) MSI via cargo-wix~~ — not planned (ADR 0008); the Inno Setup installer covers service install, firewall rules, Start-menu shortcut and clean uninstall
 - [x] Portable zip: runs without install (attended mode only)
       _(evidence: `installer\portable.ps1` builds `TLP-Desk-1.0.0-rc.1-win-x64-portable.zip`)_
 - [x] SHA256SUMS for every release artifact
       _(evidence: both installer scripts write `dist\SHA256SUMS.txt`)_
 - [x] Arabic + English user guide with screenshots
       _(evidence: `docs/src/user-guide/{en,ar}/`, `docs/media/`)_
-- [ ] Landing page on the TLP site
+- [x] Landing page (in-repo `docs/site/`, English + Arabic RTL, published to GitHub Pages with the book under `/book/` by `docs.yml`; PR #39). Hosting on an external TLP site is up to the site owner.
 
 ## Later — other platforms
 
 - [ ] Linux host/viewer (X11 first, then PipeWire/Wayland portal)
+      _(X11 host + viewer implemented in PR #41 and cross-checked with `cargo clippy --target x86_64-unknown-linux-gnu --workspace`; not yet run on a real Linux PC; Wayland portal/PipeWire not implemented — design in `docs/src/dev/linux.md`)_
 - [ ] macOS host/viewer (ScreenCaptureKit, Accessibility permission flow)
+      _(implemented in PR #40 with `CGDisplayCreateImage` capture (ScreenCaptureKit swap documented), `CGEvent` input and the Screen Recording / Accessibility permission flow; cross-checked for `aarch64-apple-darwin` on proto/input/capture; not yet run on a Mac)_
 - [ ] Android viewer
+      _(implemented in PR #40: `crates/tlp-desk-android`, touch → mouse gestures, Arabic/English UI; arm64 APK builds and verifies with `apksigner`; not yet run on a device; mDNS multicast lock not implemented — connect by IP)_
