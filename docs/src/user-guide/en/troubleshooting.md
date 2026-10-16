@@ -90,7 +90,7 @@ Ctrl+Alt+Del and Win+L always act on your own PC.
 
 Windows that run **as administrator**, **UAC** prompts, the lock screen and the sign-in screen are
 protected by Windows from ordinary programs. Controlling them will need the
-[unattended access service](coming-soon/unattended-access.md). Until then, ask the person at the
+[unattended access service](unattended-access.md). Until then, ask the person at the
 remote PC to handle those prompts.
 
 ## Typing produces the wrong characters

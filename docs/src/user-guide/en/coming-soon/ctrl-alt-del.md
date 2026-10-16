@@ -10,7 +10,7 @@ Needs the **System** permission.
 
 ## Status
 
-Defined in protocol v4; Ctrl+Alt+Del requires the TLP-Desk Windows service.
+**Lock remote PC** already works from the toolbar's System menu (see [Unattended access](../unattended-access.md)). The **Ctrl+Alt+Del** button is in the menu too, but it requires the TLP-Desk Windows service, which is not available yet.
 
 ## Until then
 

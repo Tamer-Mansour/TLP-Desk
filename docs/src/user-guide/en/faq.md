@@ -19,9 +19,9 @@ network.
 
 ### Does the other person need to be at their PC?
 
-For now, yes, unless you have their **one-time code**: then you can connect without anyone
-clicking Accept — once. Permanent unattended access with a password is
-[coming soon](coming-soon/unattended-access.md).
+Not necessarily. With their **one-time code** you can connect without anyone clicking Accept —
+once. With a **permanent password** set on that PC you can connect any time TLP-Desk is running
+(see [Unattended access](unattended-access.md)).
 
 ### Does my device ID ever change?
 
@@ -39,7 +39,7 @@ Yes. Each one needs permission, and each appears on its own line in the connecti
 
 ### Can I control a PC that is at the sign-in screen or locked?
 
-Not yet; this needs the [unattended access service](coming-soon/unattended-access.md).
+Not yet; this needs the [unattended access service](unattended-access.md).
 
 ### Does it support Mac, Linux, Android?
 

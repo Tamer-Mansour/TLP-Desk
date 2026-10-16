@@ -115,8 +115,15 @@ It prints a stats line every second, host input-priority changes and the monitor
 summary at the end. If the host key changed it prints a loud warning and tells you to re-run with
 `--forget-key` **only** if you know the host was reinstalled.
 
-> Neither `serve` nor the GUI configures a password yet, so `--password` is currently refused with
-> "not allowed". It exists for the unattended-access work in M3.
+`serve` loads the permanent password stored by the app or by `set-password` (only its Argon2id
+verifier), so `--password` works against it; without one the host refuses it.
+
+### `set-password [--remove]`
+
+Sets the permanent unattended-access password from the `TLP_DESK_PASSWORD` environment variable
+(never argv), refusing passwords below the minimum length, or removes it with `--remove`. Writes
+the verifier into the data dir (`--data-dir`), which needs administrator rights for
+`%ProgramData%\TLP-Desk`.
 
 ### `info <TARGET>`
 
