@@ -26,6 +26,8 @@ png = "0.18"
 arboard = "3.6"
 
 [target.'cfg(windows)'.dependencies]
+# The `#[implement]` macro (COM objects of `shellclip`) expands to paths in this crate.
+windows-core = "0.62"
 # Drives (labels, size, free space) and known folders for the remote file browser (`fs::windows`)
 # plus event-driven clipboard change notifications (`clipboard::windows`,
 # AddClipboardFormatListener). The crate's only unsafe modules.
@@ -34,8 +36,11 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
     "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",

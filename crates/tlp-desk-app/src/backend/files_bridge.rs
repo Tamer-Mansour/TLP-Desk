@@ -9,6 +9,7 @@ use tlp_desk_files::clipfiles::{self, ClipFilesConfig, ClipFilesFeature, RemoteC
 use tlp_desk_files::fs::{
     execute, known_folder, FsConfig, FsFeature, StartError, StartFuture, TransferStarter,
 };
+use tlp_desk_files::shellclip::{self, ShellClipboard};
 use tlp_desk_files::{ConflictPolicy, FileTransfer, FilesError};
 use tlp_desk_net::{FeatureEvent, FeatureSet};
 use tlp_desk_proto::FsRootKind;
@@ -54,6 +55,19 @@ impl FilesBridge {
             let a = clip.announced(key, id)?;
             Some(a.set.source_dir.to_string_lossy().into_owned())
         }));
+    }
+
+    /// Makes the peer's copied files pasteable in Explorer: the clipboard feature, the transfer
+    /// engine and this PC's clipboard are connected (see `tlp_desk_files::shellclip`). The
+    /// clipboard is only touched when a peer announces files.
+    pub fn enable_explorer_paste(&self, engine: &Arc<FileTransfer>, policy: ConflictPolicy) {
+        shellclip::engine::install(
+            &self.clip,
+            engine,
+            ShellClipboard::system(),
+            policy,
+            shellclip::engine::default_staging_root(),
+        );
     }
 
     /// `set` plus the files features (registration for host and viewer sessions).
