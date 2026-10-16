@@ -17,9 +17,10 @@
 //! * [`Host::sessions`] is the always-visible "who is connected" list; [`Host::disconnect`]
 //!   ends a session; [`Host::set_permissions`] changes permissions live and
 //!   [`Host::set_input_paused`] mutes one viewer's input without touching the others.
-//!   Every session is independent (own capture pipeline, encoder, input thread and
+//!   Every session is independent (own encoder, quality, monitor choice, input thread and
 //!   permissions), so several viewers can control the host at the same time.
-//! * Per session, capture + encode run on one std thread and input injection on another;
+//! * Per session, encode runs on its own std thread and input injection on another; sessions
+//!   on the same monitor share one capture thread ([`HostConfig::share_capture`]);
 //!   nothing CPU-heavy runs on the tokio runtime. Factories in [`HostConfig`] let tests swap
 //!   in fake capturers, encoders and injectors.
 //!
@@ -65,6 +66,7 @@ mod priority;
 mod privacy;
 mod refine;
 mod resume;
+mod shared_capture;
 pub mod service;
 mod tunnel;
 mod unattended;
@@ -201,6 +203,9 @@ pub struct HostConfig {
     /// Accept, with the session's current permissions (see the `resume` module). `None`
     /// disables it. Default [`RESUME_TICKET_TTL`].
     pub session_resume: Option<Duration>,
+    /// Sessions streaming the same monitor at the same size share one screen capturer (each
+    /// keeps its own encoder and quality); see the `shared_capture` module. Default on.
+    pub share_capture: bool,
     /// Name announced in discovery.
     pub device_name: String,
     /// Announce this host on the LAN (mDNS + broadcast). The advertisement is filled in from
@@ -238,6 +243,7 @@ impl Default for HostConfig {
             password: None,
             reconnect_tickets: None,
             session_resume: Some(RESUME_TICKET_TTL),
+            share_capture: true,
             device_name: default_device_name(),
             advertise: true,
             discovery: DiscoveryConfig::default(),
@@ -266,6 +272,7 @@ impl std::fmt::Debug for HostConfig {
             .field("password", &self.password.is_some())
             .field("reconnect_tickets", &self.reconnect_tickets.is_some())
             .field("session_resume", &self.session_resume)
+            .field("share_capture", &self.share_capture)
             .field("device_name", &self.device_name)
             .field("advertise", &self.advertise)
             .field("local_input_grace", &self.local_input_grace)
@@ -493,8 +500,11 @@ impl Host {
     /// Only one `Host` per endpoint: it consumes [`Endpoint::accept`].
     pub async fn start(
         endpoint: Arc<Endpoint>,
-        cfg: HostConfig,
+        mut cfg: HostConfig,
     ) -> Result<(Host, HostEvents), HostError> {
+        if cfg.share_capture {
+            cfg.capturer_factory = shared_capture::share(cfg.capturer_factory.clone());
+        }
         let port = endpoint.local_addr()?.port();
         let (tx, rx) = mpsc::unbounded_channel();
         let discovery = if cfg.advertise {

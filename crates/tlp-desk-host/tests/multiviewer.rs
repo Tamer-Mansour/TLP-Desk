@@ -403,7 +403,37 @@ async fn monitor_switch_by_one_viewer_does_not_affect_the_other() {
         rig.host.streamed_monitor(cb.id),
         Some(MonitorRect::new(0, 0, W, H))
     );
-    assert!(rig.captures_opened.load(Ordering::Relaxed) >= 3);
+    // Shared capture: A and B shared monitor 0, then A opened monitor 1.
+    assert_eq!(rig.captures_opened.load(Ordering::Relaxed), 2);
+}
+
+/// Two viewers on the same monitor share one capturer; each still decodes its own stream,
+/// and the capturer outlives the first viewer leaving.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn viewers_on_one_monitor_share_one_capturer() {
+    let mut rig = rig(|_| {}).await;
+    let (va, vb) = (viewer("viewer-a"), viewer("viewer-b"));
+    let (sa, _ea, _ca) = join(&mut rig, &va, FULL).await;
+    let (sb, _eb, _cb) = join(&mut rig, &vb, FULL).await;
+    streaming(&sa, W, H).await;
+    streaming(&sb, W, H).await;
+    assert_eq!(rig.captures_opened.load(Ordering::Relaxed), 1);
+    sa.disconnect();
+    within("A ended", sa.ended()).await;
+    streaming(&sb, W, H).await;
+    assert_eq!(rig.captures_opened.load(Ordering::Relaxed), 1);
+}
+
+/// With sharing off every session opens its own capturer (the previous behaviour).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn capture_sharing_can_be_switched_off() {
+    let mut rig = rig(|c| c.share_capture = false).await;
+    let (va, vb) = (viewer("viewer-a"), viewer("viewer-b"));
+    let (sa, _ea, _ca) = join(&mut rig, &va, FULL).await;
+    let (sb, _eb, _cb) = join(&mut rig, &vb, FULL).await;
+    streaming(&sa, W, H).await;
+    streaming(&sb, W, H).await;
+    assert_eq!(rig.captures_opened.load(Ordering::Relaxed), 2);
 }
 
 /// Revoking VIEW from one viewer ends only that viewer's session.
