@@ -165,13 +165,14 @@ fn try_host_endpoint(
     )
 }
 
-/// Binds the host port, waiting for a previous endpoint on it to let go (a "reboot" reuses it).
+/// Binds the host port, waiting for the previous endpoint on it to let go (a "reboot" reuses
+/// it); the teardown of its sessions is asynchronous, so allow a few seconds.
 async fn host_endpoint_when_free(
     identity: Arc<Identity>,
     bind: SocketAddr,
     rate: RateLimitConfig,
 ) -> Endpoint {
-    for _ in 0..100 {
+    for _ in 0..50 {
         match try_host_endpoint(identity.clone(), bind, rate) {
             Ok(ep) => return ep,
             Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
@@ -421,8 +422,7 @@ async fn restart_and_reconnect_with_ticket() {
     host.shutdown();
     let ended = within("viewer session end", session.ended()).await;
     assert!(!matches!(ended, ViewerEnd::Local), "{ended:?}");
-    host.endpoint().close();
-    within("endpoint idle", host.endpoint().wait_idle()).await;
+    // Dropping the host must be enough to free its port (no manual `Endpoint::close`).
     drop(host);
     let tickets = TicketStore::load(&tickets_path, DEFAULT_TICKET_TTL).unwrap();
     assert_eq!(tickets.len(), 1);

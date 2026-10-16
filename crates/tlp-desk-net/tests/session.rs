@@ -810,3 +810,28 @@ async fn feature_dispatch_routes_messages_and_stops_with_the_session() {
     let ev = timeout(T, ev_rx.recv()).await.unwrap().unwrap();
     assert_eq!(ev.payload::<String>().map(String::as_str), Some("stopped"));
 }
+
+/// Regression: dropping the last handle of a listening endpoint releases its UDP port. The
+/// accept task used to keep the socket bound for the life of the process, so a host that was
+/// stopped and restarted in-process could not rebind its port.
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_the_endpoint_releases_the_port() {
+    init_tracing();
+    let identity = Arc::new(Identity::generate().unwrap());
+    let first = Endpoint::bind(identity.clone(), cfg(true)).unwrap();
+    let bind = first.local_addr().unwrap();
+    drop(first);
+    let again = EndpointConfig { bind, ..cfg(true) };
+    let mut bound = false;
+    for _ in 0..50 {
+        if Endpoint::bind(identity.clone(), again.clone()).is_ok() {
+            bound = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        bound,
+        "the port stayed bound after the endpoint was dropped"
+    );
+}

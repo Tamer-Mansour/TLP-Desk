@@ -516,8 +516,20 @@ fn unexpected(m: &Message) -> NetError {
     NetError::Unexpected(w.out)
 }
 
+/// Hands incoming connections to [`Endpoint::accept`]. Ends when the [`Endpoint`] is dropped
+/// (its receiver closes `tx`): this task owns a `quinn::Endpoint` clone, and without that exit
+/// the UDP port stayed bound for the life of the process after the last `Endpoint` handle was
+/// gone (a restarted host could not rebind its port). Live sessions keep their own references,
+/// so they outlive the exit and release the socket when they end.
 async fn accept_loop(ep: quinn::Endpoint, shared: Arc<Shared>, tx: mpsc::Sender<PendingSession>) {
-    while let Some(incoming) = ep.accept().await {
+    loop {
+        let incoming = tokio::select! {
+            () = tx.closed() => break,
+            next = ep.accept() => match next {
+                Some(incoming) => incoming,
+                None => break,
+            },
+        };
         let addr = incoming.remote_address();
         let allowed = shared
             .allow
