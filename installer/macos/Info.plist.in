@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>TLP-Desk</string>
+  <key>CFBundleDisplayName</key><string>TLP-Desk</string>
+  <key>CFBundleIdentifier</key><string>org.tlp.tlp-desk</string>
+  <key>CFBundleExecutable</key><string>TLP-Desk</string>
+  <key>CFBundleIconFile</key><string>TLP-Desk</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>@VERSION@</string>
+  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array><string>en</string><string>ar</string></array>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>TLP-Desk sends the picture of this screen to the device on your local network that you allow to connect.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>TLP-Desk finds and connects to your other devices on the local network. It never uses the internet.</string>
+  <key>NSBonjourServices</key>
+  <array><string>_tlpdesk._udp</string></array>
+</dict>
+</plist>
