@@ -14,6 +14,13 @@ tick for 6 s, then still for 4 s, repeated (timestamps of every stop logged). St
 from `connect --json` (now with `qp` and `t_ms`), refresh pictures from the host's debug log
 (`refresh picture sent`).
 
+### Quality gate
+
+`cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace --no-fail-fast`, `cargo deny check` and `typos`: all clean on the PR
+branch (1232 tests passed, 0 failed, 42 ignored) and again after merging the current `TLP-Desk`
+(1256 passed, 0 failed, 42 ignored in 62 test binaries).
+
 ### Results
 
 | # | Check | Result |
