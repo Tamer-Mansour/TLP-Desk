@@ -11,6 +11,8 @@
   - [Your device ID and one-time code](user-guide/en/device-id-and-code.md)
   - [Finding devices on your network](user-guide/en/finding-devices.md)
   - [Connecting](user-guide/en/connecting.md)
+  - [Address book](user-guide/en/address-book.md)
+  - [Wake-on-LAN](user-guide/en/wake-on-lan.md)
   - [The Accept prompt and the banner](user-guide/en/accept-prompt.md)
   - [Controlling the remote PC](user-guide/en/controlling.md)
   - [Switching monitors](user-guide/en/monitors.md)
@@ -25,6 +27,7 @@
   - [View options](user-guide/en/view-options.md)
   - [The statistics overlay](user-guide/en/stats.md)
   - [Unattended access](user-guide/en/unattended-access.md)
+  - [Ctrl+Alt+Del, lock and restart](user-guide/en/ctrl-alt-del.md)
   - [Settings](user-guide/en/settings.md)
   - [The connection log](user-guide/en/connection-log.md)
   - [When the host key has changed](user-guide/en/host-key-changed.md)
@@ -38,9 +41,6 @@
   - [Uninstalling](user-guide/en/uninstall.md)
   - [Manual test checklist (two PCs)](user-guide/en/manual-test.md)
   - [Coming soon](user-guide/en/coming-soon/index.md)
-    - [Address book](user-guide/en/coming-soon/address-book.md)
-    - [Ctrl+Alt+Del and lock](user-guide/en/coming-soon/ctrl-alt-del.md)
-    - [Wake-on-LAN](user-guide/en/coming-soon/wake-on-lan.md)
 
 # دليل المستخدم (العربية)
 
@@ -51,6 +51,8 @@
   - [معرّف جهازك والرمز لمرة واحدة](user-guide/ar/device-id-and-code.md)
   - [العثور على الأجهزة](user-guide/ar/finding-devices.md)
   - [الاتصال](user-guide/ar/connecting.md)
+  - [دفتر العناوين](user-guide/ar/address-book.md)
+  - [التشغيل عبر الشبكة (Wake-on-LAN)](user-guide/ar/wake-on-lan.md)
   - [طلب القبول وشريط الاتصال](user-guide/ar/accept-prompt.md)
   - [التحكم بالحاسوب البعيد](user-guide/ar/controlling.md)
   - [التبديل بين الشاشات](user-guide/ar/monitors.md)
@@ -65,6 +67,7 @@
   - [خيارات العرض](user-guide/ar/view-options.md)
   - [لوحة الإحصاءات](user-guide/ar/stats.md)
   - [الوصول غير المراقَب](user-guide/ar/unattended-access.md)
+  - [Ctrl+Alt+Del والقفل وإعادة التشغيل](user-guide/ar/ctrl-alt-del.md)
   - [الإعدادات](user-guide/ar/settings.md)
   - [سجل الاتصالات](user-guide/ar/connection-log.md)
   - [عند تغيّر مفتاح الجهاز المضيف](user-guide/ar/host-key-changed.md)
@@ -78,9 +81,6 @@
   - [إزالة التثبيت](user-guide/ar/uninstall.md)
   - [قائمة الاختبار اليدوي (جهازان)](user-guide/ar/manual-test.md)
   - [قريبًا](user-guide/ar/coming-soon/index.md)
-    - [دفتر العناوين](user-guide/ar/coming-soon/address-book.md)
-    - [Ctrl+Alt+Del والقفل](user-guide/ar/coming-soon/ctrl-alt-del.md)
-    - [التشغيل عبر الشبكة (Wake-on-LAN)](user-guide/ar/coming-soon/wake-on-lan.md)
 
 # Security
 

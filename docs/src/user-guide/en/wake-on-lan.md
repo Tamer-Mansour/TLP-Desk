@@ -1,6 +1,6 @@
 # Wake-on-LAN
 
-![Magic packet sent](../../../media/wake-on-lan-en-light.png)
+![Magic packet sent](../../media/wake-on-lan-en-light.png)
 
 TLP-Desk can switch on a sleeping or powered-off PC from the [address book](address-book.md),
 using the standard Wake-on-LAN "magic packet" on your local network.
