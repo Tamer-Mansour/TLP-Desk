@@ -82,7 +82,7 @@ pub fn lanczos2(x: f64) -> f64 {
 /// samples: `(first source index, weights)`. The kernel is stretched by the reduction ratio
 /// when shrinking (so it also low-passes against aliasing), source indices are clamped by the
 /// caller. The GPU shader in `windows_capture::scaler` computes exactly the same taps.
-fn taps(o: u32, src: u32, out: u32) -> (i64, Vec<f64>) {
+fn taps(o: u32, src: u32, out: u32) -> (i64, Vec<f32>) {
     let ratio = f64::from(src) / f64::from(out);
     let scale = ratio.max(1.0);
     let centre = (f64::from(o) + 0.5) * ratio;
@@ -98,7 +98,7 @@ fn taps(o: u32, src: u32, out: u32) -> (i64, Vec<f64>) {
             *v /= sum;
         }
     }
-    (first, w)
+    (first, w.into_iter().map(|v| v as f32).collect())
 }
 
 /// Resamples `src` to `w` x `h` with a separable Lanczos-2 filter (CPU path: reference for the
@@ -114,36 +114,36 @@ pub fn resample_lanczos2(src: &BgraFrame, w: u32, h: u32) -> BgraFrame {
     // Horizontal pass into f32 (3 channels) at the target width, source height.
     let mut tmp = vec![0f32; w as usize * sh * 3];
     let htaps: Vec<_> = (0..w).map(|o| taps(o, src.width, w)).collect();
-    for y in 0..sh {
+    for (y, trow) in tmp.chunks_exact_mut(w as usize * 3).enumerate() {
         let row = src.row(y as u32);
-        for (ox, (first, weights)) in htaps.iter().enumerate() {
-            let mut acc = [0f64; 3];
+        for (tpx, (first, weights)) in trow.chunks_exact_mut(3).zip(&htaps) {
+            let mut acc = [0f32; 3];
             for (k, wt) in weights.iter().enumerate() {
                 let x = (first + k as i64).clamp(0, sw as i64 - 1) as usize;
-                for (c, a) in acc.iter_mut().enumerate() {
-                    *a += wt * f64::from(row[x * 4 + c]);
-                }
+                let px = &row[x * 4..x * 4 + 3];
+                acc[0] += wt * f32::from(px[0]);
+                acc[1] += wt * f32::from(px[1]);
+                acc[2] += wt * f32::from(px[2]);
             }
-            for (c, a) in acc.iter().enumerate() {
-                tmp[(y * w as usize + ox) * 3 + c] = *a as f32;
-            }
+            tpx.copy_from_slice(&acc);
         }
     }
+    let stride = w as usize * 3;
     for oy in 0..h {
         let (first, weights) = taps(oy, src.height, h);
         let dst = out.row_mut(oy);
-        for ox in 0..w as usize {
-            let mut acc = [0f64; 3];
-            for (k, wt) in weights.iter().enumerate() {
-                let y = (first + k as i64).clamp(0, sh as i64 - 1) as usize;
-                for (c, a) in acc.iter_mut().enumerate() {
-                    *a += wt * f64::from(tmp[(y * w as usize + ox) * 3 + c]);
-                }
+        let mut acc = vec![0f32; stride];
+        for (k, wt) in weights.iter().enumerate() {
+            let y = (first + k as i64).clamp(0, sh as i64 - 1) as usize;
+            for (a, t) in acc.iter_mut().zip(&tmp[y * stride..(y + 1) * stride]) {
+                *a += wt * t;
             }
-            for (c, a) in acc.iter().enumerate() {
-                dst[ox * 4 + c] = a.round().clamp(0.0, 255.0) as u8;
-            }
-            dst[ox * 4 + 3] = 255;
+        }
+        for (px, a) in dst.chunks_exact_mut(4).zip(acc.chunks_exact(3)) {
+            px[0] = a[0].round().clamp(0.0, 255.0) as u8;
+            px[1] = a[1].round().clamp(0.0, 255.0) as u8;
+            px[2] = a[2].round().clamp(0.0, 255.0) as u8;
+            px[3] = 255;
         }
     }
     out
