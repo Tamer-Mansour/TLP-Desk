@@ -230,6 +230,9 @@ impl App {
         if let Some(target) = opts.connect {
             app.address = target;
             app.connect_from_address();
+            // Started to open a session: never start minimized (the setting, or the show state
+            // a console or script launcher passed to the process).
+            app.tray.show_on_start = true;
         }
         app
     }
