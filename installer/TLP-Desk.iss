@@ -26,12 +26,22 @@ AppId={{2BD625D0-C78E-4CFB-BFEA-524A00171A2A}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
+; Publisher, URLs and version info: shown in Apps & features and the setup's file properties.
+; Keep AppPublisher equal to the exes' CompanyName (winres.rs) and the code-signing publisher.
 AppPublisher=TLP
-AppCopyright=MIT OR Apache-2.0
+AppPublisherURL=https://github.com/Tamer-Mansour/TLP-Desk
+AppSupportURL=https://github.com/Tamer-Mansour/TLP-Desk/issues
+AppUpdatesURL=https://github.com/Tamer-Mansour/TLP-Desk/releases
+AppComments=Remote desktop for your local network (MIT OR Apache-2.0)
+AppCopyright=Copyright (c) 2026 Tamer Mansour and the TLP-Desk contributors
 VersionInfoVersion={#MyAppNumericVersion}
+VersionInfoTextVersion={#MyAppVersion}
 VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppNumericVersion}
+VersionInfoProductTextVersion={#MyAppVersion}
 VersionInfoCompany=TLP
-VersionInfoDescription={#MyAppName} setup
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoOriginalFileName={#MyAppName}-{#MyAppVersion}-setup.exe
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
