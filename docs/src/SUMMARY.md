@@ -114,7 +114,7 @@
 - [Performance notes](dev/performance.md)
 - [i18n and Arabic](dev/i18n.md)
 - [Release process](dev/release.md)
-- [System test report (1.0.0-rc.1)](dev/system-test-report.md)
+- [System test reports (1.0.0-rc.1, rc.2)](dev/system-test-report.md)
 
 # Architecture decisions
 
