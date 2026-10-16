@@ -63,7 +63,10 @@ pub use agent_features::{
     MAX_FEATURE_OBJECTS,
 };
 pub use client::{gui_command_on, gui_subscribe_on, GuiSubscription};
-pub use extension::{ConsoleUser, ServiceCommands, ServiceContext, ServiceExtension};
+pub use extension::{
+    reload_credentials, ConsoleUser, CredentialFiles, PasswordTarget, ServiceCommands,
+    ServiceContext, ServiceExtension,
+};
 pub use feature_proxy::{
     AgentActivity, AgentAudio, AgentFeatureHub, AgentMarker, AgentOverlay, AgentShield,
     StageHandler, OVERLAY_POINTS_PER_REQUEST,

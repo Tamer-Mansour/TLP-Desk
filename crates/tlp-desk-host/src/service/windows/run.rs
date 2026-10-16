@@ -19,10 +19,10 @@ use super::{pipe, sas};
 use crate::service::ipc::{self, AgentChannel, AgentEvent, WireDesktop};
 use crate::service::{
     agent_pipe_name, check_gui_client, route_prompt, serve_gui_connection, AgentConn,
-    AgentConnector, AgentFeatureHub, AgentLink, AgentSupervisor, DesktopStatus, GuiClientFacts,
-    GuiClientRefusal, GuiHub, PipeSpec, PromptRoute, RestartPolicy, ServiceCommands,
-    ServiceContext, ServiceExtension, SessionAction, SessionChange, SessionTracker,
-    SupervisorEvent, SystemActions, SystemControl, NO_CONSOLE_SESSION,
+    AgentConnector, AgentFeatureHub, AgentLink, AgentSupervisor, CredentialFiles, DesktopStatus,
+    GuiClientFacts, GuiClientRefusal, GuiHub, PipeSpec, PromptRoute, RestartPolicy,
+    ServiceCommands, ServiceContext, ServiceExtension, SessionAction, SessionChange,
+    SessionTracker, SupervisorEvent, SystemActions, SystemControl, NO_CONSOLE_SESSION,
 };
 use crate::{Host, HostConfig, HostError, HostEvent, HostEvents, MAX_CAPTURE_SIZE};
 
@@ -294,6 +294,10 @@ pub fn run_service(
     let identity = Arc::new(Identity::load_or_generate(&opts.data_dir)?);
     let device_name = opts.host.device_name.clone();
     let extension = opts.extension.clone();
+    let credentials = CredentialFiles {
+        data_dir: opts.data_dir.clone(),
+        tickets: opts.host.reconnect_tickets.clone(),
+    };
     let mut ep_cfg = EndpointConfig {
         bind: opts.bind,
         device_name: device_name.clone(),
@@ -351,7 +355,9 @@ pub fn run_service(
     }
     spawn_gui_server(
         hub.clone(),
-        Arc::new(ServiceCommands::new(host.clone(), extension.clone())),
+        Arc::new(
+            ServiceCommands::new(host.clone(), extension.clone()).with_credentials(credentials),
+        ),
         opts.exe.clone(),
     );
 

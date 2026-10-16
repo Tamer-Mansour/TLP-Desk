@@ -379,6 +379,12 @@ mod link {
             send(GuiCommand::RotateCode);
         }
 
+        /// Tells the service to re-read the permanent password and reconnect tickets (after
+        /// the GUI saved the unattended password; audit F5).
+        pub fn reload_credentials(&self) {
+            send(GuiCommand::ReloadCredentials);
+        }
+
         /// Whether `session` is hosted by the service.
         pub fn owns_session(&self, session: SessionId) -> bool {
             lock(&self.mirror).session(session).is_some()

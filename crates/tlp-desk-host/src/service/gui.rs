@@ -60,6 +60,13 @@ pub trait GuiCommands: Send + Sync {
     fn app_snapshot(&self) -> Vec<Vec<u8>> {
         Vec::new()
     }
+
+    /// Re-reads the permanent password and reconnect tickets from disk
+    /// ([`GuiCommand::ReloadCredentials`], audit F5). `false` when nothing could be reloaded
+    /// (no credential files known, or reading failed).
+    fn reload_credentials(&self) -> bool {
+        false
+    }
 }
 
 impl GuiCommands for crate::Host {
@@ -340,6 +347,11 @@ fn run_command(commands: &dyn GuiCommands, cmd: GuiCommand) -> GuiReply {
             session,
             permissions,
         } => commands.set_permissions(session, permissions),
+        GuiCommand::ReloadCredentials => {
+            let ok = commands.reload_credentials();
+            tracing::info!(ok, "credentials reloaded on the GUI's request");
+            ok
+        }
     };
     if found {
         GuiReply::Ok
@@ -379,6 +391,10 @@ mod tests {
         }
         fn set_permissions(&self, session: u64, p: Permissions) -> bool {
             lock(&self.log).push(format!("perms {session} {}", p.0));
+            true
+        }
+        fn reload_credentials(&self) -> bool {
+            lock(&self.log).push("reload".into());
             true
         }
     }
@@ -553,6 +569,7 @@ mod tests {
                 },
                 GuiReply::Ok,
             ),
+            (GuiCommand::ReloadCredentials, GuiReply::Ok),
         ] {
             let (mut a, mut b) = duplex();
             ipc::write_msg(
@@ -575,7 +592,8 @@ mod tests {
                 "respond 8 false",
                 "rotate",
                 "disconnect 3",
-                "perms 3 1"
+                "perms 3 1",
+                "reload"
             ]
         );
     }
