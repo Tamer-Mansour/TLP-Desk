@@ -19,8 +19,9 @@ automated tests (`cargo test --workspace`, clippy, fmt, cargo-deny and typos are
 one-PC end-to-end [system test](dev/system-test-report.md). Wire protocol v6. What still needs
 two real PCs (privacy overlay, service and lock screen, Ctrl+Alt+Del, restart and reconnect,
 real audio, clipboard and Explorer paste, Wake-on-LAN, Wi-Fi performance) is listed in the
-[manual test checklist](user-guide/en/manual-test.md). Not included yet: Linux, macOS and Android,
-an MSI (not planned, see ADR 0008).
+[manual test checklist](user-guide/en/manual-test.md). Also included, as previews not yet run on real
+hardware: a Linux X11 host/viewer, a macOS host/viewer and an Android viewer (arm64 APK, debug-signed).
+Wayland is not supported yet; an MSI is not planned (see ADR 0008).
 
 ### Added
 
