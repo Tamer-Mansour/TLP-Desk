@@ -4583,6 +4583,7 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "tempfile",
+ "thiserror 2.0.21",
  "time",
  "tlp-desk-audio",
  "tlp-desk-capture",
@@ -4599,6 +4600,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "unicode-bidi",
+ "windows 0.62.2",
  "windows-registry",
 ]
 
