@@ -452,6 +452,8 @@ impl RealBackend {
             Arc::new(EngineStarter::new(files.clone(), cfg.transfer.conflict)),
         );
         fsb.link_engine(&files);
+        // Ctrl+C on files in Explorer on the other PC, Ctrl+V in Explorer here.
+        fsb.enable_explorer_paste(&files, cfg.transfer.conflict);
         let mut host = None;
         let mut host_events = None;
         if let Some((ep, true)) = &endpoint {
