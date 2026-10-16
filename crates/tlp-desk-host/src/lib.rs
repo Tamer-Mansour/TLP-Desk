@@ -60,6 +60,7 @@ mod live;
 mod pipeline;
 mod priority;
 mod privacy;
+mod refine;
 pub mod service;
 mod tunnel;
 mod unattended;

@@ -1338,3 +1338,116 @@ async fn device_info_request_is_answered_and_cached() {
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     session.disconnect();
 }
+
+/// Moves for 30 frames, then shows the same picture forever (a screen that went still).
+struct SettlingCapturer {
+    inner: FakeCapturer,
+}
+
+impl ScreenCapturer for SettlingCapturer {
+    fn next_frame(&mut self, timeout: Duration) -> Result<Option<BgraFrame>, CaptureError> {
+        if self.inner.n >= 30 {
+            self.inner.n = 30;
+        }
+        self.inner.next_frame(timeout)
+    }
+    fn cursor(&mut self) -> Result<CursorState, CaptureError> {
+        self.inner.cursor()
+    }
+    fn monitor(&self) -> &MonitorInfo {
+        self.inner.monitor()
+    }
+}
+
+/// Counts normal and refresh encodes.
+struct CountingEncoder {
+    inner: Box<dyn tlp_desk_codec::VideoEncoder>,
+    encodes: Arc<std::sync::atomic::AtomicU32>,
+    refines: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl tlp_desk_codec::VideoEncoder for CountingEncoder {
+    fn encode(
+        &mut self,
+        f: &BgraFrame,
+    ) -> Result<Option<tlp_desk_codec::EncodedFrame>, tlp_desk_codec::CodecError> {
+        self.encodes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.encode(f)
+    }
+    fn encode_refine(
+        &mut self,
+        f: &BgraFrame,
+    ) -> Result<Option<tlp_desk_codec::EncodedFrame>, tlp_desk_codec::CodecError> {
+        self.refines
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.encode_refine(f)
+    }
+    fn request_keyframe(&mut self) {
+        self.inner.request_keyframe();
+    }
+    fn set_bitrate(&mut self, kbps: u32) -> Result<(), tlp_desk_codec::CodecError> {
+        self.inner.set_bitrate(kbps)
+    }
+    fn config(&self) -> tlp_desk_codec::EncoderConfig {
+        self.inner.config()
+    }
+}
+
+/// When the screen stops changing the host sends exactly one high-quality refresh picture
+/// (and none while it keeps moving or after it has been sent), and the viewer decodes it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn still_screen_gets_one_refine_picture() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let encodes = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let refines = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let (e2, r2) = (encodes.clone(), refines.clone());
+    let mut h = harness(false, move |c| {
+        c.capturer_factory = Arc::new(|_, _| {
+            Ok(Box::new(SettlingCapturer {
+                inner: FakeCapturer::new(),
+            }) as Box<dyn ScreenCapturer>)
+        });
+        c.encoder_factory = Arc::new(move |cfg| {
+            Ok(Box::new(CountingEncoder {
+                inner: tlp_desk_codec::new_encoder(cfg)?,
+                encodes: e2.clone(),
+                refines: r2.clone(),
+            }) as Box<dyn tlp_desk_codec::VideoEncoder>)
+        });
+    })
+    .await;
+    let conn = spawn_connect(&h, AuthMethod::AcceptPrompt);
+    let req = incoming(&mut h.events).await;
+    h.host.accept(req, None);
+    let (session, _ev) = conn.await.unwrap().expect("connect");
+    first_frame(&session).await;
+    assert_eq!(refines.load(SeqCst), 0, "no refresh while the screen moves");
+
+    within("one refresh picture", async {
+        while refines.load(SeqCst) == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    let moved = encodes.load(SeqCst);
+    assert!(moved >= 2);
+    // The refresh is decoded by the viewer like any other picture.
+    let before = session.stats().frames_decoded;
+    within("refresh decoded", async {
+        while session.stats().frames_decoded <= before {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    // Still static: no second refresh, no more normal encodes.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(
+        refines.load(SeqCst),
+        1,
+        "exactly one refresh for a still screen"
+    );
+    assert_eq!(encodes.load(SeqCst), moved, "nothing else was encoded");
+    session.disconnect();
+    within("end", session.ended()).await;
+}

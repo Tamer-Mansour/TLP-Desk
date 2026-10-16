@@ -224,6 +224,18 @@ impl VideoEncoder for FallbackEncoder {
         self.active.request_keyframe();
     }
 
+    fn encode_refine(&mut self, frame: &BgraFrame) -> Result<Option<EncodedFrame>, CodecError> {
+        match self.active.encode_refine(frame) {
+            Ok(out) => Ok(out),
+            Err(e @ CodecError::SizeMismatch { .. }) => Err(e),
+            Err(e) if self.on_primary => {
+                self.fall_back(&e)?;
+                self.active.encode_refine(frame)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError> {
         let kbps = kbps.max(1);
         self.config.bitrate_kbps = kbps;

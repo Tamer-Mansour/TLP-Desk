@@ -210,3 +210,156 @@ impl StagingReader {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Graphics::Direct3D11::{D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT};
+
+    use super::*;
+    use crate::resample_lanczos2;
+
+    /// Dark 1-2 px strokes on a light page: the worst case for blurry filters.
+    fn text_like(w: u32, h: u32) -> BgraFrame {
+        let mut f = BgraFrame::new_tight(w, h);
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        for y in 0..h {
+            for x in 0..w {
+                // Glyph cells of 6x10 px; a pseudo-random 5x7 bit pattern per cell.
+                let (cx, cy) = (x / 6, y / 10);
+                let mut s = seed ^ (u64::from(cx) * 0x1000_0000_01B3) ^ (u64::from(cy) << 32);
+                s ^= s >> 29;
+                s = s.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                s ^= s >> 32;
+                let (gx, gy) = (x % 6, y % 10);
+                let on = gx < 5 && gy < 7 && s % 7 != 0 && (s >> (gy * 5 + gx) as u64) & 1 == 1;
+                let v = if on { 20 } else { 245 };
+                f.row_mut(y)[x as usize * 4..x as usize * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        seed = seed.wrapping_add(1);
+        let _ = seed;
+        f
+    }
+
+    /// Mean absolute neighbour difference: a simple sharpness measure.
+    fn edge_energy(f: &BgraFrame) -> f64 {
+        let mut total = 0u64;
+        for y in 0..f.height - 1 {
+            let (a, b) = (f.row(y), f.row(y + 1));
+            for x in 0..f.width as usize - 1 {
+                total += u64::from(a[x * 4].abs_diff(a[x * 4 + 4]));
+                total += u64::from(a[x * 4].abs_diff(b[x * 4]));
+            }
+        }
+        total as f64 / (f64::from(f.width) * f64::from(f.height))
+    }
+
+    fn psnr(a: &BgraFrame, b: &BgraFrame) -> f64 {
+        let mut se = 0f64;
+        for y in 0..a.height {
+            for (p, q) in a.row(y).chunks_exact(4).zip(b.row(y).chunks_exact(4)) {
+                for c in 0..3 {
+                    let d = f64::from(p[c]) - f64::from(q[c]);
+                    se += d * d;
+                }
+            }
+        }
+        let mse = se / (f64::from(a.width) * f64::from(a.height) * 3.0);
+        if mse < 1e-9 {
+            99.0
+        } else {
+            10.0 * (255.0f64 * 255.0 / mse).log10()
+        }
+    }
+
+    /// Plain 2x2-area average to the target size (what the old bilinear path approximated).
+    fn box_downscale(src: &BgraFrame, w: u32, h: u32) -> BgraFrame {
+        let mut out = BgraFrame::new_tight(w, h);
+        for oy in 0..h {
+            let y0 = (u64::from(oy) * u64::from(src.height) / u64::from(h)) as u32;
+            let y1 = ((u64::from(oy + 1) * u64::from(src.height)).div_ceil(u64::from(h)) as u32)
+                .max(y0 + 1)
+                .min(src.height);
+            for ox in 0..w {
+                let x0 = (u64::from(ox) * u64::from(src.width) / u64::from(w)) as u32;
+                let x1 = ((u64::from(ox + 1) * u64::from(src.width)).div_ceil(u64::from(w)) as u32)
+                    .max(x0 + 1)
+                    .min(src.width);
+                let mut sum = 0u64;
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        sum += u64::from(src.row(y)[x as usize * 4]);
+                    }
+                }
+                let v = (sum / u64::from((y1 - y0) * (x1 - x0))) as u8;
+                out.row_mut(oy)[ox as usize * 4..ox as usize * 4 + 4]
+                    .copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        out
+    }
+
+    /// Uploads `src`, runs the real GPU scaler + readback, returns the scaled frame. `None` when
+    /// no D3D11 device is available (headless CI): the test is then skipped.
+    fn gpu_scale(src: &BgraFrame, out: (u32, u32)) -> Option<BgraFrame> {
+        let (device, context) = create_device(None).ok()?;
+        let desc = D3D11_TEXTURE2D_DESC {
+            Usage: D3D11_USAGE_DEFAULT,
+            ..bgra_desc(src.width, src.height)
+        };
+        let init = D3D11_SUBRESOURCE_DATA {
+            pSysMem: src.data.as_ptr().cast(),
+            SysMemPitch: src.stride,
+            SysMemSlicePitch: 0,
+        };
+        let mut tex = None;
+        // SAFETY: `desc` is a valid BGRA8 description; `init` points at `stride * height`
+        // initialised bytes of `src`, alive for the call; `tex` is a live out-pointer.
+        unsafe { device.CreateTexture2D(&desc, Some(&init), Some(&mut tex)) }.ok()?;
+        let tex = tex?;
+        let mut reader = StagingReader::new(device, context, (src.width, src.height), Some(out));
+        assert_eq!(reader.output_size(), out, "GPU scaler must be active");
+        reader.read(&tex, src.width, src.height, 0).ok()
+    }
+
+    /// Measured numbers for the docs (run with `--nocapture`): for the non-2x ratios the GPU
+    /// Lanczos-2 output matches the CPU reference and keeps more edge contrast than the old
+    /// box/bilinear result.
+    #[test]
+    fn gpu_lanczos_matches_cpu_reference_and_is_sharper_than_box() {
+        for (src_size, out) in [((1920, 1200), (1600, 1000)), ((2560, 1440), (1920, 1080))] {
+            let src = text_like(src_size.0, src_size.1);
+            let Some(gpu) = gpu_scale(&src, out) else {
+                eprintln!("no D3D11 device; skipping");
+                return;
+            };
+            assert_eq!((gpu.width, gpu.height), out);
+            let cpu = resample_lanczos2(&src, out.0, out.1);
+            let boxed = box_downscale(&src, out.0, out.1);
+            let (e_gpu, e_box, e_src) = (edge_energy(&gpu), edge_energy(&boxed), edge_energy(&src));
+            let p = psnr(&gpu, &cpu);
+            eprintln!(
+                "{src_size:?} -> {out:?}: GPU vs CPU Lanczos {p:.1} dB; edge energy src {e_src:.2}, box {e_box:.2}, lanczos {e_gpu:.2}"
+            );
+            assert!(
+                p > 35.0,
+                "GPU Lanczos differs from the CPU reference: {p:.1} dB"
+            );
+            assert!(
+                e_gpu > e_box * 1.05,
+                "no sharper than box: {e_gpu:.2} vs {e_box:.2}"
+            );
+        }
+    }
+
+    /// The exact-2x and 1:1 paths keep their old (box / identity) behaviour.
+    #[test]
+    fn gpu_exact_half_is_still_a_box_filter() {
+        let src = text_like(1280, 800);
+        let Some(gpu) = gpu_scale(&src, (640, 400)) else {
+            return;
+        };
+        let boxed = box_downscale(&src, 640, 400);
+        assert!(psnr(&gpu, &boxed) > 40.0);
+    }
+}

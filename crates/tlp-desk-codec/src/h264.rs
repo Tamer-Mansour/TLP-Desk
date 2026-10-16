@@ -94,6 +94,11 @@ pub struct H264Encoder {
     raw: ffi::RawEncoder,
     yuv: I420Buffer,
     force_keyframe: bool,
+    /// Second OpenH264 instance for refresh pictures (fixed low quantiser), created on first
+    /// use. A separate instance because OpenH264 does not reliably take quantiser changes on a
+    /// running encoder; the main encoder is told to emit a keyframe after each refresh so the
+    /// viewer's reference stays in sync.
+    refiner: Option<ffi::RawEncoder>,
 }
 
 impl H264Encoder {
@@ -144,6 +149,7 @@ impl H264Encoder {
             raw,
             yuv: I420Buffer::default(),
             force_keyframe: false, // the first frame is always an IDR
+            refiner: None,
         })
     }
 
@@ -199,6 +205,58 @@ impl VideoEncoder for H264Encoder {
 
     fn request_keyframe(&mut self) {
         self.force_keyframe = true;
+    }
+
+    fn encode_refine(&mut self, frame: &BgraFrame) -> Result<Option<EncodedFrame>, CodecError> {
+        if frame.width != self.config.width || frame.height != self.config.height {
+            return Err(CodecError::SizeMismatch {
+                got_w: frame.width,
+                got_h: frame.height,
+                want_w: self.config.width,
+                want_h: self.config.height,
+            });
+        }
+        if !frame.is_well_formed() {
+            return Err(CodecError::Backend(
+                "BGRA frame buffer too small for its geometry".into(),
+            ));
+        }
+        if self.refiner.is_none() {
+            let q = crate::refine::REFINE_QP as u8;
+            self.refiner = Some(ffi::RawEncoder::new(&ffi::Params {
+                width: self.encoded.0,
+                height: self.encoded.1,
+                // Effectively unlimited: the quantiser, not the rate, decides the size.
+                bitrate_bps: 100_000_000,
+                fps: self.config.fps.max(1),
+                threads: resolve_threads(self.tuning.threads),
+                complexity: H264Complexity::Low,
+                screen_content: false,
+                qp: crate::QpBounds { min: q, max: q + 1 },
+            })?);
+        }
+        if self.half {
+            bgra_to_i420_half(frame, &mut self.yuv);
+        } else {
+            bgra_to_i420(frame, &mut self.yuv);
+        }
+        let Some(refiner) = self.refiner.as_mut() else {
+            return Ok(None);
+        };
+        refiner.force_idr()?;
+        let mut data = Vec::new();
+        let kind = refiner.encode(&self.yuv, (frame.timestamp_us / 1000) as i64, &mut data)?;
+        // The viewer now holds this picture, not the main encoder's reference: restart the
+        // main stream with a keyframe on the next change.
+        self.force_keyframe = true;
+        if kind == ffi::FrameKind::Skipped || data.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(EncodedFrame {
+            keyframe: true,
+            timestamp_us: frame.timestamp_us,
+            data,
+        }))
     }
 
     fn set_bitrate(&mut self, kbps: u32) -> Result<(), CodecError> {

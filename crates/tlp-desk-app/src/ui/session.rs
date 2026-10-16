@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use eframe::egui::{
     self, Color32, ColorImage, EventFilter, Pos2, Rect, RichText, Sense, TextureHandle,
-    TextureOptions,
 };
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
@@ -19,7 +18,7 @@ use super::perf;
 use super::privacy::PrivacyUi;
 use super::transfers::{self, TransferPanel};
 use super::whiteboard::WhiteboardUi;
-use super::{theme, widgets};
+use super::{theme, view_scale, widgets};
 use crate::backend::{Backend, FrameSlot, MonitorDesc, PeerInfo, SessionId, SessionStats};
 use crate::i18n::{format, ltr_isolate, Tx, S};
 use crate::input_map;
@@ -41,6 +40,8 @@ pub struct ViewerSession {
     pub permissions: Permissions,
     frames: Arc<FrameSlot>,
     texture: Option<TextureHandle>,
+    /// Sharp display of the frame: filter choice and still-screen pre-scaling.
+    view: super::view_scale::RemoteView,
     frame_size: [usize; 2],
     pub mode: ViewMode,
     pub view_only: bool,
@@ -121,6 +122,7 @@ impl ViewerSession {
             permissions,
             frames,
             texture: None,
+            view: Default::default(),
             frame_size: [0, 0],
             mode: ViewMode::Fit,
             view_only: false,
@@ -262,13 +264,8 @@ impl ViewerSession {
         // The pixels were copied into the texture image: give the buffer back to the decoder.
         self.frames.recycle(frame.rgba);
         self.frame_size = [w, h];
-        match &mut self.texture {
-            Some(tex) => tex.set(image, TextureOptions::LINEAR),
-            None => {
-                self.texture =
-                    Some(ctx.load_texture("remote-screen", image, TextureOptions::LINEAR))
-            }
-        }
+        self.view
+            .set_frame(ctx, &mut self.texture, image, Instant::now());
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend, modal_open: bool) {
@@ -317,7 +314,7 @@ impl ViewerSession {
             .frame(egui::Frame::new().fill(Color32::from_rgb(0x0B, 0x0D, 0x10)))
             .show(ui, |ui| {
                 let area = ui.max_rect();
-                let Some(tex) = self.texture.clone() else {
+                let Some(mut tex) = self.texture.clone() else {
                     ui.centered_and_justified(|ui| {
                         ui.label(RichText::new(tx.t(S::WaitingForVideo)).color(Color32::GRAY));
                     });
@@ -326,18 +323,21 @@ impl ViewerSession {
                     }
                     return;
                 };
-                let tex_size = egui::vec2(self.frame_size[0] as f32, self.frame_size[1] as f32);
+                let ppp = ui.ctx().pixels_per_point();
+                let now = Instant::now();
                 let uv = Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
                 let (resp, image_rect, visible) = match self.mode {
                     ViewMode::Fit => {
                         let avail = ui.available_rect_before_wrap();
                         let resp = ui.allocate_rect(avail, Sense::click_and_drag());
-                        let image_rect = fit_rect(avail, tex_size);
-                        ui.painter().image(tex.id(), image_rect, uv, Color32::WHITE);
+                        let image_rect = view_scale::fit_rect_snapped(avail, self.frame_size, ppp);
+                        let id = self.view.texture_for(ui.ctx(), &mut tex, image_rect, now);
+                        ui.painter().image(id, image_rect, uv, Color32::WHITE);
                         (resp, image_rect, image_rect)
                     }
                     ViewMode::Original => {
-                        let size = tex_size / ui.ctx().pixels_per_point();
+                        let size =
+                            egui::vec2(self.frame_size[0] as f32, self.frame_size[1] as f32) / ppp;
                         let source = if self.can_mouse() {
                             egui::scroll_area::ScrollSource::SCROLL_BAR
                         } else {
@@ -349,7 +349,11 @@ impl ViewerSession {
                             .show(ui, |ui| {
                                 let (rect, resp) =
                                     ui.allocate_exact_size(size, Sense::click_and_drag());
-                                ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
+                                // One texel per physical pixel, at a physical-pixel origin.
+                                let rect =
+                                    view_scale::original_rect(rect.min, self.frame_size, ppp);
+                                let id = self.view.texture_for(ui.ctx(), &mut tex, rect, now);
+                                ui.painter().image(id, rect, uv, Color32::WHITE);
                                 let visible = ui.clip_rect().intersect(rect);
                                 (resp, rect, visible)
                             })

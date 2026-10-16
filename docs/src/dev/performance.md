@@ -34,7 +34,7 @@ costs almost nothing after the first frame.
 
 Reading a 3840×2400 BGRA frame back from the GPU moves 36 MB per frame — over 2 GB/s at 60 fps —
 before the encoder even starts. The host caps capture at **1920×1200** and scales on the GPU
-(mip generation for reductions above 2×, then one bilinear pass), so only 9 MB per frame crosses
+(mip generation for reductions above 2×, then one bilinear pass, or a Lanczos-2 pass for ratios other than 2×; see [Sharpness](#sharpness)), so only 9 MB per frame crosses
 to the CPU and the encoder works on a quarter of the pixels. Input mapping is unaffected: clicks
 are mapped over the real monitor, not the video. See
 [ADR 0012](../adr/0012-capture-size-cap.md).
@@ -164,6 +164,62 @@ flapping.
 BGRA → I420 is integer BT.709 code written for auto-vectorisation and split into bands of at least
 128 rows across up to 8 threads. `bgra_to_i420_half` downsizes 2× and converts in one pass when
 the encoder has to halve an oversized source.
+
+## Sharpness
+
+"Never blurry" is about what the eye sees once the picture stops moving, so sharpness work targets
+four places in the pipeline.
+
+**Static refinement (host).** While the screen moves, rate control spends few bits per picture and
+text softens. When the captured content has been unchanged for 300 ms the encode thread
+(`tlp-desk-host`, `refine::RefineGate`) re-encodes the last frame **once** through
+`VideoEncoder::encode_refine`: a keyframe at QP 14. The OpenH264 encoder does this with a second,
+lazily created OpenH264 instance configured for QP 14 and no practical bitrate cap (OpenH264 does
+not reliably take quantiser changes on a running encoder, so the quality-ladder's `QpBounds` on the
+main encoder are never touched); the main encoder is then told to emit a keyframe on its next
+picture, so the viewer's reference stays in sync (the main stream afterwards behaves exactly as
+after any keyframe request). Other backends (Media Foundation hardware) use the trait default:
+forced keyframe at 6x the bitrate, then the bitrate is restored. A pending resolution-ladder step
+postpones the refresh (the capturer is about to reopen at another size). Rules: nothing changed means no
+refresh (cursor-only moves do not count), at least 1.5 s between refreshes, and a 3 s back-off after
+a dropped packet because a refresh keyframe is big. It is sent at the current encoded size; lifting
+the capture cap for the refresh is not done (the adaptive ladder owns the size).
+
+**Downscale filter (capture).** The GPU scaler used mips plus a bilinear tap, which is an exact box
+filter only for a 2x reduction and blurs 1-pixel strokes at other ratios (1920x1200 to 1600x1000,
+1440p to 1080p). For any final reduction that is not 1:1 or exactly 2x it now runs a Lanczos-2
+pixel shader (kernel stretched by the ratio, normalised, exact `Load`s). The same taps exist on the
+CPU as `tlp_desk_capture::resample_lanczos2`, which is the reference in the tests and the fallback
+for CPU-only paths.
+
+**Colour.** BGRA to I420 is BT.709 limited range on the encoder side (signalled in the OpenH264 SPS
+VUI and in the Media Foundation media type) and the viewer decodes with the inverse BT.709
+limited-range matrix, so there is no washed-out or tinted picture. `tests/colour.rs` round-trips
+flat colours through the real codec (error at most 6 levels). 4:2:0 chroma still halves the colour
+resolution of coloured text; luminance, which carries the legibility, is full resolution.
+
+**Viewer display (app).** `ui::view_scale`: the image rectangle is snapped to physical pixels
+(fractional `pixels_per_point` safe); a 1:1 display (Actual size, or a fit that equals the frame size)
+uses nearest sampling, other scales bilinear. egui's wgpu backend has no mipmaps, so when a picture is
+shown smaller than it is and the screen has been still for 120 ms, the viewer pre-scales it once with
+Lanczos-2 (about 40 ms for 1080p to 720p) and shows that texture 1:1.
+
+### Measurements
+
+All from tests in the repository; run with `--nocapture` to reproduce.
+
+| Measurement | Result | Test |
+|---|---|---|
+| Synthetic dense text, 1280x720, 2.5 Mbps, scrolled 37 px/frame, last moving frame | 31.1 dB PSNR, SSIM 0.989 | `sharpness::refine_picture_is_much_sharper_than_a_moving_frame` |
+| Same scene after one refresh picture | 49.3 dB, SSIM 0.9999 (401 KB once) | same |
+| 1080p60 at the default 14.9 Mbps, same scroll | moving 30.9 dB / SSIM 0.988; refresh 48.7 dB / SSIM 0.9999 (about 1 MB once) | `sharpness::report_1080p_default_bitrate` |
+| Text image 1920x1200 to 1600x1000 (GPU, headless D3D11) | edge energy: source 131, box filter 72, Lanczos-2 107; GPU equals CPU reference at 72 dB | `windows_capture::d3d::tests::gpu_lanczos_matches_cpu_reference_and_is_sharper_than_box` |
+| Text image 2560x1440 to 1920x1080 | edge energy: source 131, box 74, Lanczos-2 103 | same |
+
+The synthetic scene is deliberately harsh (1-pixel strokes everywhere, no smooth areas), so real
+screens refresh far smaller than 1 MB and the moving picture is better than 31 dB; the point is the
+size of the *difference*. A refresh keyframe is one extra burst of a few hundred kilobytes about a
+third of a second after the screen settles, which is nothing on a LAN.
 
 ## Hardware encoding
 

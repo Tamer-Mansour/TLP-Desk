@@ -3,7 +3,10 @@
 //! The captured texture is copied into our own shader-readable texture (the capture APIs do not
 //! guarantee shader bindings on theirs), optionally box-filtered with `GenerateMips` when the
 //! reduction exceeds 2x, then drawn into a smaller render target with a full-screen triangle and a
-//! bilinear sampler. For an exact 2x reduction the bilinear tap at each output pixel centre lands
+//! bilinear sampler. When the remaining reduction is not exactly 2x (and not 1x) a Lanczos-2
+//! pixel shader is used instead: bilinear/box filtering blurs 1-pixel text strokes at ratios
+//! such as 1920x1200 -> 1600x1000, Lanczos-2 keeps them crisp (the same taps as the CPU
+//! reference `resample_lanczos2`). For an exact 2x reduction the bilinear tap at each output pixel centre lands
 //! on the corner shared by four source pixels, i.e. a 2x2 box filter, same as the CPU half path.
 //!
 //! The shaders are compiled at startup with `D3DCompile` (d3dcompiler_47.dll, part of Windows 10
@@ -20,18 +23,19 @@ use windows::Win32::Graphics::Direct3D::{
     ID3DBlob, ID3DInclude, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, D3D_SRV_DIMENSION_TEXTURE2D,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RenderTargetView,
+    ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RenderTargetView,
     ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader,
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_COMPARISON_NEVER,
-    D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FLOAT32_MAX, D3D11_RESOURCE_MISC_GENERATE_MIPS,
-    D3D11_SAMPLER_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0,
-    D3D11_TEX2D_SRV, D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_VIEWPORT,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX,
+    D3D11_BUFFER_DESC, D3D11_COMPARISON_NEVER, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FLOAT32_MAX,
+    D3D11_RESOURCE_MISC_GENERATE_MIPS, D3D11_SAMPLER_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC,
+    D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_SUBRESOURCE_DATA, D3D11_TEX2D_SRV,
+    D3D11_TEXTURE2D_DESC, D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_IMMUTABLE, D3D11_VIEWPORT,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
 use super::d3d::{bgra_desc, create_texture};
 use super::platform_err;
-use crate::{mip_level_for, CaptureError};
+use crate::{mip_level_for, mip_size, needs_lanczos, CaptureError};
 
 const SHADER: &str = r#"
 Texture2D src_tex : register(t0);
@@ -53,6 +57,45 @@ VsOut vs_main(uint id : SV_VertexID) {
 
 float4 ps_main(VsOut i) : SV_Target {
     return src_tex.Sample(src_smp, i.uv);
+}
+
+cbuffer Params : register(b0) {
+    float2 ratio;   // source pixels per output pixel (>= 1)
+    float2 pad;
+};
+
+float lanczos2(float x) {
+    x = abs(x);
+    if (x < 1e-5) return 1.0;
+    if (x >= 2.0) return 0.0;
+    float px = 3.14159265 * x;
+    return 2.0 * sin(px) * sin(px * 0.5) / (px * px);
+}
+
+// Lanczos-2 with the kernel stretched by the reduction ratio. Exact `Load`s (no filtering), taps
+// clamped to the image, weights normalised: same maths as the CPU reference.
+float4 ps_lanczos(VsOut i) : SV_Target {
+    uint w, h, levels;
+    src_tex.GetDimensions(0, w, h, levels);
+    float2 scale = max(ratio, float2(1.0, 1.0));
+    float2 centre = i.pos.xy * ratio;          // pos.xy is already (x + 0.5, y + 0.5)
+    float2 radius = 2.0 * scale;
+    int2 first = (int2)floor(centre - radius);
+    int2 last = (int2)ceil(centre + radius);
+    int2 maxc = int2((int)w - 1, (int)h - 1);
+    float3 acc = float3(0.0, 0.0, 0.0);
+    float wsum = 0.0;
+    [loop] for (int y = first.y; y <= last.y; y++) {
+        float wy = lanczos2((y + 0.5 - centre.y) / scale.y);
+        int cy = clamp(y, 0, maxc.y);
+        [loop] for (int x = first.x; x <= last.x; x++) {
+            float wgt = wy * lanczos2((x + 0.5 - centre.x) / scale.x);
+            int cx = clamp(x, 0, maxc.x);
+            acc += wgt * src_tex.Load(int3(cx, cy, 0)).rgb;
+            wsum += wgt;
+        }
+    }
+    return float4(saturate(acc / wsum), 1.0);
 }
 "#;
 
@@ -115,6 +158,8 @@ pub(super) struct GpuScaler {
     vs: ID3D11VertexShader,
     ps: ID3D11PixelShader,
     sampler: ID3D11SamplerState,
+    /// Constant buffer with the reduction ratio, present when `ps` is the Lanczos shader.
+    params: Option<ID3D11Buffer>,
 }
 
 impl GpuScaler {
@@ -178,7 +223,40 @@ impl GpuScaler {
         let rtv = rtv.ok_or_else(|| CaptureError::Platform("no render target view".into()))?;
 
         let vs_code = compile(s!("vs_main"), s!("vs_4_0"))?;
-        let ps_code = compile(s!("ps_main"), s!("ps_4_0"))?;
+        let lanczos = needs_lanczos(mip_size(input, level), output);
+        let ps_code = if lanczos {
+            compile(s!("ps_lanczos"), s!("ps_4_0"))?
+        } else {
+            compile(s!("ps_main"), s!("ps_4_0"))?
+        };
+        let params = if lanczos {
+            let m = mip_size(input, level);
+            let data: [f32; 4] = [
+                m.0 as f32 / output.0 as f32,
+                m.1 as f32 / output.1 as f32,
+                0.0,
+                0.0,
+            ];
+            let desc = D3D11_BUFFER_DESC {
+                ByteWidth: 16,
+                Usage: D3D11_USAGE_IMMUTABLE,
+                BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+                ..Default::default()
+            };
+            let init = D3D11_SUBRESOURCE_DATA {
+                pSysMem: data.as_ptr().cast(),
+                ..Default::default()
+            };
+            let mut buf = None;
+            // SAFETY: `desc` describes a 16-byte immutable constant buffer and `init` points at
+            // exactly 16 initialised bytes (`data`) that outlive the call; `buf` is a live
+            // out-pointer.
+            unsafe { device.CreateBuffer(&desc, Some(&init), Some(&mut buf)) }
+                .map_err(|e| platform_err("CreateBuffer(scale params)", e))?;
+            Some(buf.ok_or_else(|| CaptureError::Platform("no constant buffer".into()))?)
+        } else {
+            None
+        };
         let (mut vs, mut ps) = (None, None);
         // SAFETY: the bytecode slices come from successful D3DCompile calls for the matching
         // shader stages and stay alive for the calls; no class linkage; live out-pointers.
@@ -225,6 +303,7 @@ impl GpuScaler {
             vs,
             ps,
             sampler,
+            params,
         })
     }
 
@@ -277,6 +356,9 @@ impl GpuScaler {
             context.PSSetShader(&self.ps, None);
             context.PSSetShaderResources(0, Some(&[Some(self.src_view.clone())]));
             context.PSSetSamplers(0, Some(&[Some(self.sampler.clone())]));
+            if let Some(params) = &self.params {
+                context.PSSetConstantBuffers(0, Some(&[Some(params.clone())]));
+            }
             context.RSSetState(None);
             context.OMSetBlendState(None, None, u32::MAX);
             context.RSSetViewports(Some(&[viewport]));

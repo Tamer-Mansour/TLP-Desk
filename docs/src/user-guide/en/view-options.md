@@ -50,3 +50,10 @@ Within the preset the remote PC still adapts to the network by itself, and it do
 picture **smaller** (for example 1920 × 1200, then 1600 × 1000, then 1280 × 800) instead of letting
 it turn blurry or blocky. The size in use is shown in the [statistics overlay](stats.md); it goes
 back up when the network is calm again.
+
+### Sharp text
+
+When the picture stops moving (you stop scrolling or typing) the remote PC sends one extra
+high-quality picture about a third of a second later, so text turns crisp on its own. In **Actual
+size** every remote pixel is shown on exactly one screen pixel, and when the window is smaller than
+the remote screen, TLP-Desk re-scales the still picture with a sharp filter. Nothing to configure.
