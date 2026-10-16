@@ -8,6 +8,16 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Added
+
+- **Drag files from the remote PC into Explorer.** Select files or folders in the file browser's **Remote PC** pane and drag them out of the window onto Explorer, the desktop or any program that accepts virtual files; Windows copies them with its own progress dialog. The files are listed while you drag and pulled through the transfer engine only when dropped (resume, BLAKE3 verification). Needs the Files permission. No wire change.
+- **Drop into the remote folder.** Files dropped from Explorer onto the **Remote PC** pane are copied into the folder open there (the pane shows where they go); dropped elsewhere on the session window they still go to the remote Desktop.
+
+### Fixed
+
+- **No blur flash after the screen settles.** The frame that follows a still screen (the host's sharp refresh picture, or a single keystroke) is no longer shown bilinear for about 120 ms before the sharp version; the viewer re-scales it at once (pictures up to 1920x1200).
+- **`--connect` opens the window normally.** A run started with `--connect` no longer starts minimized (from the start-minimized setting or a console/script launcher).
+
 ## [1.0.0-rc.2] - 2026-10-16
 
 Streaming quality and AnyDesk-style file transfer.
