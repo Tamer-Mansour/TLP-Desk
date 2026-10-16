@@ -40,8 +40,13 @@ executables' VERSIONINFO, and the setup's file name uses it. The wire protocol h
    ```
 
    `build-setup.ps1` sets `TLP_DESK_REQUIRE_EXE_ICON=1`, so a build without `rc.exe` fails
-   instead of producing an exe without an icon. Both scripts build with `--offline` and honour
-   `CARGO_TARGET_DIR`.
+   instead of producing an exe without an icon. Both scripts build with `--offline`, honour
+   `CARGO_TARGET_DIR`, and write to `TLP_DESK_DIST_DIR` instead of `dist\` when it is set.
+
+   **Signing:** with a certificate configured (`TLP_SIGN_*` variables, see
+   [Code signing](code-signing.md)), both scripts sign `TLP-Desk.exe` and `TLP-Desk-cli.exe`, and
+   Inno signs the setup and its uninstaller; set `TLP_SIGN_REQUIRED=1` for a release so a signing
+   problem stops the build. Without a certificate the scripts print that the build is unsigned.
 6. **Smoke-test the installer**: install, launch, check the firewall rules exist
    (`netsh advfirewall firewall show rule name="TLP-Desk (QUIC)"`), uninstall, check they are gone.
    Silent mode: `TLP-Desk-<version>-setup.exe /VERYSILENT /SUPPRESSMSGBOXES` (standard Inno Setup
@@ -53,6 +58,12 @@ executables' VERSIONINFO, and the setup's file name uses it. The wire protocol h
    tag (the version comes from `Cargo.toml`, not from the tag), paste the changelog section as
    the description, include the SHA256 lines, and publish the draft. Without CI, build with the
    scripts and upload the three files from `dist\` by hand.
+10. **winget manifest.** After publishing, run
+    `scripts\update-winget-manifest.ps1 -Tag vx.y.z` (downloads the setup, checks its SHA-256,
+    updates `installer\winget\`, runs `winget validate`) and commit the result. Submitting it to
+    `microsoft/winget-pkgs` is a separate, manual step; see
+    [Code signing, SmartScreen and winget](code-signing.md#winget-install-without-the-warning)
+    (including the note on pre-release versions).
 
 ## What the installer does
 
@@ -78,8 +89,11 @@ From `installer\TLP-Desk.iss`:
   `%ProgramData%\TLP-Desk` (identity key, known hosts) and `%APPDATA%\TLP-Desk` (settings), so a
   reinstall keeps the same device ID.
 
-The setup is **not code-signed**, so SmartScreen may warn on first run; the user guide explains
-"More info → Run anyway". See [ADR 0008](../adr/0008-inno-setup-instead-of-msi.md).
+The pipeline can sign everything (exes, setup, uninstaller), but no certificate is configured yet,
+so releases are **not code-signed** and SmartScreen warns on first run; the user guide explains
+"More info → Run anyway" and the winget route. What to buy and how to set it up:
+[Code signing, SmartScreen and winget](code-signing.md). See also
+[ADR 0008](../adr/0008-inno-setup-instead-of-msi.md).
 
 ## Verifying a download
 
