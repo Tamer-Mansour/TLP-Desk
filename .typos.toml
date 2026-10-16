@@ -27,3 +27,5 @@ trun = "trun"
 ue = "ue"
 # Additive-increase / multiplicative-decrease (bitrate controller in tlp-desk-host adapt).
 AIMD = "AIMD"
+# SDDL alias of the built-in Administrators group (service file and COM ACLs).
+BA = "BA"

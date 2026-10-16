@@ -88,6 +88,13 @@ impl AppServiceExtension {
         })
     }
 
+    /// Browsing while nobody is logged on: only a folder that does not exist, so nothing.
+    fn no_user_fs(&self) -> FsConfig {
+        FsConfig {
+            allowed_roots: vec![self.data_dir.join("no-user")],
+        }
+    }
+
     /// The settings in effect.
     pub fn settings(&self) -> HostSettings {
         lock(&self.settings).clone()
@@ -290,8 +297,9 @@ impl ServiceExtension for AppServiceExtension {
             Arc::new(AgentClipboard::new(features.clone())),
             ClipboardConfig::default(),
         );
+        // Nothing to browse until the console user is known (see `console_user`).
         let fsb = FilesBridge::new(
-            FsConfig::default(),
+            self.no_user_fs(),
             ClipFilesConfig {
                 source: agent_file_source(features.clone()),
                 ..ClipFilesConfig::default()
@@ -385,10 +393,7 @@ impl ServiceExtension for AppServiceExtension {
                 self.files.set_allowed_roots(Some(Vec::new()));
                 self.files.set_default_upload_dir(None);
                 if let Some(fsb) = self.fsb.get() {
-                    // A folder that does not exist: nothing to browse while nobody is logged on.
-                    fsb.set_fs_config(FsConfig {
-                        allowed_roots: vec![self.data_dir.join("no-user")],
-                    });
+                    fsb.set_fs_config(self.no_user_fs());
                 }
             }
         }
