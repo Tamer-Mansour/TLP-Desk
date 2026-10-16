@@ -20,3 +20,4 @@ pub mod settings;
 pub mod text_route;
 pub mod tray;
 pub mod ui;
+pub mod update;

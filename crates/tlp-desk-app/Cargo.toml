@@ -40,6 +40,14 @@ time = { version = "0.3", default-features = false, features = ["std", "local-of
 # Native file / folder picker for sending files (Win32 dialogs; no GTK or portals on Windows).
 rfd = { version = "0.15", default-features = false }
 resvg = { version = "0.48", default-features = false }
+# In-app updates (update/): opt-in GitHub Releases check over HTTPS. rustls with ring (already
+# used by quinn) and the OS certificate store (platform verifier), no bundled root list.
+ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+semver = "1"
+sha2 = "0.10"
+# Verifies the release manifest signature (minisign format, ed25519); no dependencies.
+minisign-verify = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 # HKCU Run key for "start with Windows" (settings::autostart). Safe API: this crate stays
@@ -55,6 +63,7 @@ windows = { version = "0.62", features = [
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Threading",
     "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
@@ -71,6 +80,11 @@ tempfile = "3"
 # (`wgpu`) and drives `App` through a real `eframe::CreationContext` (`eframe`).
 egui_kittest = { version = "0.36.2", features = ["wgpu", "eframe"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Release signing (update::sign, examples/release_sign.rs): minisign-compatible signatures.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
+blake2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
 
 [lib]
 path = "src/lib.rs"
