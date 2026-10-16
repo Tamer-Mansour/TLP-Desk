@@ -410,3 +410,48 @@ async fn ending_one_session_keeps_the_others() {
     assert_ne!(left[0], ca.id);
 }
 
+/// The host user pauses one viewer's input: that viewer's events are dropped (held keys
+/// released) and it is shown the priority notice, the other viewer keeps control, and
+/// resuming lets the paused viewer's input through again. Permissions do not change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pausing_one_viewers_input_keeps_the_other_in_control() {
+    let mut rig = rig(|_| {}).await;
+    let (va, vb) = (viewer("viewer-a"), viewer("viewer-b"));
+    let (sa, mut ea, ca) = join(&mut rig, &va, FULL).await;
+    let (sb, _eb, _cb) = join(&mut rig, &vb, FULL).await;
+    streaming(&sa, W, H).await;
+
+    assert!(rig.host.set_input_paused(ca.id, true));
+    assert_eq!(rig.host.input_paused(ca.id), Some(true));
+    assert!(!rig.host.set_input_paused(SessionId(9999), true));
+    within("A told input is paused", async {
+        loop {
+            if let Some(ViewerEvent::HostInputPriority(true)) = ea.recv().await {
+                return;
+            }
+        }
+    })
+    .await;
+    wait_recorded(&rig.recorded, |r| r.contains(&InputEvent::ReleaseAll)).await;
+    sa.send_input(mv(1300));
+    sb.send_input(mv(2300));
+    wait_recorded(&rig.recorded, |r| has(r, &mv(2300))).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !has(&rig.recorded.lock().unwrap(), &mv(1300)),
+        "paused viewer's input leaked"
+    );
+    assert_eq!(rig.host.sessions()[0].permissions, FULL);
+
+    assert!(rig.host.set_input_paused(ca.id, false));
+    within("A told input resumed", async {
+        loop {
+            if let Some(ViewerEvent::HostInputPriority(false)) = ea.recv().await {
+                return;
+            }
+        }
+    })
+    .await;
+    sa.send_input(mv(1400));
+    wait_recorded(&rig.recorded, |r| has(r, &mv(1400))).await;
+}

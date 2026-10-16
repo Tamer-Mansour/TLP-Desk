@@ -15,7 +15,10 @@
 //!   Prompts are rate limited per peer IP.
 //! * One-time-code and password requests are verified automatically.
 //! * [`Host::sessions`] is the always-visible "who is connected" list; [`Host::disconnect`]
-//!   ends a session; [`Host::set_permissions`] changes permissions live.
+//!   ends a session; [`Host::set_permissions`] changes permissions live and
+//!   [`Host::set_input_paused`] mutes one viewer's input without touching the others.
+//!   Every session is independent (own capture pipeline, encoder, input thread and
+//!   permissions), so several viewers can control the host at the same time.
 //! * Per session, capture + encode run on one std thread and input injection on another;
 //!   nothing CPU-heavy runs on the tokio runtime. Factories in [`HostConfig`] let tests swap
 //!   in fake capturers, encoders and injectors.
@@ -417,6 +420,9 @@ struct SessionCtl {
     perms: AtomicU16,
     stop: Notify,
     perms_changed: Notify,
+    /// The host user paused this viewer's input ([`Host::set_input_paused`]).
+    input_paused: AtomicBool,
+    pause_changed: Notify,
 }
 
 struct Inner {
@@ -626,6 +632,25 @@ impl Host {
         lock(&ctl.info).permissions = permissions;
         ctl.perms_changed.notify_one();
         true
+    }
+
+    /// Pauses (or resumes) one viewer's mouse and keyboard without changing its permissions:
+    /// the host user mutes one colleague while the others keep control. Held keys/buttons of
+    /// that viewer are released, and the viewer is shown the "host has priority" notice while
+    /// paused. Returns `false` for an unknown session.
+    pub fn set_input_paused(&self, id: SessionId, paused: bool) -> bool {
+        let Some(ctl) = lock(&self.inner.sessions).get(&id).cloned() else {
+            return false;
+        };
+        ctl.input_paused.store(paused, Ordering::Release);
+        ctl.pause_changed.notify_one();
+        true
+    }
+
+    /// Whether the session's input is paused; `None` for an unknown session.
+    pub fn input_paused(&self, id: SessionId) -> Option<bool> {
+        let ctl = lock(&self.inner.sessions).get(&id).cloned()?;
+        Some(ctl.input_paused.load(Ordering::Acquire))
     }
 
     /// The rectangle (physical virtual-desktop pixels) a session currently streams and maps
@@ -898,6 +923,8 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
         perms: AtomicU16::new(perms.0),
         stop: Notify::new(),
         perms_changed: Notify::new(),
+        input_paused: AtomicBool::new(false),
+        pause_changed: Notify::new(),
     });
     if inner.shutting_down.load(Ordering::Acquire) {
         session.close(ByeReason::UserClosed).await;
@@ -984,6 +1011,10 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
     monitor_poll.reset();
     let mut active_open = true;
     let mut priority_open = true;
+    // What the viewer was last told about input priority: the local user's priority or the
+    // host user's pause, whichever holds.
+    let mut local_active = false;
+    let mut paused = false;
     let reason = loop {
         // Publish the monitor list whenever it (or the active monitor) differs from what the
         // viewer last saw.
@@ -1014,14 +1045,37 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
                 // The list is re-sent at the top of the loop if the active index differs.
             }
             p = prio_rx.recv(), if priority_open => match p {
-                Some(local_active) => {
-                    tracing::info!(session = id.0, local_active, "host input priority changed");
-                    if let Err(e) = session.send(&Message::HostInputPriority { local_active }).await {
-                        break EndReason::ConnectionLost(e.to_string());
+                Some(active) => {
+                    tracing::info!(session = id.0, local_active = active, "host input priority changed");
+                    let was = local_active || paused;
+                    local_active = active;
+                    if was != (local_active || paused) {
+                        let msg = Message::HostInputPriority { local_active: local_active || paused };
+                        if let Err(e) = session.send(&msg).await {
+                            break EndReason::ConnectionLost(e.to_string());
+                        }
                     }
                 }
                 None => priority_open = false,
             },
+            _ = ctl.pause_changed.notified() => {
+                let now = ctl.input_paused.load(Ordering::Acquire);
+                if now == paused {
+                    continue;
+                }
+                tracing::info!(session = id.0, paused = now, "host user changed input pause");
+                let was = local_active || paused;
+                paused = now;
+                if paused {
+                    let _ = input_tx.send(InputEvent::ReleaseAll);
+                }
+                if was != (local_active || paused) {
+                    let msg = Message::HostInputPriority { local_active: local_active || paused };
+                    if let Err(e) = session.send(&msg).await {
+                        break EndReason::ConnectionLost(e.to_string());
+                    }
+                }
+            }
             Some(()) = blocked_rx.recv() => {
                 inner.emit(HostEvent::InputBlocked { id });
             }
@@ -1057,7 +1111,9 @@ async fn run_session(inner: Arc<Inner>, session: Session, auth: AuthKind) {
             }
             msg = session.recv() => match msg {
                 Ok(Message::InputEvent(ev)) => {
-                    if input_allowed(current, &ev) {
+                    if paused {
+                        tracing::trace!(?ev, "input dropped: paused by the host user");
+                    } else if input_allowed(current, &ev) {
                         let _ = input_tx.send(ev);
                     } else {
                         tracing::trace!(?ev, "input blocked by permissions");
