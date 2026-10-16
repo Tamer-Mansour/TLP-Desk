@@ -9,6 +9,10 @@
 //!   [`downscale_rgba`] pre-scales it once with a Lanczos-2 filter to the exact physical size
 //!   and that texture is shown 1:1 instead (a still screen is exactly when the host sends its
 //!   crisp refresh picture).
+//! * A frame that follows a still screen while the sharp still image is on show (the host's
+//!   refine picture, or a single keystroke) is pre-scaled at once instead of being shown
+//!   bilinear for [`STILL_AFTER`] first, so the picture does not blur and sharpen again
+//!   (for frames up to [`SYNC_PRESCALE_MAX_PIXELS`]; larger ones keep the short wait).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -136,6 +140,17 @@ pub fn downscale_rgba(img: &ColorImage, size: [usize; 2]) -> ColorImage {
 /// bilinear one.
 const STILL_AFTER: Duration = Duration::from_millis(120);
 
+/// Largest frame (pixels) pre-scaled on the spot when it follows a still screen (1920x1200:
+/// a few milliseconds of Lanczos in a release build).
+const SYNC_PRESCALE_MAX_PIXELS: usize = 1920 * 1200;
+
+/// Whether a frame that arrived `gap` after the previous one, while the sharp still image
+/// was on show (`showing_still`), is pre-scaled at once: a lone frame after a still screen
+/// (the refine picture, a keystroke) stays sharp; frames in motion are shown bilinear.
+pub fn prescale_at_once(showing_still: bool, gap: Option<Duration>, pixels: usize) -> bool {
+    showing_still && gap.is_some_and(|g| g >= STILL_AFTER) && pixels <= SYNC_PRESCALE_MAX_PIXELS
+}
+
 /// A pre-scaled copy of a still frame, shown 1:1.
 struct Prescaled {
     tex: TextureHandle,
@@ -153,6 +168,10 @@ pub struct RemoteView {
     generation: u64,
     last_frame: Option<Instant>,
     prescaled: Option<Prescaled>,
+    /// The last texture handed out was the pre-scaled still image.
+    showing_still: bool,
+    /// The newest frame is pre-scaled without waiting (see [`prescale_at_once`]).
+    at_once: bool,
 }
 
 impl RemoteView {
@@ -176,6 +195,12 @@ impl RemoteView {
                 ));
             }
         }
+        let gap = self.last_frame.map(|t| now.saturating_duration_since(t));
+        self.at_once = prescale_at_once(
+            self.showing_still,
+            gap,
+            image.size[0].saturating_mul(image.size[1]),
+        );
         self.image = Some(image);
         self.generation += 1;
         self.last_frame = Some(now);
@@ -201,14 +226,16 @@ impl RemoteView {
             self.sampling = Some(want);
         }
         let Some(target) = prescale_target(image.size, rect, ppp) else {
+            self.showing_still = false;
             return tex.id();
         };
         let idle = self
             .last_frame
             .map_or(STILL_AFTER, |t| now.saturating_duration_since(t));
-        if idle < STILL_AFTER {
+        if idle < STILL_AFTER && !self.at_once {
             // Come back once the screen has been still long enough.
             ctx.request_repaint_after(STILL_AFTER - idle);
+            self.showing_still = false;
             return tex.id();
         }
         let fresh = self
@@ -236,6 +263,7 @@ impl RemoteView {
                 p.generation = self.generation;
             }
         }
+        self.showing_still = self.prescaled.is_some();
         self.prescaled.as_ref().map_or(tex.id(), |p| p.tex.id())
     }
 }
@@ -410,9 +438,14 @@ mod tests {
             "cached"
         );
 
-        // A new frame invalidates it until the screen is quiet again.
-        view.set_frame(&ctx, &mut texture, frame(640, 360), later);
-        assert_eq!(view.texture_for(&ctx, &mut tex, small, later), main);
+        // A lone frame after the still screen is pre-scaled at once (see the flicker test);
+        // frames in quick succession after it are motion: bilinear until the screen is quiet.
+        let first = later + Duration::from_millis(16);
+        view.set_frame(&ctx, &mut texture, frame(640, 360), first);
+        assert_eq!(view.texture_for(&ctx, &mut tex, small, first), still);
+        let moving = first + Duration::from_millis(16);
+        view.set_frame(&ctx, &mut texture, frame(640, 360), moving);
+        assert_eq!(view.texture_for(&ctx, &mut tex, small, moving), main);
 
         // Shown 1:1 or enlarged: never pre-scaled, and the filter follows the scale class.
         let exact = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(640.0, 360.0));
@@ -422,6 +455,57 @@ mod tests {
         let big = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(1280.0, 720.0));
         assert_eq!(view.texture_for(&ctx, &mut tex, big, much_later), main);
         assert_eq!(view.sampling, Some(Sampling::Linear));
+    }
+
+    #[test]
+    fn a_lone_frame_after_a_still_screen_stays_sharp_instead_of_flickering() {
+        let ctx = egui::Context::default();
+        let mut view = RemoteView::default();
+        let mut texture = None;
+        let t0 = Instant::now();
+        let small = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(480.0, 270.0));
+        view.set_frame(&ctx, &mut texture, frame(640, 360), t0);
+        let mut tex = texture.clone().unwrap();
+        let main = tex.id();
+        let settled = t0 + STILL_AFTER + Duration::from_millis(5);
+        let still = view.texture_for(&ctx, &mut tex, small, settled);
+        assert_ne!(still, main, "the sharp still image is on show");
+
+        // The host's refine picture arrives 300 ms later: shown pre-scaled at once (the
+        // still texture with the new content), never the blurry bilinear one in between.
+        let refine = settled + Duration::from_millis(300);
+        view.set_frame(&ctx, &mut texture, frame(640, 360), refine);
+        assert_eq!(view.texture_for(&ctx, &mut tex, small, refine), still);
+        assert_eq!(
+            view.prescaled.as_ref().map(|p| p.generation),
+            Some(view.generation),
+            "re-scaled from the new frame"
+        );
+
+        // Motion right after: bilinear, as before.
+        let next = refine + Duration::from_millis(16);
+        view.set_frame(&ctx, &mut texture, frame(640, 360), next);
+        assert_eq!(view.texture_for(&ctx, &mut tex, small, next), main);
+    }
+
+    #[test]
+    fn on_the_spot_prescale_needs_a_still_on_show_a_pause_and_a_moderate_size() {
+        let pause = Some(STILL_AFTER + Duration::from_millis(1));
+        assert!(prescale_at_once(true, pause, 1920 * 1080));
+        assert!(
+            !prescale_at_once(false, pause, 1920 * 1080),
+            "no still shown"
+        );
+        assert!(!prescale_at_once(
+            true,
+            Some(Duration::from_millis(16)),
+            1920 * 1080
+        ));
+        assert!(!prescale_at_once(true, None, 1920 * 1080), "first frame");
+        assert!(
+            !prescale_at_once(true, pause, 3840 * 2160),
+            "too big for the UI thread"
+        );
     }
 
     /// The still-screen pre-scale is done on the UI thread once per settled picture; this prints
