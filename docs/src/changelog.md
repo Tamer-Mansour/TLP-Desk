@@ -12,6 +12,7 @@ protocol bump is called out below.
 
 - **Drag files from the remote PC into Explorer.** Select files or folders in the file browser's **Remote PC** pane and drag them out of the window onto Explorer, the desktop or any program that accepts virtual files; Windows copies them with its own progress dialog. The files are listed while you drag and pulled through the transfer engine only when dropped (resume, BLAKE3 verification). Needs the Files permission. No wire change.
 - **Drop into the remote folder.** Files dropped from Explorer onto the **Remote PC** pane are copied into the folder open there (the pane shows where they go); dropped elsewhere on the session window they still go to the remote Desktop.
+- **Everything works when the host runs as the Windows service.** Explorer copy/paste, clipboard sync, file transfer (limited to the signed-in user's folder, arriving on their Desktop), chat, whiteboard, pointer marker, local priority, privacy mode and sound now work under the TLP-Desk service: a helper in the user's session does the desktop parts. The TLP-Desk window shows incoming transfers, "replace or keep both?" questions, chat and the service's sessions in the connection log. Changed host settings are applied by the service at once and saved machine-wide in `%ProgramData%\TLP-Desk\host-settings.json`. `service.log` rotates (4 MB, five older files), and `install-service` / `uninstall-service` print their outcome in a terminal. Local IPC version 2 (service, agent and GUI must be the same release); no wire change.
 
 ### Fixed
 
