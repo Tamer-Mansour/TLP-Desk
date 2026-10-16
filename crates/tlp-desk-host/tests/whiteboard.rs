@@ -3,7 +3,7 @@
 
 use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use tlp_desk_capture::{BgraFrame, CaptureError, CursorState, MonitorInfo, ScreenCapturer};
@@ -115,6 +115,13 @@ struct OverlayLog {
 
 type Log = Arc<Mutex<OverlayLog>>;
 
+/// The overlay side ignores poisoning: when a test assertion panics while holding the log, the
+/// overlay thread must not panic too (its `Drop` would then panic while unwinding and abort the
+/// whole test binary, hiding the assertion message).
+fn overlay_log(log: &Log) -> MutexGuard<'_, OverlayLog> {
+    log.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Renders the board offscreen on every change, like the real window would.
 struct FakeOverlay {
     log: Log,
@@ -125,7 +132,7 @@ struct FakeOverlay {
 impl WhiteboardOverlay for FakeOverlay {
     fn set_target(&mut self, rect: MonitorRect) {
         self.target = Some(rect);
-        self.log.lock().unwrap().targets.push(rect);
+        overlay_log(&self.log).targets.push(rect);
     }
 
     fn changed(&mut self) {
@@ -145,7 +152,7 @@ impl WhiteboardOverlay for FakeOverlay {
                 sy += (i as u32 / t.width) as f64;
             }
         }
-        let mut log = self.log.lock().unwrap();
+        let mut log = overlay_log(&self.log);
         log.inked = n;
         log.centroid = if n > 0 {
             (sx / n as f64, sy / n as f64)
@@ -157,7 +164,7 @@ impl WhiteboardOverlay for FakeOverlay {
 
 impl Drop for FakeOverlay {
     fn drop(&mut self) {
-        self.log.lock().unwrap().alive -= 1;
+        overlay_log(&self.log).alive -= 1;
     }
 }
 
@@ -393,7 +400,12 @@ async fn strokes_need_the_permission_and_land_on_the_streamed_monitor() {
         is_whiteboard_event(e, WhiteboardHostEvent::Drawing)
     })
     .await;
-    until("overlay rendered", || h.log.lock().unwrap().inked > 0).await;
+    // The overlay re-renders after each point, so the first render (a single dot, ~84 px) can
+    // land before the second point's render: wait for the whole line, not for any ink.
+    until("overlay rendered the whole line", || {
+        h.log.lock().unwrap().inked >= 1500
+    })
+    .await;
     let l = h.log.lock().unwrap();
     assert_eq!(l.created, 1);
     assert_eq!(l.targets, vec![monitor_rect()]);
