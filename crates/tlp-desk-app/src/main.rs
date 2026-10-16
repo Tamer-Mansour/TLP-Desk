@@ -6,7 +6,8 @@
 //! * `--code <6 digits>` — the host's one-time code for `--connect`;
 //! * `--settings` — open on the settings screen;
 //! * `--port <udp port>` — listen on another port than 47400 (testing two instances);
-//! * `--fake` — run on the in-process fake backend (no network; development/screenshots).
+//! * `--fake` — run on the in-process fake backend (no network; development/screenshots);
+//! * `--accept-prompt` — internal: the stand-alone Accept window (see `prompt`).
 #![forbid(unsafe_code)]
 // Hide the console window in release builds on Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -58,6 +59,10 @@ fn main() -> anyhow::Result<()> {
     // The service, its session agent and (un)installation run headless: never open a window.
     #[cfg(windows)]
     if let Some(code) = tlp_desk_app::service_entry::dispatch() {
+        std::process::exit(code);
+    }
+    // `--accept-prompt`: the stand-alone Accept window (one request on stdin, answer on stdout).
+    if let Some(code) = tlp_desk_app::prompt::dispatch() {
         std::process::exit(code);
     }
     let args = parse_args();

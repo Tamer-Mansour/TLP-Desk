@@ -14,5 +14,49 @@
 //! for its fallback dialog.
 
 pub mod protocol;
+pub mod run;
+#[cfg(windows)]
+mod windows;
 
 pub use protocol::{Outcome, PromptAuth, PromptDecision, PromptRequest, PromptTheme};
+pub use run::{dispatch, ACCEPT_PROMPT_ARG};
+
+/// Platform helpers with no-op fallbacks off Windows.
+pub(crate) mod platform {
+    /// Primary work area `[left, top, right, bottom]` in points.
+    pub fn work_area_points() -> Option<[f32; 4]> {
+        #[cfg(windows)]
+        return super::windows::work_area_points();
+        #[cfg(not(windows))]
+        None
+    }
+
+    pub fn round_corners(window: isize) {
+        #[cfg(windows)]
+        super::windows::round_corners(window);
+        #[cfg(not(windows))]
+        let _ = window;
+    }
+
+    pub fn bring_to_front(window: isize) -> bool {
+        #[cfg(windows)]
+        return super::windows::bring_to_front(window);
+        #[cfg(not(windows))]
+        {
+            let _ = window;
+            false
+        }
+    }
+
+    pub fn allow_foreground(pid: u32) {
+        #[cfg(windows)]
+        super::windows::allow_foreground(pid);
+        #[cfg(not(windows))]
+        let _ = pid;
+    }
+
+    pub fn notification_sound() {
+        #[cfg(windows)]
+        super::windows::notification_sound();
+    }
+}
