@@ -100,6 +100,15 @@ impl App {
                             self.backend.as_ref(),
                         );
                         ui.add_space(12.0);
+                        crate::ui::typing::settings_card(ui, tx, &mut self.settings);
+                        if let Some(view) = self.session.as_mut() {
+                            view.typing.set_route(
+                                crate::text_route::TextRoute::from_layout_setting(
+                                    self.settings.type_with_my_layout,
+                                ),
+                            );
+                        }
+                        ui.add_space(12.0);
                         crate::ui::audio::settings_card(
                             ui,
                             tx,

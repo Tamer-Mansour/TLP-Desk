@@ -332,6 +332,9 @@ strings! {
     AudioNotAllowed => "The other device does not share its sound.", "لا يشارك الجهاز الآخر صوته.";
     AudioVolume => "Volume", "مستوى الصوت";
     AudioDeviceFailed => "The remote sound cannot be played: no audio output device is available.", "تعذّر تشغيل صوت الجهاز البعيد: لا يتوفر جهاز لإخراج الصوت.";
+    TypingSettings => "Typing", "الكتابة";
+    TypeWithMyLayout => "Type text using my keyboard layout", "الكتابة بتخطيط لوحة المفاتيح لدي";
+    TypeWithMyLayoutHint => "Letters are sent as text, so Arabic typed here appears as Arabic even if the other PC uses an English layout. Shortcuts and special keys still work as usual.", "تُرسل الحروف نصاً، فيظهر ما تكتبه بالعربية هنا عربياً حتى لو كان تخطيط الجهاز الآخر إنجليزياً. وتبقى الاختصارات والمفاتيح الخاصة تعمل كالمعتاد.";
     AudioSettings => "Sound", "الصوت";
     AudioOnConnect => "Play the remote computer's sound when connecting", "تشغيل صوت الجهاز البعيد عند الاتصال";
     AudioOnConnectHint => "Sound plays only if the other device allows it. You can mute it at any time from the session toolbar.", "لا يُشغَّل الصوت إلا إذا سمح به الجهاز الآخر، ويمكنك كتمه في أي وقت من شريط أدوات الجلسة.";
