@@ -646,7 +646,7 @@ async fn slow_consumer_receives_every_stream() {
         seen.insert(got.id);
     }
     assert_eq!(seen.len(), 150);
-    for mut s in sends {
+    for s in sends {
         assert_eq!(s.stopped().await.unwrap(), None, "a stream was refused");
     }
 }
