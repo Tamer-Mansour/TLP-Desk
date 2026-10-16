@@ -126,6 +126,31 @@ mod tests {
         }
     }
 
+    /// Keyboard-layout switching (Arabic <-> English) on the host: Alt+Shift and Win+Space,
+    /// with either Alt/Shift, must reach the host as plain scancodes and never switch the
+    /// viewer's own layout.
+    #[test]
+    fn layout_switch_hotkeys_reach_the_host() {
+        let mut g = GrabLogic::default();
+        let combos: [&[(u16, bool)]; 3] = [
+            &[(0x38, false), (0x2A, false)], // Left Alt + Left Shift
+            &[(0x38, true), (0x36, false)],  // Right Alt (AltGr) + Right Shift
+            &[(0x5B, true), (0x39, false)],  // Win + Space
+        ];
+        for combo in combos {
+            for &(sc, ext) in combo {
+                let d = g.on_key(true, false, sc, ext, true);
+                assert!(d.suppress, "{sc:#x} down is swallowed locally");
+                assert_eq!(d.emit, vec![k(sc, ext, true)]);
+            }
+            for &(sc, ext) in combo.iter().rev() {
+                let d = g.on_key(true, false, sc, ext, false);
+                assert!(d.suppress, "{sc:#x} up is swallowed locally");
+                assert_eq!(d.emit, vec![k(sc, ext, false)]);
+            }
+        }
+    }
+
     #[test]
     fn not_grabbing_passes_through() {
         let mut g = GrabLogic::default();

@@ -54,7 +54,8 @@ anyway**, and compare the file's SHA-256 with `SHA256SUMS.txt` if you want to be
 
 Fully: the whole interface is available in Arabic with a right-to-left layout, you can choose
 Arabic-Indic digits, device names can be Arabic, and typing Arabic on the remote PC works through
-the remote PC's keyboard layout.
+the remote PC's keyboard layout (or through your own, with *Type text using my keyboard layout*),
+and text fields in TLP-Desk itself show Arabic in the right order while you type.
 
 ### How much network bandwidth does it use?
 
