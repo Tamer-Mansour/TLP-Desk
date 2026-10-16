@@ -103,7 +103,7 @@ mod tests {
         let sig = k.sign(manifest, "TLP-Desk 1.0.0");
         verify_manifest(manifest, &sig, &k.public_key_base64()).unwrap();
         // Changed manifest.
-        let bad = b"abd  TLP-Desk-1.0.0-setup.exe\n";
+        let bad = b"abX  TLP-Desk-1.0.0-setup.exe\n";
         assert!(matches!(
             verify_manifest(bad, &sig, &k.public_key_base64()),
             Err(UpdateError::BadSignature)

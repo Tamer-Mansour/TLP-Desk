@@ -29,7 +29,7 @@ pub fn is_newer(candidate: &Version, current: &Version) -> bool {
 }
 
 /// The newest version among peer announcements that is newer than `current`, with the name
-/// of the device that announced it. Unparseable announcements are skipped.
+/// of the device that announced it. Unparsable announcements are skipped.
 pub fn newest_peer<'a, I>(peers: I, current: &Version) -> Option<(Version, String)>
 where
     I: IntoIterator<Item = (&'a str, Option<&'a str>)>,

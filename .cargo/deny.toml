@@ -24,6 +24,13 @@ allow = [
 crate = "epaint_default_fonts"
 allow = ["OFL-1.1", "Ubuntu-font-1.0"]
 
+# Mozilla's CA list as data (permissive data licence). Pulled by rustls-platform-verifier
+# (the opt-in update check, ureq) for targets without a usable OS store; on Windows the OS
+# certificate store is used. Allowed for this one crate only.
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 # Duplicate versions are common in the egui/wgpu/windows graph; report them, don't fail.
 multiple-versions = "warn"
