@@ -1047,6 +1047,7 @@ impl Inner {
                     stats: SessionStats {
                         fps: s.fps,
                         latency_ms: s.latency_ms,
+                        latency_synced: s.latency_synced,
                         bitrate_kbps: s.bitrate_kbps.max(0.0).round() as u32,
                     },
                 }),
@@ -1213,6 +1214,13 @@ impl Backend for RealBackend {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {
             s.select_monitor(index);
+        }
+    }
+
+    fn select_all_monitors(&self, session: SessionId) {
+        let s = self.inner.state().viewer_sessions.get(&session).cloned();
+        if let Some(s) = s {
+            s.select_all_monitors();
         }
     }
 

@@ -9,6 +9,7 @@ pub mod file_browser;
 pub mod home;
 pub mod icons;
 pub(crate) mod key_forward;
+pub mod perf;
 pub mod playback;
 pub mod recordings;
 pub mod session;

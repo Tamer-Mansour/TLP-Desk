@@ -10,6 +10,7 @@ mod incoming;
 mod startup;
 
 pub(crate) use incoming::PERMISSION_LABELS;
+pub(crate) use startup::quality_key;
 
 use eframe::egui::{self, RichText};
 
