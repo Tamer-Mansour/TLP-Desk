@@ -1,6 +1,12 @@
-//! Every user-facing CLI string, in one place (English for now; the i18n table comes with the
-//! CLI `--lang` work in a later milestone).
+//! Every user-facing CLI string, in English and Arabic (`--lang en|ar`, env `TLP_DESK_LANG`).
+//!
+//! The language is chosen once at start-up ([`set_lang`]); each function returns the text in
+//! that language. Numbers, device IDs, addresses and codes stay in ASCII digits in both
+//! languages so they can be copied into other commands and scripts. JSON output (`--json`) is
+//! never translated: its keys and enum names are a stable machine interface.
 
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use tlp_desk_crypto::{DeviceId, Fingerprint};
@@ -12,89 +18,235 @@ use tlp_desk_net::{AuthKind, DiscoveredDevice, PeerInfo};
 use tlp_desk_proto::{Permissions, RejectReason};
 use tlp_desk_viewer::{EndReason as ViewerEnd, MonitorDesc, ViewerStats};
 
-pub const ABOUT: &str = "Headless TLP-Desk client for scripts and testing (LAN only)";
-pub const WAITING_FOR_ACCEPT: &str = "Waiting for the host user to accept...";
-pub const PROMPT_HINT: &str = "Type y + Enter to accept, anything else to reject.";
-pub const STOPPING: &str = "Stopping.";
-pub const NO_DEVICES: &str = "No devices found.";
-pub const NO_FRAME: &str = "No frame was decoded; snapshot not written.";
+/// Language of the human-readable output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Lang {
+    /// English.
+    #[default]
+    En,
+    /// Arabic (العربية).
+    Ar,
+}
+
+static LANG: AtomicU8 = AtomicU8::new(0);
+
+thread_local! {
+    /// Per-thread override so tests can check both languages in parallel.
+    static OVERRIDE: Cell<Option<Lang>> = const { Cell::new(None) };
+}
+
+/// Sets the process-wide output language (call once, before any output).
+pub fn set_lang(lang: Lang) {
+    LANG.store(lang as u8, Ordering::Relaxed);
+}
+
+/// The output language in effect on this thread.
+pub fn lang() -> Lang {
+    OVERRIDE.with(Cell::get).unwrap_or_else(|| {
+        if LANG.load(Ordering::Relaxed) == Lang::Ar as u8 {
+            Lang::Ar
+        } else {
+            Lang::En
+        }
+    })
+}
+
+/// Runs `f` with `lang` as this thread's language (tests).
+#[cfg(test)]
+pub fn with_lang<R>(lang: Lang, f: impl FnOnce() -> R) -> R {
+    let prev = OVERRIDE.with(|o| o.replace(Some(lang)));
+    let r = f();
+    OVERRIDE.with(|o| o.set(prev));
+    r
+}
+
+/// Picks the English or Arabic variant.
+fn t<T>(en: T, ar: T) -> T {
+    match lang() {
+        Lang::En => en,
+        Lang::Ar => ar,
+    }
+}
+
+/// `--help` summary (clap needs a constant, so this one stays English).
+pub const ABOUT: &str = "Headless TLP-Desk client for scripts and AI agents (LAN only)";
+
+pub fn waiting_for_accept() -> &'static str {
+    t(
+        "Waiting for the host user to accept...",
+        "بانتظار موافقة مستخدم الجهاز المضيف...",
+    )
+}
+
+pub fn prompt_hint() -> &'static str {
+    t(
+        "Type y + Enter to accept, anything else to reject.",
+        "اكتب y ثم Enter للقبول، وأي شيء آخر للرفض.",
+    )
+}
+
+pub fn stopping() -> &'static str {
+    t("Stopping.", "جارٍ الإيقاف.")
+}
+
+pub fn no_devices() -> &'static str {
+    t("No devices found.", "لم يُعثر على أي جهاز.")
+}
+
+pub fn no_frame() -> &'static str {
+    t(
+        "No frame was decoded; snapshot not written.",
+        "لم تُفك أي صورة؛ لم تُحفظ اللقطة.",
+    )
+}
+
+pub fn error_line(err: &anyhow::Error) -> String {
+    t(format!("error: {err:#}"), format!("خطأ: {err:#}"))
+}
 
 pub fn identity(id: DeviceId, fp: &Fingerprint, dir: &str) -> String {
-    format!(
-        "Device ID:   {id}\nFingerprint: {}\nKey store:   {dir}",
-        fp.to_hex()
+    t(
+        format!(
+            "Device ID:   {id}\nFingerprint: {}\nKey store:   {dir}",
+            fp.to_hex()
+        ),
+        format!(
+            "معرّف الجهاز: {id}\nبصمة المفتاح: {}\nمخزن المفاتيح: {dir}",
+            fp.to_hex()
+        ),
     )
 }
 
 pub fn listening(id: DeviceId, addr: std::net::SocketAddr, name: &str) -> String {
-    format!("Hosting as \"{name}\" - device ID {id}, listening on UDP {addr}")
+    t(
+        format!("Hosting as \"{name}\" - device ID {id}, listening on UDP {addr}"),
+        format!("الاستضافة باسم \"{name}\" - معرّف الجهاز {id}، الاستماع على UDP {addr}"),
+    )
 }
 
 pub fn code(code: &str) -> String {
-    format!("One-time code: {code}")
+    t(
+        format!("One-time code: {code}"),
+        format!("رمز الاستخدام لمرة واحدة: {code}"),
+    )
 }
 
 pub fn code_disabled() -> &'static str {
-    "One-time code access is off (use --code to enable). Viewers must be accepted."
+    t(
+        "One-time code access is off (use --code to enable). Viewers must be accepted.",
+        "الدخول برمز لمرة واحدة معطّل (فعّله بـ --code). يجب قبول كل مشاهد يدويًا.",
+    )
 }
 
 pub fn auto_accept() -> &'static str {
-    "WARNING: --auto-accept is on: every LAN viewer that asks is accepted without a prompt."
+    t(
+        "WARNING: --auto-accept is on: every LAN viewer that asks is accepted without a prompt.",
+        "تحذير: الخيار --auto-accept مفعّل: يُقبل كل مشاهد على الشبكة المحلية دون سؤال.",
+    )
 }
 
 pub fn incoming(r: &IncomingRequest) -> String {
-    format!(
-        "\nIncoming connection: \"{}\" (ID {}) from {}",
-        r.peer.name, r.peer.device_id, r.peer.addr
+    t(
+        format!(
+            "\nIncoming connection: \"{}\" (ID {}) from {}",
+            r.peer.name, r.peer.device_id, r.peer.addr
+        ),
+        format!(
+            "\nطلب اتصال وارد: \"{}\" (المعرّف {}) من {}",
+            r.peer.name, r.peer.device_id, r.peer.addr
+        ),
     )
 }
 
 pub fn accept_question() -> &'static str {
-    "Accept? [y/N] "
+    t("Accept? [y/N] ", "قبول؟ [y/N] ")
 }
 
 pub fn auto_accepted(r: &IncomingRequest) -> String {
-    format!("Auto-accepting {} ({})", r.peer.device_id, r.peer.addr)
+    t(
+        format!("Auto-accepting {} ({})", r.peer.device_id, r.peer.addr),
+        format!("قبول تلقائي لـ {} ({})", r.peer.device_id, r.peer.addr),
+    )
 }
 
-pub fn cancelled(reason: CancelReason) -> String {
+pub fn cancelled(reason: CancelReason) -> &'static str {
     match reason {
-        CancelReason::ViewerLeft => "The viewer gave up before an answer.".into(),
-        CancelReason::TimedOut => "No answer in time: rejected.".into(),
-        CancelReason::HostShutdown => "Host stopping: request rejected.".into(),
+        CancelReason::ViewerLeft => t(
+            "The viewer gave up before an answer.",
+            "انسحب المشاهد قبل الرد.",
+        ),
+        CancelReason::TimedOut => t("No answer in time: rejected.", "لم يصل رد في الوقت: رُفض."),
+        CancelReason::HostShutdown => t(
+            "Host stopping: request rejected.",
+            "المضيف يتوقف: رُفض الطلب.",
+        ),
     }
 }
 
 pub fn auth_failed(peer: &PeerInfo, kind: AuthKind, reason: RejectReason) -> String {
-    format!(
-        "Refused {} ({}) using {kind:?}: {reason:?}",
-        peer.device_id, peer.addr
+    t(
+        format!(
+            "Refused {} ({}) using {kind:?}: {reason:?}",
+            peer.device_id, peer.addr
+        ),
+        format!(
+            "رُفض {} ({}) عبر {kind:?}: {reason:?}",
+            peer.device_id, peer.addr
+        ),
     )
 }
 
 pub fn connected_viewer(v: &ConnectedViewer) -> String {
-    format!(
-        "CONNECTED: \"{}\" (ID {}) from {} via {:?}, permissions {}",
-        v.peer.name,
-        v.peer.device_id,
-        v.peer.addr,
-        v.auth,
-        permissions(v.permissions)
+    t(
+        format!(
+            "CONNECTED: \"{}\" (ID {}) from {} via {:?}, permissions {}",
+            v.peer.name,
+            v.peer.device_id,
+            v.peer.addr,
+            v.auth,
+            permissions(v.permissions)
+        ),
+        format!(
+            "متصل: \"{}\" (المعرّف {}) من {} عبر {:?}، الصلاحيات {}",
+            v.peer.name,
+            v.peer.device_id,
+            v.peer.addr,
+            v.auth,
+            permissions(v.permissions)
+        ),
     )
 }
 
 pub fn viewer_left(peer: &PeerInfo, reason: &HostEnd) -> String {
-    format!(
-        "DISCONNECTED: {} ({}) - {reason:?}",
-        peer.device_id, peer.addr
+    t(
+        format!(
+            "DISCONNECTED: {} ({}) - {reason:?}",
+            peer.device_id, peer.addr
+        ),
+        format!("انقطع: {} ({}) - {reason:?}", peer.device_id, peer.addr),
     )
 }
 
 pub fn code_changed(code: &str) -> String {
-    format!("New one-time code: {code}")
+    t(
+        format!("New one-time code: {code}"),
+        format!("رمز جديد لمرة واحدة: {code}"),
+    )
 }
 
+/// Permission names joined with `+`. Kept in English in both languages: they are the same
+/// words the JSON output and `--help` use.
 pub fn permissions(p: Permissions) -> String {
+    let v = permission_names(p);
+    if v.is_empty() {
+        t("none", "لا شيء").into()
+    } else {
+        v.join("+")
+    }
+}
+
+/// Stable machine names of the permissions in `p` (also used in JSON).
+pub fn permission_names(p: Permissions) -> Vec<&'static str> {
     let names = [
         (Permissions::VIEW, "view"),
         (Permissions::CONTROL, "mouse"),
@@ -109,111 +261,151 @@ pub fn permissions(p: Permissions) -> String {
         (Permissions::WHITEBOARD, "whiteboard"),
         (Permissions::SYSTEM, "system"),
     ];
-    let v: Vec<&str> = names
+    names
         .iter()
         .filter(|(f, _)| p.contains(*f))
         .map(|(_, n)| *n)
-        .collect();
-    if v.is_empty() {
-        "none".into()
-    } else {
-        v.join("+")
-    }
+        .collect()
 }
 
 pub fn device_row(d: &DiscoveredDevice) -> String {
     let addrs: Vec<String> = d.addrs.iter().map(|a| a.to_string()).collect();
-    let via = match (d.via_mdns, d.via_broadcast) {
-        (true, true) => "mdns+broadcast",
-        (true, false) => "mdns",
-        _ => "broadcast",
-    };
     format!(
-        "{}  {:<24}  {}  (v{}, {via})",
+        "{}  {:<24}  {}  (v{}, {})",
         d.device_id,
         d.name,
         addrs.join(", "),
-        d.protocol_version
+        d.protocol_version,
+        discovered_via(d)
     )
+}
+
+/// How a device was discovered (stable machine name, also used in JSON).
+pub fn discovered_via(d: &DiscoveredDevice) -> &'static str {
+    match (d.via_mdns, d.via_broadcast) {
+        (true, true) => "mdns+broadcast",
+        (true, false) => "mdns",
+        _ => "broadcast",
+    }
 }
 
 pub fn searching(secs: u64) -> String {
-    format!("Searching the LAN for {secs} s...")
-}
-
-pub fn connecting(target: &str) -> String {
-    format!("Connecting to {target}...")
-}
-
-pub fn connected_host(peer: &PeerInfo, perms: Permissions) -> String {
-    format!(
-        "Connected to \"{}\" (ID {}) at {}, permissions {}",
-        peer.name,
-        peer.device_id,
-        peer.addr,
-        permissions(perms)
+    t(
+        format!("Searching the LAN for {secs} s..."),
+        format!("جارٍ البحث في الشبكة المحلية لمدة {secs} ث..."),
     )
 }
 
-pub fn stats_line(t: Duration, s: &ViewerStats) -> String {
-    format!(
-        "[{:>3}s] {:>5.1} fps  {:>8.0} kbps  rtt {:>5.1} ms  latency ~{:>5.1} ms  decode {:>5.1} ms  {}x{}  frames {}/{}",
-        t.as_secs(),
-        s.fps,
-        s.bitrate_kbps,
-        s.rtt_ms,
-        s.latency_ms,
-        s.decode_ms,
-        s.width,
-        s.height,
-        s.frames_decoded,
-        s.frames_received
+pub fn connecting(target: &str) -> String {
+    t(
+        format!("Connecting to {target}..."),
+        format!("جارٍ الاتصال بـ {target}..."),
+    )
+}
+
+pub fn connected_host(peer: &PeerInfo, perms: Permissions) -> String {
+    t(
+        format!(
+            "Connected to \"{}\" (ID {}) at {}, permissions {}",
+            peer.name,
+            peer.device_id,
+            peer.addr,
+            permissions(perms)
+        ),
+        format!(
+            "تم الاتصال بـ \"{}\" (المعرّف {}) على {}، الصلاحيات {}",
+            peer.name,
+            peer.device_id,
+            peer.addr,
+            permissions(perms)
+        ),
+    )
+}
+
+pub fn stats_line(t_elapsed: Duration, s: &ViewerStats) -> String {
+    t(
+        format!(
+            "[{:>3}s] {:>5.1} fps  {:>8.0} kbps  rtt {:>5.1} ms  latency ~{:>5.1} ms  decode {:>5.1} ms  {}x{}  frames {}/{}",
+            t_elapsed.as_secs(), s.fps, s.bitrate_kbps, s.rtt_ms, s.latency_ms, s.decode_ms,
+            s.width, s.height, s.frames_decoded, s.frames_received
+        ),
+        format!(
+            "[{:>3} ث] {:>5.1} إطار/ث  {:>8.0} ك.بت/ث  ذهاب وإياب {:>5.1} م.ث  تأخير ~{:>5.1} م.ث  فك {:>5.1} م.ث  {}x{}  إطارات {}/{}",
+            t_elapsed.as_secs(), s.fps, s.bitrate_kbps, s.rtt_ms, s.latency_ms, s.decode_ms,
+            s.width, s.height, s.frames_decoded, s.frames_received
+        ),
     )
 }
 
 pub fn session_ended(r: &ViewerEnd) -> String {
-    format!("Session ended: {r:?}")
+    t(
+        format!("Session ended: {r:?}"),
+        format!("انتهت الجلسة: {r:?}"),
+    )
 }
 
 pub fn snapshot_saved(path: &str, w: u32, h: u32) -> String {
-    format!("Snapshot {w}x{h} saved to {path}")
+    t(
+        format!("Snapshot {w}x{h} saved to {path}"),
+        format!("حُفظت لقطة {w}x{h} في {path}"),
+    )
 }
 
 pub fn key_changed_help() -> &'static str {
-    "\n!!! THE HOST KEY HAS CHANGED !!!\n\
-     Someone may be impersonating this host (man-in-the-middle), or it was reinstalled.\n\
-     If you are sure the host was reinstalled, run again with --forget-key."
+    t(
+        "\n!!! THE HOST KEY HAS CHANGED !!!\n\
+         Someone may be impersonating this host (man-in-the-middle), or it was reinstalled.\n\
+         If you are sure the host was reinstalled, run again with --forget-key.",
+        "\n!!! تغيّر مفتاح الجهاز المضيف !!!\n\
+         قد يكون أحدهم ينتحل هذا الجهاز (هجوم الوسيط)، أو أُعيد تثبيته.\n\
+         إن كنت متأكدًا من إعادة التثبيت، فأعد التشغيل مع --forget-key.",
+    )
 }
 
 pub fn summary(s: &ViewerStats, secs: f32) -> String {
-    format!(
-        "Summary: {} frames decoded in {:.1} s ({:.1} fps avg)",
-        s.frames_decoded,
-        secs,
-        s.frames_decoded as f32 / secs.max(0.001)
+    let avg = s.frames_decoded as f32 / secs.max(0.001);
+    t(
+        format!(
+            "Summary: {} frames decoded in {secs:.1} s ({avg:.1} fps avg)",
+            s.frames_decoded
+        ),
+        format!(
+            "الملخص: فُكّ {} إطارًا في {secs:.1} ث (بمعدل {avg:.1} إطار/ث)",
+            s.frames_decoded
+        ),
     )
 }
 
 pub fn host_priority(local_active: bool) -> &'static str {
     if local_active {
-        "The host user is using the mouse/keyboard; your input is paused."
+        t(
+            "The host user is using the mouse/keyboard; your input is paused.",
+            "مستخدم المضيف يستعمل الفأرة/لوحة المفاتيح؛ إدخالك متوقف مؤقتًا.",
+        )
     } else {
-        "The host user is idle again; your input is active."
+        t(
+            "The host user is idle again; your input is active.",
+            "مستخدم المضيف لم يعد نشطًا؛ إدخالك مفعّل.",
+        )
     }
 }
 
 pub fn monitors(list: &[MonitorDesc], active: u32) -> String {
-    let mut out = String::from("Host monitors:");
+    let mut out = String::from(t("Host monitors:", "شاشات المضيف:"));
     for m in list {
         out.push_str(&format!(
-            "\n  {} {}: {}x{} at ({}, {}){}{}",
+            "\n  {} {}: {}x{} ({}, {}){}{}",
             if m.index == active { "*" } else { " " },
             m.index,
             m.width,
             m.height,
             m.x,
             m.y,
-            if m.primary { " primary" } else { "" },
+            if m.primary {
+                t(" primary", " رئيسية")
+            } else {
+                ""
+            },
             if m.name.is_empty() {
                 String::new()
             } else {
@@ -225,16 +417,23 @@ pub fn monitors(list: &[MonitorDesc], active: u32) -> String {
 }
 
 pub fn selecting_monitor(index: u32) -> String {
-    format!("Switching to monitor {index}...")
+    t(
+        format!("Switching to monitor {index}..."),
+        format!("جارٍ التبديل إلى الشاشة {index}..."),
+    )
 }
 
 pub fn privacy_allowed() -> &'static str {
-    "Privacy mode is allowed: viewers may blank this PC's screen and block its keyboard/mouse.\n\
-     To end it here: hold Ctrl+Alt+Shift+P for 3 seconds, or press Ctrl+Alt+Del."
+    t(
+        "Privacy mode is allowed: viewers may blank this PC's screen and block its keyboard/mouse.\n\
+         To end it here: hold Ctrl+Alt+Shift+P for 3 seconds, or press Ctrl+Alt+Del.",
+        "وضع الخصوصية مسموح: يمكن للمشاهدين جعل شاشة هذا الحاسوب سوداء وحجب لوحة مفاتيحه وفأرته.\n\
+         لإنهائه من هنا: اضغط مطولاً على Ctrl+Alt+Shift+P لمدة ٣ ثوانٍ، أو اضغط Ctrl+Alt+Del.",
+    )
 }
 
 /// The host's black privacy screen. Shown to whoever sits at the host, so it is always in
-/// Arabic and English (same wording as the GUI's i18n table).
+/// Arabic and English, whatever `--lang` says (same wording as the GUI's i18n table).
 pub fn privacy_screen(viewers: &[PrivacyViewer]) -> PrivacyScreenText {
     let mut lines = vec![
         ScreenLine::title("هذا الحاسوب قيد الاستخدام عن بُعد عبر TLP-Desk"),
@@ -259,46 +458,121 @@ pub fn privacy_screen(viewers: &[PrivacyViewer]) -> PrivacyScreenText {
     PrivacyScreenText { lines }
 }
 
+/// Host side: privacy mode changed for a viewer.
 pub fn host_privacy(peer: &str, status: &PrivacyStatus) -> String {
-    let state = if status.active { "ON" } else { "OFF" };
-    format!(
-        "PRIVACY MODE {state} ({:?}; reported to {peer})",
-        status.cause
-    )
-}
-
-pub fn requesting_privacy() -> &'static str {
-    "Asking the host to turn privacy mode on..."
-}
-
-pub fn viewer_privacy(enabled: bool) -> &'static str {
-    if enabled {
-        "Privacy mode is ON: the host screen is black and its keyboard/mouse are blocked."
+    let cause = format!("{:?}", status.cause);
+    if status.active {
+        t(
+            format!("PRIVACY MODE ON ({cause}; viewer {peer})"),
+            format!("وضع الخصوصية مفعّل ({cause}؛ المشاهد {peer})"),
+        )
     } else {
-        "Privacy mode is OFF (turned off, refused, or ended on the host)."
+        t(
+            format!("PRIVACY MODE OFF ({cause}; viewer {peer})"),
+            format!("وضع الخصوصية متوقف ({cause}؛ المشاهد {peer})"),
+        )
     }
 }
 
+pub fn requesting_privacy() -> &'static str {
+    t(
+        "Asking the host to turn privacy mode on...",
+        "جارٍ طلب تشغيل وضع الخصوصية من المضيف...",
+    )
+}
+
+/// Viewer side: the host's actual privacy-mode state.
+pub fn viewer_privacy(enabled: bool) -> &'static str {
+    if enabled {
+        t(
+            "Privacy mode is ON: the host screen is black and its keyboard/mouse are blocked.",
+            "وضع الخصوصية مفعّل: شاشة المضيف سوداء ولوحة مفاتيحه وفأرته محجوبة.",
+        )
+    } else {
+        t(
+            "Privacy mode is OFF (turned off, refused, or ended on the host).",
+            "وضع الخصوصية متوقف (أُوقف، أو رُفض، أو أُنهي على المضيف).",
+        )
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn both_languages_differ_and_keep_values() {
+        let en = with_lang(Lang::En, || searching(7));
+        let ar = with_lang(Lang::Ar, || searching(7));
+        assert_eq!(en, "Searching the LAN for 7 s...");
+        assert!(ar.starts_with("جارٍ البحث"));
+        assert!(ar.contains('7'), "numbers stay ASCII: {ar}");
+        assert_ne!(
+            with_lang(Lang::En, no_devices),
+            with_lang(Lang::Ar, no_devices)
+        );
+    }
+
+    #[test]
+    fn arabic_names_round_trip_in_messages() {
+        let name = "حاسوب المكتب ٢";
+        let ar = with_lang(Lang::Ar, || connecting(name));
+        assert!(ar.contains(name));
+        let en = with_lang(Lang::En, || connecting(name));
+        assert_eq!(en, format!("Connecting to {name}..."));
+    }
+
+    #[test]
+    fn permission_names_are_stable() {
+        assert_eq!(
+            permission_names(Permissions::VIEW | Permissions::FILES),
+            ["view", "files"]
+        );
+        assert_eq!(
+            with_lang(Lang::En, || permissions(Permissions::NONE)),
+            "none"
+        );
+        assert_eq!(
+            with_lang(Lang::Ar, || permissions(Permissions::NONE)),
+            "لا شيء"
+        );
+    }
+
+    #[test]
+    fn override_is_per_thread() {
+        with_lang(Lang::Ar, || {
+            let other = std::thread::spawn(|| with_lang(Lang::En, stopping))
+                .join()
+                .unwrap();
+            assert_eq!(other, "Stopping.");
+            assert_eq!(stopping(), "جارٍ الإيقاف.");
+        });
+    }
+
+    #[test]
     fn privacy_screen_is_bilingual_and_names_viewers() {
-        let t = privacy_screen(&[PrivacyViewer {
-            name: "مكتب-Office".into(),
-            device_id: "123 456 789".into(),
-        }]);
-        assert!(t.lines[0].large && t.lines[0].is_rtl());
-        assert!(t.lines[1].large && !t.lines[1].is_rtl());
-        assert!(t
-            .lines
-            .iter()
-            .any(|l| l.text == "متصل: مكتب-Office (123 456 789)"));
-        assert!(t
-            .lines
-            .iter()
-            .any(|l| l.text == "Connected: مكتب-Office (123 456 789)"));
-        assert_eq!(t.sanitized(), t, "fits the privacy screen limits");
+        // The same in both CLI languages: it is read by the person at the host.
+        for lang in [Lang::En, Lang::Ar] {
+            let t = with_lang(lang, || {
+                privacy_screen(&[PrivacyViewer {
+                    name: "مكتب-Office".into(),
+                    device_id: "123 456 789".into(),
+                }])
+            });
+            assert!(t.lines[0].large && t.lines[0].is_rtl());
+            assert!(t.lines[1].large && !t.lines[1].is_rtl());
+            assert!(t
+                .lines
+                .iter()
+                .any(|l| l.text == "متصل: مكتب-Office (123 456 789)"));
+            assert!(t
+                .lines
+                .iter()
+                .any(|l| l.text == "Connected: مكتب-Office (123 456 789)"));
+            assert_eq!(t.sanitized(), t, "fits the privacy screen limits");
+        }
+        assert_ne!(
+            with_lang(Lang::En, || viewer_privacy(true)),
+            with_lang(Lang::Ar, || viewer_privacy(true))
+        );
     }
 }
