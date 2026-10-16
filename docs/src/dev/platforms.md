@@ -33,5 +33,46 @@ they are only checked by the macOS CI job.
 
 ## Android (viewer only)
 
-See [the Android section below](#android-viewer-details) once the crate lands; summary: viewer
-only, a `tlp-desk-android` cdylib that drives the shared viewer session with a touch-first UI.
+`crates/tlp-desk-android` is a `cdylib` (+ `rlib`) loaded by `NativeActivity`
+(`android-activity` + eframe's `android-native-activity`). It reuses `tlp-desk-viewer` unchanged and
+has its own slim egui UI. Android cannot host: there is no unattended capture or injection API for
+a normal app.
+
+| Module | What it does | Tested on Windows |
+|---|---|---|
+| `gesture` | touch recognizer (tap, long press, drag, two-finger scroll, pinch) and the mapper to `InputEvent` | yes, unit tests |
+| `view` | zoom/pan of the picture | yes |
+| `keyboard` | soft-keyboard text to US-layout scancodes; Arabic and other characters via clipboard + Ctrl+V | yes |
+| `i18n` | Arabic/English; includes the desktop app's `i18n/shaping.rs` by path | yes |
+| `session` | tokio runtime + `Viewer::connect` + state for the UI | partly |
+| `ui` | connect form, session view | compiles; not run |
+
+### Building the APK on Windows
+
+One-time setup (nothing needs admin rights; everything lives under one folder, here
+`C:\tlp-build\android`):
+
+1. JDK 17 (zip), Android command-line tools (zip), then
+   `sdkmanager --sdk_root=<sdk> "platforms;android-34" "build-tools;34.0.0"`, and the NDK r27c zip.
+2. `rustup target add aarch64-linux-android` and `cargo install cargo-apk --locked`.
+
+Build (PowerShell):
+
+```powershell
+$env:ANDROID_HOME = "C:\tlp-build\android\sdk"
+$env:ANDROID_NDK_ROOT = "C:\tlp-build\android\ndk-x\android-ndk-r27c"
+$env:JAVA_HOME = "C:\tlp-build\android\jdk\jdk-17.0.13+11"; $env:Path = "$env:JAVA_HOME\bin;$env:Path"
+cargo apk build -p tlp-desk-android --lib           # debug-signed APK under target/debug/apk
+cargo apk build -p tlp-desk-android --lib --release # needs your own keystore (see cargo-apk docs)
+```
+
+Manifest permissions come from `[package.metadata.android]` in the crate's `Cargo.toml`:
+`INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_MULTICAST_STATE`.
+
+### Known gaps
+
+* **Multicast lock.** mDNS discovery needs `WifiManager.createMulticastLock(..).acquire()` (a JNI
+  call). Not implemented; the permission is requested and the call is documented in the crate
+  docs. Connect by IP (or `id@ip`).
+* No file transfer, chat, audio, monitor switching or recording UI.
+* The touch UI has never run on a device or emulator.

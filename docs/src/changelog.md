@@ -20,6 +20,8 @@ a landing page and an MSI.
 
 ### Added
 
+- **macOS host and viewer (experimental).** Screen capture with Quartz Display Services, mouse and keyboard injection with `CGEvent` (Windows scancodes mapped to macOS key codes), Screen Recording and Accessibility permission checks with an Arabic/English guidance card that opens the right System Settings pane, data in `~/Library/Application Support/TLP-Desk`, an unsigned `.app` bundle script and a macOS CI job. Written and cross-checked without a Mac; not yet run on real hardware. See [TLP-Desk on a Mac](user-guide/en/macos.md). (PR #40)
+- **Android viewer (experimental).** New `tlp-desk-android` crate: connect by IP or `id@ip`, tap/hold/drag/two-finger scroll/pinch-zoom touch controls, soft keyboard (Arabic through the clipboard), Arabic and English UI with right-to-left layout. Viewer only; not yet run on a device. See [TLP-Desk on Android](user-guide/en/android.md). (PR #40)
 - **Windows service, secure desktop and Ctrl+Alt+Del.** `TLP-Desk.exe install-service` runs TLP-Desk as a SYSTEM service that starts a session agent in the active console session and follows user switching, so the sign-in screen, lock screen and UAC prompts can be seen and controlled. Ctrl+Alt+Del is sent with `SendSAS` from the service. (PR #9)
 - **Permanent password, restart and reconnect, lock.** An unattended-access password (Argon2id at rest, never on the wire, 5 attempts per minute then a 10-minute lockout), **Restart remote PC** with a one-use reconnect ticket and automatic reconnect, and **Lock remote PC**. (PR #11)
 - **Privacy mode.** Blanks the host's screens and blocks its local input during a session; ends with Ctrl+Alt+Shift+P (3 s) or Ctrl+Alt+Del, on disconnect or when permission is withdrawn. (PR #19)
