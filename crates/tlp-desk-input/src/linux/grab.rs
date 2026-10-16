@@ -47,7 +47,7 @@ impl KeyboardGrab {
     /// Connects to the X server (inactive grab). Returns the grab and the receiver of
     /// captured events.
     pub fn start() -> Result<(KeyboardGrab, Receiver<InputEvent>), InputError> {
-        if !x11_display_available() {
+        if !x11_display_available() || super::wayland_session() {
             return Err(no_display_error());
         }
         let (conn, screen) =

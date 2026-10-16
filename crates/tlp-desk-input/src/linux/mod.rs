@@ -30,12 +30,24 @@ pub fn x11_display_available() -> bool {
     std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
 }
 
-/// The error returned when no X server is reachable, naming Wayland when that is the cause.
+/// Whether this is a native Wayland session, where XTest and `XGrabKeyboard` on the XWayland
+/// server only reach X11 clients and so would silently do the wrong thing. Setting
+/// `TLP_DESK_FORCE_X11` overrides the check (same switch as the capture backend).
+pub(crate) fn wayland_session() -> bool {
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    !set("TLP_DESK_FORCE_X11")
+        && (std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t.eq_ignore_ascii_case("wayland"))
+            || (set("WAYLAND_DISPLAY") && !set("DISPLAY")))
+}
+
+/// The error returned when no usable X server is reachable, naming Wayland when that is the
+/// cause.
 pub(crate) fn no_display_error() -> InputError {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty()) {
+    if wayland_session() || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty()) {
         InputError::Platform(
-            "this is a Wayland session without XWayland; input injection needs an X11 session \
-             (the RemoteDesktop portal is not implemented yet)"
+            "this is a Wayland session; input injection and the keyboard grab need an X11 \
+             session (the RemoteDesktop portal is not implemented yet; \
+             TLP_DESK_FORCE_X11=1 overrides)"
                 .into(),
         )
     } else {
@@ -66,7 +78,7 @@ struct XTestSink {
 
 impl XTestSink {
     fn connect() -> Result<Self, InputError> {
-        if !x11_display_available() {
+        if !x11_display_available() || wayland_session() {
             return Err(no_display_error());
         }
         let (conn, screen) =

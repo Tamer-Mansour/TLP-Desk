@@ -50,7 +50,8 @@ pub(crate) fn scan_to_evdev(key: ScanKey) -> Option<u16> {
             .find(|(sc, _)| *sc == key.scancode)
             .map(|&(_, ev)| ev);
     }
-    // 0x54..=0x55 are unused on set 1; 0x56 is the ISO extra key (KEY_102ND); 0x57/0x58 are F11/F12 and equal evdev 87/88.
+    // 0x54..=0x55 are unused on set 1; 0x56 is the ISO extra key (evdev 86); 0x57/0x58 are
+    // F11/F12 and equal evdev 87/88.
     (1..=IDENTITY_MAX)
         .contains(&key.scancode)
         .then_some(key.scancode)
