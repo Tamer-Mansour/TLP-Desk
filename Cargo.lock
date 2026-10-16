@@ -4549,7 +4549,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tlp-desk-android"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -4569,7 +4569,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-app"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "anyhow",
  "eframe",
@@ -4604,7 +4604,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-audio"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "cpal",
  "opus",
@@ -4619,7 +4619,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-capture"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -4631,7 +4631,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-cli"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -4650,7 +4650,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-codec"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "openh264",
  "openh264-sys2",
@@ -4662,7 +4662,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-crypto"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "argon2",
  "hmac",
@@ -4678,7 +4678,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-files"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "arboard",
  "blake3",
@@ -4699,7 +4699,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-host"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "postcard",
  "serde",
@@ -4723,7 +4723,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-input"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -4736,7 +4736,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-net"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "if-addrs",
  "mdns-sd",
@@ -4756,7 +4756,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-proto"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "postcard",
  "proptest",
@@ -4766,7 +4766,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-testkit"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "memory-stats",
  "tlp-desk-capture",
@@ -4784,7 +4784,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-viewer"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "fs4",
  "tempfile",
