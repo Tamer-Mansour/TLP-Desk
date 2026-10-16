@@ -233,6 +233,9 @@ impl App {
         if let Some(target) = opts.connect {
             app.address = target;
             app.connect_from_address();
+            // Started to open a session: never start minimized (the setting, or the show state
+            // a console or script launcher passed to the process).
+            app.tray.show_on_start = true;
         }
         app
     }
@@ -1124,5 +1127,10 @@ impl eframe::App for App {
             Screen::Settings => self.settings_ui(ui),
             Screen::ConnectionLog => self.connection_log_ui(ui),
         }
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // A drag out of the file browser ran the OS drag loop, which took the mouse-up.
+        crate::ui::file_browser::release_pointer_if_requested(ctx, raw_input);
     }
 }

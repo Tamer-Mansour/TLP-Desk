@@ -39,6 +39,8 @@ pub(super) enum PaneAction {
     Delete(Vec<String>),
     /// Copy these entries to the other pane's folder.
     CopyToOther(Vec<String>),
+    /// These remote entries started being dragged (they may leave the window: drag-out).
+    DragOut(Vec<String>),
 }
 
 /// Payload of a drag from one pane to the other.

@@ -10,6 +10,10 @@ protocol bump is called out below.
 
 ### Added
 
+- **Ready for code signing, and a winget package.** The installer scripts and the release workflow sign `TLP-Desk.exe`, `TLP-Desk-cli.exe`, the setup and its uninstaller (SHA-256, timestamped, verified) as soon as a certificate is configured: Azure Artifact Signing, a PFX file or a certificate on a hardware token. Until then builds stay unsigned and say so, which is why Windows SmartScreen warns. A validated winget manifest (`TLP.TLP-Desk`) and a script that refreshes it from each release are included. The user guide explains the SmartScreen window and the winget route; the [code-signing guide](dev/code-signing.md) lists the certificate options. File properties of the exes and the setup now show a proper copyright line and the project links.
+- **Drag files from the remote PC into Explorer.** Select files or folders in the file browser's **Remote PC** pane and drag them out of the window onto Explorer, the desktop or any program that accepts virtual files; Windows copies them with its own progress dialog. The files are listed while you drag and pulled through the transfer engine only when dropped (resume, BLAKE3 verification). Needs the Files permission. No wire change.
+- **Drop into the remote folder.** Files dropped from Explorer onto the **Remote PC** pane are copied into the folder open there (the pane shows where they go); dropped elsewhere on the session window they still go to the remote Desktop.
+- CLI `connect` statistics show the quantiser (`Q~`, `"qp"`) and a millisecond timestamp (`"t_ms"`). Hidden, development-only `connect --sim-loss`, `--sim-bandwidth-kbps` and `--sim-seconds` flags simulate a lossy or slow link for testing the adaptive quality on one PC.
 - **Several viewers with full control at once.** Two (or more) colleagues can control one PC at
   the same time, each with their own picture, monitor choice, quality, permissions and pointer
   marker; one leaving does not disturb the others. Sessions on the same monitor share one screen
@@ -29,6 +33,14 @@ protocol bump is called out below.
 
 - High-resolution wheel deltas (precision touchpads) keep their sub-notch remainder, so slow
   scrolling is no longer lost to rounding.
+
+### Fixed
+
+- **No blur flash after the screen settles.** The frame that follows a still screen (the host's sharp refresh picture, or a single keystroke) is no longer shown bilinear for about 120 ms before the sharp version; the viewer re-scales it at once (pictures up to 1920x1200).
+- **`--connect` opens the window normally.** A run started with `--connect` no longer starts minimized (from the start-minimized setting or a console/script launcher).
+- The sharp refresh picture after scrolling or typing no longer waits until the mouse stops moving. (Found by the rc.2 [system test](dev/system-test-report.md).)
+- `get-file --on-conflict skip` no longer hangs when every file already exists, and `get-file` prints its destination as `C:\...` instead of `\\?\C:\...`.
+- Hardware encoder: when Media Foundation refuses a frame the encoder waits for its next request instead of giving up, and a fallback to OpenH264 now logs the real cause.
 
 ## [1.0.0-rc.2] - 2026-10-16
 

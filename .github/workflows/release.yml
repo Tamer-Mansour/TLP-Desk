@@ -1,6 +1,15 @@
 # Builds the Windows release artifacts for a version tag and attaches them to a GitHub Release:
 #   TLP-Desk-<version>-setup.exe, TLP-Desk-<version>-win-x64-portable.zip, SHA256SUMS.txt
 # Trigger: push a tag like v0.2.0 (the version itself comes from Cargo.toml).
+#
+# Code signing is optional and switches itself on when the repository is configured for it
+# (docs/src/dev/code-signing.md). First match wins, as in installer/sign.ps1:
+#   - Azure Artifact Signing (formerly Trusted Signing), OIDC sign-in, no stored password:
+#       secrets   AZURE_CLIENT_ID, AZURE_TENANT_ID (+ optional AZURE_SUBSCRIPTION_ID)
+#       variables ATS_ENDPOINT, ATS_ACCOUNT, ATS_PROFILE
+#   - A PFX certificate: secrets SIGN_PFX_BASE64 (the .pfx, base64) and SIGN_PFX_PASSWORD
+# With neither, the build is unsigned exactly as before. With one, TLP_SIGN_REQUIRED=1 makes a
+# signing failure fail the release instead of shipping unsigned files.
 name: Release
 
 on:
@@ -10,6 +19,8 @@ on:
 
 permissions:
   contents: write
+  # Only used by azure/login (OIDC) when Azure Artifact Signing is configured.
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,8 +31,14 @@ jobs:
     name: Windows installer and portable zip
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      # `secrets` cannot be used in step `if:` conditions; expose only whether they exist.
+      SIGN_WITH_ATS: ${{ secrets.AZURE_CLIENT_ID != '' && vars.ATS_ENDPOINT != '' }}
+      SIGN_WITH_PFX: ${{ secrets.SIGN_PFX_BASE64 != '' }}
+      # Version of the Artifact Signing dlib for signtool (nuget.org Microsoft.ArtifactSigning.Client).
+      ATS_CLIENT_VERSION: "1.0.146"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -34,16 +51,82 @@ jobs:
       - name: Fetch dependencies
         run: cargo fetch --locked
 
+      - name: "Signing: Azure login (OIDC)"
+        if: env.SIGN_WITH_ATS == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
+
+      # signtool + the Artifact Signing dlib, driven by installer/sign.ps1 like a local build, so
+      # Inno Setup can also sign the uninstaller it embeds in setup.exe (a post-build signing
+      # action cannot reach that file).
+      - name: "Signing: Azure Artifact Signing client"
+        if: env.SIGN_WITH_ATS == 'true'
+        shell: pwsh
+        env:
+          ATS_ENDPOINT: ${{ vars.ATS_ENDPOINT }}
+          ATS_ACCOUNT: ${{ vars.ATS_ACCOUNT }}
+          ATS_PROFILE: ${{ vars.ATS_PROFILE }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'artifact-signing'
+          $pkg = Join-Path $env:RUNNER_TEMP 'artifact-signing.zip'
+          $v = $env:ATS_CLIENT_VERSION
+          Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/$v/microsoft.artifactsigning.client.$v.nupkg" -OutFile $pkg
+          Expand-Archive $pkg -DestinationPath $dir -Force
+          $dlib = Get-ChildItem $dir -Recurse -Filter Azure.CodeSigning.Dlib.dll |
+            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          if (-not $dlib) { throw 'x64 Azure.CodeSigning.Dlib.dll not found in the NuGet package' }
+          "TLP_SIGN_ATS_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
+          "TLP_SIGN_ATS_ENDPOINT=$env:ATS_ENDPOINT" >> $env:GITHUB_ENV
+          "TLP_SIGN_ATS_ACCOUNT=$env:ATS_ACCOUNT" >> $env:GITHUB_ENV
+          "TLP_SIGN_ATS_PROFILE=$env:ATS_PROFILE" >> $env:GITHUB_ENV
+          # azure/login leaves an Azure CLI session; skip the credential types that cannot work here.
+          "TLP_SIGN_ATS_EXCLUDE_CREDENTIALS=ManagedIdentityCredential,SharedTokenCacheCredential,VisualStudioCredential,VisualStudioCodeCredential,InteractiveBrowserCredential" >> $env:GITHUB_ENV
+          "TLP_SIGN_REQUIRED=1" >> $env:GITHUB_ENV
+
+      - name: "Signing: PFX certificate"
+        if: env.SIGN_WITH_ATS != 'true' && env.SIGN_WITH_PFX == 'true'
+        shell: pwsh
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'tlp-sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+          "TLP_SIGN_PFX=$pfx" >> $env:GITHUB_ENV
+          "TLP_SIGN_REQUIRED=1" >> $env:GITHUB_ENV
+
       - name: Build setup.exe
         shell: pwsh
+        env:
+          TLP_SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
         run: ./installer/build-setup.ps1
 
       - name: Build portable zip
         shell: pwsh
+        env:
+          TLP_SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
         run: ./installer/portable.ps1
 
+      - name: Signature summary
+        shell: pwsh
+        run: |
+          "### Code signing" >> $env:GITHUB_STEP_SUMMARY
+          Get-ChildItem dist -Filter *-setup.exe | ForEach-Object {
+            $s = Get-AuthenticodeSignature $_.FullName
+            $who = if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { 'unsigned (SmartScreen will warn)' }
+            "- $($_.Name): $($s.Status), $who" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Remove signing material
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'tlp-sign.pfx')
+
       - name: Attach to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           files: |

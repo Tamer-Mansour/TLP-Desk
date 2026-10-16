@@ -15,4 +15,6 @@ pub enum CryptoError {
     KnownHostsFormat { line: usize, reason: String },
     #[error("password hashing failed: {0}")]
     PasswordHash(String),
+    #[error("the OS random number generator failed: {0}")]
+    Random(String),
 }

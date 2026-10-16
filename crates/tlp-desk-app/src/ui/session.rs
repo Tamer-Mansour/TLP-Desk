@@ -394,7 +394,10 @@ impl ViewerSession {
     fn transfers_ui(&mut self, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
         let allowed = self.permissions.contains(Permissions::FILES);
         let ctx = ui.ctx().clone();
-        TransferPanel::drop_overlay(&ctx, tx, &self.peer.name, allowed);
+        // Over the file browser's panes the browser shows where the files would go.
+        if !self.files.drop_hover_handled() {
+            TransferPanel::drop_overlay(&ctx, tx, &self.peer.name, allowed);
+        }
         let dropped = TransferPanel::take_dropped(&ctx);
         if !dropped.is_empty() {
             self.transfers.open = true;

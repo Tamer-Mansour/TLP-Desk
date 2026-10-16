@@ -754,6 +754,13 @@ strings! {
     PlayTitle => "Playback: {name}", "تشغيل: {name}";
     PlaySpeed => "Speed", "السرعة";
     PlayClose => "Close", "إغلاق";
+    // --- drag-out, drop into remote folders, recording audio (TLP-drag-out) ---
+    FsDropIntoFolder => "Drop to copy into {folder} on the remote PC", "أفلِت للنسخ إلى {folder} على الجهاز البعيد";
+    FsDropPickFolder => "Open a folder in the remote PC's pane to drop files into it.", "افتح مجلدًا في جزء الجهاز البعيد لتُفلت الملفات فيه.";
+    FsDropOnRemoteHint => "Drop on the remote PC's pane to copy files there", "أفلِت في جزء الجهاز البعيد لنسخ الملفات إليه";
+    FsDragOutHint => "Drag files from here to Explorer or the desktop to copy them to this PC", "اسحب الملفات من هنا إلى المستكشف أو سطح المكتب لنسخها إلى هذا الجهاز";
+    FsDragOutDropped => "Windows is copying the dragged files and shows its own progress.", "يقوم ويندوز بنسخ الملفات المسحوبة ويعرض تقدّم النسخ بنفسه.";
+    FsDragOutFailed => "The files could not be dragged out: {detail}", "تعذّر سحب الملفات إلى الخارج: {detail}";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.

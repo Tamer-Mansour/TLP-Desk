@@ -28,8 +28,8 @@ mod optimus {
 use tlp_desk_capture::BgraFrame;
 use tlp_desk_codec::{
     list_adapters, list_hw_encoders, new_encoder_with, EncoderConfig, EncoderOptions,
-    EncoderPreference, H264Decoder, HwAdapter, MfEncoder, VideoDecoder, VideoEncoder, VENDOR_INTEL,
-    VENDOR_NVIDIA,
+    EncoderPreference, H264Decoder, HwAdapter, MfEncoder, QpBounds, VideoDecoder, VideoEncoder,
+    VENDOR_INTEL, VENDOR_NVIDIA,
 };
 
 /// Gradient desktop, a moving box, and a block of fine text-like stripes.
@@ -237,6 +237,62 @@ fn bitrate_change_works(vendor: u32) {
     );
 }
 
+/// What a live session does to the encoder (rc.2 system test): the adaptive controller retunes
+/// the bitrate every few frames, the viewer asks for keyframes, a still screen gets a refresh
+/// picture (bitrate boosted x6, forced IDR, bitrate restored), and the screen stops and starts.
+/// In live sessions on a loaded PC Intel Quick Sync failed within seconds with
+/// MF_E_NOTACCEPTING from `ProcessInput`; this synthetic run did not reproduce that timing, so
+/// it guards the sequence itself, and the live run in the system test report covers the fix.
+fn survives_live_bitrate_and_refresh_churn(vendor: u32) {
+    let (w, h) = (1920, 1200);
+    let config = cfg(w, h, 16_000);
+    let present = list_adapters()
+        .unwrap()
+        .iter()
+        .any(|a| a.vendor_id == vendor);
+    if !present {
+        eprintln!("no adapter with vendor {vendor:#06x}: skipped");
+        return;
+    }
+    let mut enc = MfEncoder::with_qp(config, HwAdapter::Vendor(vendor), QpBounds::FLOOR)
+        .expect("hardware encoder");
+    let mut dec = H264Decoder::new().unwrap();
+    let (mut pictures, mut refreshes) = (0u32, 0u32);
+    for t in 0..360u32 {
+        // A screen that stops and starts: idle gaps, and pointer-only re-encodes of the same
+        // picture (the host encodes the last frame again with the pointer drawn in).
+        if t % 37 == 36 {
+            std::thread::sleep(std::time::Duration::from_millis(
+                300 + u64::from(t % 5) * 150,
+            ));
+        }
+        let src = noisy_frame(w, h, if t % 60 >= 45 { t - t % 60 + 45 } else { t });
+        if t % 5 == 4 {
+            // AIMD steps up and down around the link capacity.
+            let kbps = [16_000, 13_600, 11_560, 12_100, 14_000, 9_800][(t / 5 % 6) as usize];
+            enc.set_bitrate(kbps)
+                .unwrap_or_else(|e| panic!("bitrate {kbps} at frame {t}: {e}"));
+        }
+        if t % 45 == 30 {
+            enc.request_keyframe();
+        }
+        let out = if t % 40 == 39 {
+            refreshes += 1;
+            enc.encode_refine(&src)
+        } else {
+            enc.encode(&src)
+        };
+        let out = out.unwrap_or_else(|e| panic!("frame {t}: {e}"));
+        if let Some(pkt) = out {
+            if dec.decode(&pkt.data).unwrap().is_some() {
+                pictures += 1;
+            }
+        }
+    }
+    eprintln!("{pictures} pictures decoded, {refreshes} refreshes");
+    assert!(pictures >= 350, "only {pictures} of 360 frames came out");
+}
+
 /// Odd sizes are padded to even like the software encoder does.
 fn odd_size_matches_software_policy(vendor: u32) {
     let (w, h) = (333, 199);
@@ -288,6 +344,18 @@ fn intel_bitrate_change_works() {
 #[ignore = "needs an NVIDIA GPU"]
 fn nvidia_bitrate_change_works() {
     bitrate_change_works(VENDOR_NVIDIA);
+}
+
+#[test]
+#[ignore = "needs an Intel GPU with Quick Sync"]
+fn intel_survives_live_bitrate_and_refresh_churn() {
+    survives_live_bitrate_and_refresh_churn(VENDOR_INTEL);
+}
+
+#[test]
+#[ignore = "needs an NVIDIA GPU"]
+fn nvidia_survives_live_bitrate_and_refresh_churn() {
+    survives_live_bitrate_and_refresh_churn(VENDOR_NVIDIA);
 }
 
 #[test]

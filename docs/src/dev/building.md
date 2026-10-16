@@ -6,7 +6,7 @@ Windows 10/11 x64 is the tier-1 platform. Everything below uses PowerShell.
 
 | Tool | Why | How |
 |---|---|---|
-| **Rust stable**, at least 1.85 | `rust-toolchain.toml` pins the `stable` channel with `clippy` and `rustfmt`; `windows` 0.62 needs 1.82 and `openh264` 0.9 needs 1.85 | [rustup](https://rustup.rs), default host `x86_64-pc-windows-msvc` |
+| **Rust stable**, at least 1.95 | `rust-toolchain.toml` pins the `stable` channel with `clippy` and `rustfmt`; `egui`/`eframe` 0.36 need 1.95 (the highest `rust-version` in the dependency graph) | [rustup](https://rustup.rs), default host `x86_64-pc-windows-msvc` |
 | **Visual Studio Build Tools** with "Desktop development with C++" | MSVC linker; the C++ compiler builds the bundled OpenH264 sources | Visual Studio Installer |
 | **Windows 10/11 SDK** | `rc.exe` embeds the icon and version info into the executables | Included in the C++ workload |
 | **NASM** (optional, recommended) | OpenH264's assembly fast paths. Without it the build prints "Failed to compile NASM files, not using any assembly." and still works, just slower | Put `nasm.exe` on `PATH`; the installer scripts also look in `%LOCALAPPDATA%\bin\NASM` |
@@ -91,5 +91,5 @@ See [Release process](release.md) for `installer\build-setup.ps1` (setup.exe),
 | `link.exe` not found, or `cc` cannot find a C++ compiler | Install the Visual Studio C++ build tools; open a new shell |
 | Warning: exe will have no icon/version info | Install the Windows SDK, or set `RC` to the full path of `rc.exe` |
 | "Failed to compile NASM files" | Optional: install NASM and put it on `PATH` |
-| `rustc` too old | `rustup update stable` (1.85 or later) |
+| `rustc` too old | `rustup update stable` (1.95 or later) |
 | Disk full under `target\` | Set `CARGO_TARGET_DIR` to another drive; `cargo clean` |

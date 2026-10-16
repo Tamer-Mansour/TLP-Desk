@@ -22,8 +22,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::rand_core::UnwrapErr;
+use rand::rngs::SysRng;
+use rand::{Rng as _, TryRng as _};
 use sha2::{Digest, Sha256};
 
 use crate::{CryptoError, Fingerprint};
@@ -120,8 +121,9 @@ pub fn now_unix_ms() -> u64 {
 }
 
 fn new_instance() -> u64 {
-    // Never 0: that value marks entries loaded from disk.
-    OsRng.next_u64().max(1)
+    // Never 0: that value marks entries loaded from disk. `UnwrapErr` panics only if the OS
+    // CSPRNG fails, as rand 0.8's `OsRng` did; on Windows (`ProcessPrng`) that cannot happen.
+    UnwrapErr(SysRng).next_u64().max(1)
 }
 
 fn hash(token: &[u8]) -> [u8; 32] {
@@ -204,7 +206,8 @@ impl TicketStore {
     /// this returns, so the ticket survives an immediate restart.
     ///
     /// # Errors
-    /// The store could not be written (the ticket is not issued then).
+    /// The OS random number generator failed, or the store could not be written (the ticket is
+    /// not issued then).
     pub fn issue(
         &self,
         peer: &Fingerprint,
@@ -212,7 +215,9 @@ impl TicketStore {
         now_unix_ms: u64,
     ) -> Result<IssuedTicket, CryptoError> {
         let mut token = [0u8; TICKET_LEN];
-        OsRng.fill_bytes(&mut token);
+        SysRng
+            .try_fill_bytes(&mut token)
+            .map_err(|e| CryptoError::Random(e.to_string()))?;
         let mut s = self.lock();
         let ttl_ms = u64::try_from(s.ttl.as_millis()).unwrap_or(u64::MAX);
         let expires_unix_ms = now_unix_ms.saturating_add(ttl_ms);

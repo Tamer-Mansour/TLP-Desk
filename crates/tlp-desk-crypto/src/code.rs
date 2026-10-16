@@ -1,8 +1,9 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use rand::rngs::OsRng;
-use rand::Rng;
+use rand::rand_core::UnwrapErr;
+use rand::rngs::SysRng;
+use rand::RngExt;
 
 /// After this many failed attempts against the same code, the code rotates anyway, so an
 /// attacker spreading guesses across many IPs (to dodge the per-IP rate limit) gets at most
@@ -38,7 +39,9 @@ impl Default for OneTimeCode {
 }
 
 fn fresh() -> String {
-    format!("{:06}", OsRng.gen_range(0..1_000_000u32))
+    // `SysRng` is the OS CSPRNG. `UnwrapErr` panics if the OS refuses to give randomness, which
+    // is what rand 0.8's `OsRng` did internally; on Windows (`ProcessPrng`) that cannot happen.
+    format!("{:06}", UnwrapErr(SysRng).random_range(0..1_000_000u32))
 }
 
 impl OneTimeCode {

@@ -199,6 +199,8 @@ struct Inner {
     fsb: FilesBridge,
     /// Recent finished transfers (`transfers.json`).
     history: Mutex<super::transfer_history::HistoryStore>,
+    /// The drag of remote files prepared in the file browser (TLP-drag-out).
+    drag_out: super::drag_out::DragOutSlot,
 }
 
 #[derive(Default)]
@@ -622,6 +624,7 @@ impl RealBackend {
                     .as_deref()
                     .map_or_else(HistoryStore::in_memory, HistoryStore::load),
             ),
+            drag_out: Default::default(),
         });
         let local = LocalInfo {
             device_id: own_id,
@@ -1855,6 +1858,25 @@ impl Backend for RealBackend {
 
     fn set_clipboard_default(&self, enabled: bool) {
         self.inner.clipboard.set_default_enabled(enabled);
+    }
+
+    // --- drag-out (TLP-drag-out) ---
+    fn drag_out_prepare(&self, session: SessionId, remote: Vec<String>) {
+        let Some(key) = self.inner.feature_key(session) else {
+            return;
+        };
+        let engine: Arc<dyn tlp_desk_files::shellclip::drag::DragEngine> = self.inner.files.clone();
+        self.inner
+            .drag_out
+            .prepare(&self.inner.rt, engine, session, key, remote);
+    }
+
+    fn drag_out_run(&self, session: SessionId) -> super::files::DragOutcome {
+        self.inner.drag_out.run(session)
+    }
+
+    fn drag_out_cancel(&self, session: SessionId) {
+        self.inner.drag_out.cancel(session);
     }
 }
 

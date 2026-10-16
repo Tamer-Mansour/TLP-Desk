@@ -1,0 +1,33 @@
+# winget installer manifest. Regenerate with scripts/update-winget-manifest.ps1 -Tag v<version>.
+# The setup is Inno Setup (installer/TLP-Desk.iss): per-machine, needs admin, x64, Windows 10+.
+# Silent installs leave the optional tasks off (desktop shortcut, Windows service); users can add
+# them with: winget install TLP.TLP-Desk --custom "/MERGETASKS=installservice"
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+PackageIdentifier: TLP.TLP-Desk
+PackageVersion: 1.0.0-rc.2
+Platform:
+- Windows.Desktop
+MinimumOSVersion: 10.0.0.0
+InstallerType: inno
+Scope: machine
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+InstallerSwitches:
+  Silent: /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+  SilentWithProgress: /SP- /SILENT /SUPPRESSMSGBOXES /NORESTART
+UpgradeBehavior: install
+ElevationRequirement: elevatesSelf
+# Inno Setup's uninstall key: the fixed AppId from TLP-Desk.iss plus "_is1".
+ProductCode: '{2BD625D0-C78E-4CFB-BFEA-524A00171A2A}_is1'
+ReleaseDate: 2026-10-16
+InstallationMetadata:
+  DefaultInstallLocation: '%ProgramFiles%\TLP-Desk'
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/Tamer-Mansour/TLP-Desk/releases/download/v1.0.0-rc.2/TLP-Desk-1.0.0-rc.2-setup.exe
+  InstallerSha256: 23FE665C76BEE0CBB09180000F56F2F1EBCBB58AD94C9E61249AA202B51B6F7D
+ManifestType: installer
+ManifestVersion: 1.12.0
