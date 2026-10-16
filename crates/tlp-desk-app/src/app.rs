@@ -130,6 +130,8 @@ pub struct App {
     pub unattended: crate::ui::unattended::UnattendedUi,
     /// Saved devices (home screen tab).
     pub address_book: AddressBookUi,
+    /// macOS Screen Recording / Accessibility guidance (never shown on Windows).
+    pub permissions: crate::ui::permissions::PermissionsUi,
     // --- TLP-settings-tray ---
     /// Settings screen editor state.
     pub settings_ui: crate::ui::settings::SettingsUi,
@@ -199,6 +201,7 @@ impl App {
             notice: None,
             service_hosting: false,
             address_book,
+            permissions: crate::ui::permissions::PermissionsUi::new(),
             settings_ui: Default::default(),
             autostart: crate::settings::autostart::system(),
             tray: Default::default(),

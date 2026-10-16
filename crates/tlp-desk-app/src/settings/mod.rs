@@ -140,18 +140,29 @@ pub const APP_DIR: &str = "TLP-Desk";
 pub const UNIX_APP_DIR: &str = "tlp-desk";
 
 /// The per-user data folder (`None` if the environment gives no home): `%APPDATA%\TLP-Desk` on
-/// Windows, `$XDG_CONFIG_HOME/tlp-desk` or `~/.config/tlp-desk` elsewhere.
+/// Windows, `~/Library/Application Support/TLP-Desk` on macOS, `$XDG_CONFIG_HOME/tlp-desk` or
+/// `~/.config/tlp-desk` elsewhere.
 pub fn app_data_dir() -> Option<PathBuf> {
-    app_data_dir_in(
-        cfg!(windows),
-        std::env::var_os("APPDATA"),
-        std::env::var_os("XDG_CONFIG_HOME"),
-        std::env::var_os("HOME"),
-    )
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        Some(macos_app_data_dir(&home))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        app_data_dir_in(
+            cfg!(windows),
+            std::env::var_os("APPDATA"),
+            std::env::var_os("XDG_CONFIG_HOME"),
+            std::env::var_os("HOME"),
+        )
+    }
 }
 
 /// [`app_data_dir`] with the environment passed in, so every platform's rule is unit tested
 /// everywhere. Per the XDG base directory spec a relative `XDG_CONFIG_HOME` is ignored.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn app_data_dir_in(
     windows: bool,
     appdata: Option<std::ffi::OsString>,
@@ -169,6 +180,14 @@ fn app_data_dir_in(
                 .map(|h| PathBuf::from(h).join(".config"))
         })?;
     Some(base.join(UNIX_APP_DIR))
+}
+
+/// The macOS per-user data folder for a home directory.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_app_data_dir(home: &std::path::Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join(APP_DIR)
 }
 
 fn default_path() -> Option<PathBuf> {
@@ -271,6 +290,12 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_data_dir_is_application_support() {
+        let d = macos_app_data_dir(std::path::Path::new("/Users/tamer"));
+        assert!(d.ends_with("Library/Application Support/TLP-Desk"));
+    }
 
     #[test]
     fn settings_roundtrip_and_defaults() {

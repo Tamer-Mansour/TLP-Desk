@@ -2,8 +2,9 @@
 //!
 //! On Windows, [`open_capturer`] tries Windows.Graphics.Capture first and falls back to DXGI
 //! Desktop Duplication. On Linux it reads the X11 root window (RandR monitors, XFixes cursor);
-//! Wayland sessions report a clear error until the ScreenCast portal path exists. Other
-//! platforms currently return [`CaptureError::Unsupported`].
+//! Wayland sessions report a clear error until the ScreenCast portal path exists. On macOS it
+//! captures with Quartz Display Services (needs the Screen Recording permission, see
+//! `macos_capture`). Other platforms currently return [`CaptureError::Unsupported`].
 //!
 //! Platform independent helpers:
 //! * [`DirtyTracker`] tells which tiles of a frame changed, so the host skips encoding frames
@@ -21,6 +22,7 @@ mod compose;
 mod dirty;
 #[cfg(any(target_os = "linux", test))]
 mod linux_capture;
+mod macos_capture;
 mod scale;
 #[cfg(windows)]
 #[allow(unsafe_code)]
@@ -208,7 +210,11 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, CaptureError> {
     {
         linux_capture::list_monitors()
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::list_monitors()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         Err(CaptureError::Unsupported)
     }
@@ -225,7 +231,11 @@ pub fn open_capturer(monitor_index: u32) -> Result<Box<dyn ScreenCapturer>, Capt
     {
         linux_capture::open_capturer(monitor_index, CaptureOptions::default())
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::open_capturer(monitor_index, CaptureOptions::default())
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = monitor_index;
         Err(CaptureError::Unsupported)
@@ -281,7 +291,11 @@ pub fn open_capturer_opts(
     {
         linux_capture::open_capturer(monitor_index, options)
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_capture::open_capturer(monitor_index, options)
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = (monitor_index, options);
         Err(CaptureError::Unsupported)
@@ -322,7 +336,7 @@ mod tests {
         assert!(BgraFrame::new_tight(5, 3).is_well_formed());
     }
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     #[test]
     fn unsupported_off_windows() {
         assert!(matches!(open_capturer(0), Err(CaptureError::Unsupported)));

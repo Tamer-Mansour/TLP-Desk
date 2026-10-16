@@ -56,6 +56,35 @@ jobs:
       - name: Release build
         run: cargo build --release --workspace
 
+  macos:
+    name: macOS (clippy, test, app bundle)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    # The macOS port was written without access to a Mac (cross-checked with
+    # `cargo check --target aarch64-apple-darwin` for proto/input/capture only), so the first
+    # runs may expose build errors in the other crates. Drop this line once the job is green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Tests that need Screen Recording / Accessibility or a real display are #[ignore].
+      - name: Test
+        run: cargo test --workspace
+
+      - name: App bundle
+        run: installer/macos/build-app.sh "$RUNNER_TEMP/tlp-desk-macos"
+
   linux:
     name: Linux (clippy, test, X11 under Xvfb)
     runs-on: ubuntu-latest

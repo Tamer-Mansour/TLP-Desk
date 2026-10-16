@@ -26,6 +26,10 @@
 //! the viewer's [`whiteboard::Editor`], `tiny-skia` rendering) and the host's overlay window
 //! ([`whiteboard::start_whiteboard_overlay`]), which is excluded from capture like the marker.
 //!
+//! # macOS
+//! [`macos::MacInjector`] injects with `CGEvent` (needs the Accessibility permission);
+//! [`permissions`] checks Screen Recording and Accessibility and opens the Settings panes.
+//!
 //! # Viewer
 //! [`ViewRect`] maps a pointer position inside the displayed (scaled, letterboxed) video to
 //! the normalized wire coordinates. [`KeyboardGrab`] captures system keys (Win, Alt+Tab,
@@ -38,8 +42,10 @@ mod activity;
 mod evdev;
 mod grab_logic;
 mod keys;
+pub mod macos;
 mod mapping;
 mod marker_shape;
+pub mod permissions;
 pub mod privacy;
 mod tracker;
 pub mod whiteboard;
@@ -71,6 +77,10 @@ pub use win::{
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub use stub::{ensure_dpi_aware, virtual_desktop_rect, vk_to_scancode, KeyboardGrab};
+
+#[cfg(target_os = "macos")]
+pub use macos::MacInjector;
+
 #[cfg(not(windows))]
 pub use stub::{LocalActivityMonitor, RemotePointerMarker};
 
@@ -153,7 +163,11 @@ pub fn injector_for_monitor(monitor: MonitorRect) -> Result<Box<dyn InputInjecto
     {
         Ok(Box::new(LinuxInjector::new(monitor)?))
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(MacInjector::new(monitor)?))
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = monitor;
         Err(InputError::Unsupported)
