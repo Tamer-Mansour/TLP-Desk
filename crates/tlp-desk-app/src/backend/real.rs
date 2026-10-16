@@ -1442,6 +1442,26 @@ impl Backend for RealBackend {
     }
 
     fn respond_to_request(&self, request: RequestId, accept: bool) {
+        self.respond_to_request_with(request, accept, None);
+    }
+
+    fn can_choose_permissions(&self, request: RequestId) -> bool {
+        #[cfg(windows)]
+        if self.service().is_some_and(|s| s.has_request(request)) {
+            return false;
+        }
+        let _ = request;
+        true
+    }
+
+    fn respond_to_request_with(
+        &self,
+        request: RequestId,
+        accept: bool,
+        permissions: Option<Permissions>,
+    ) {
+        // The service mirror cannot narrow permissions at accept time (GuiCommand::Respond
+        // has no field for it): it grants the service's defaults.
         #[cfg(windows)]
         if self.service().is_some_and(|s| s.respond(request, accept)) {
             return;
@@ -1460,7 +1480,7 @@ impl Backend for RealBackend {
         }
         if let Some(h) = &self.inner.host {
             if accept {
-                h.accept(id, None);
+                h.accept(id, permissions);
             } else {
                 h.reject(id);
             }

@@ -100,6 +100,15 @@ Source: "{#StageDir}\TLP-Desk-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#StageDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
 
+[Dirs]
+; Machine-wide data (identity key = device ID, permanent password, reconnect tickets) of the
+; SYSTEM service. Created here, before anyone else can create it, owned by Administrators and
+; restricted to SYSTEM + Administrators by the takeown/icacls [Run] steps below (Inno's
+; Permissions only add ACEs, they do not remove the inherited ProgramData ones). The service
+; repeats the repair on every start (audit F1). Without the service the folder is left alone:
+; the attended GUI keeps its per-user identity.
+Name: "{commonappdata}\TLP-Desk"; Permissions: system-full admins-full; Flags: uninsneveruninstall; Check: ShouldInstallService
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Comment: "{cm:AppComment}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Comment: "{cm:AppComment}"; Tasks: desktopicon
@@ -118,6 +127,13 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwQuic}"" dir=in action=allow program=""{app}\TLP-Desk-cli.exe"" protocol=UDP localport=47400 profile=private,domain enable=yes description=""TLP-Desk CLI LAN remote desktop connections (QUIC/TLS 1.3)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwDisc}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=47401 profile=private,domain enable=yes description=""TLP-Desk LAN device discovery (broadcast)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{#FwMdns}"" dir=in action=allow program=""{app}\{#MyAppExe}"" protocol=UDP localport=5353 profile=private,domain enable=yes description=""TLP-Desk LAN device discovery (mDNS)"""; Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+; Data folder of the service ([Dirs] above): owner Administrators, explicit ACEs dropped, then
+; SYSTEM + Administrators (+ OWNER RIGHTS) only, inheritance off. Same steps as
+; tlp_desk_crypto::secure_service_dir.
+Filename: "{sys}\takeown.exe"; Parameters: "/F ""{commonappdata}\TLP-Desk"" /A"; Flags: runhidden; StatusMsg: "{cm:ServiceStatus}"; Check: ShouldInstallService
+Filename: "{sys}\icacls.exe"; Parameters: """{commonappdata}\TLP-Desk"" /setowner *S-1-5-32-544 /T /C /Q"; Flags: runhidden; StatusMsg: "{cm:ServiceStatus}"; Check: ShouldInstallService
+Filename: "{sys}\icacls.exe"; Parameters: """{commonappdata}\TLP-Desk"" /reset /T /C /Q"; Flags: runhidden; StatusMsg: "{cm:ServiceStatus}"; Check: ShouldInstallService
+Filename: "{sys}\icacls.exe"; Parameters: """{commonappdata}\TLP-Desk"" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-3-4:(OI)(CI)F /Q"; Flags: runhidden; StatusMsg: "{cm:ServiceStatus}"; Check: ShouldInstallService
 ; Service: registered after the files are in place; an upgrade keeps an existing service.
 Filename: "{app}\{#MyAppExe}"; Parameters: "install-service"; Flags: runhidden; StatusMsg: "{cm:ServiceStatus}"; Check: ShouldInstallService
 Filename: "{app}\{#MyAppExe}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent

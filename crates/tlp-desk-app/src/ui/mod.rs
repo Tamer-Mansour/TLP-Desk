@@ -1,5 +1,6 @@
 //! egui views.
 
+pub mod accept_window;
 pub mod address_book;
 pub mod audio;
 pub mod bidi_edit;

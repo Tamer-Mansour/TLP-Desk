@@ -96,6 +96,12 @@ impl Inner {
         .map_err(|e| PasswordError::Save(e.to_string()))??;
         let set = outcome.is_some();
         host.set_password(outcome);
+        // The installed service reads the same password file; without this it would keep the
+        // old password until it restarts (audit F5).
+        #[cfg(windows)]
+        if let Some(link) = self.service.get() {
+            link.reload_credentials();
+        }
         tracing::info!(set, "permanent unattended password changed");
         self.set_password_state(|p| p.set = set);
         Ok(if set {

@@ -1,38 +1,42 @@
 # The Accept prompt and the connection banner
 
-![The Accept prompt on the host](../../media/incoming-en-light.png)
+![The Accept window on the host](../../media/accept-popup-en-light.png)
 
 This page is about the **host** — the PC someone wants to connect to.
 
-## The Accept prompt
+## The Accept window
 
-When someone connects without your one-time code, TLP-Desk comes to the front and shows:
+When someone connects without your one-time code, a **Connection request** window appears in the
+bottom-right corner of your screen, above all other windows. It appears even when TLP-Desk is
+minimized, hidden in the notification area, or not open at all (when TLP-Desk runs as a service,
+it starts itself quietly in the notification area to ask you). You never have to open TLP-Desk to
+answer. A short Windows notification sound plays when it appears.
 
-```text
-┌──────────────────────────────────────────────┐
-│ Incoming connection                          │
-│                                              │
-│ Lab-Laptop wants to view and control this    │
-│ device.                                      │
-│                                              │
-│   Name     Lab-Laptop                        │
-│   ID       735 120 664                       │
-│   Address  192.168.1.81                      │
-│                                              │
-│                        [Decline]  [Accept]   │
-└──────────────────────────────────────────────┘
-```
+The window shows:
 
-- **ID** is verified: TLP-Desk checked cryptographically that the other PC owns this ID.
-- **Name** is whatever the other PC calls itself — anyone can choose any name. If you are not
-  sure, compare the ID with the one shown on that person's screen.
-- **Address** is the other PC's local IP address.
+- the other PC's **name**, a round badge with its initials, its **ID** and its local **address**.
+  The ID is verified: TLP-Desk checked cryptographically that the other PC owns this ID. The name
+  is whatever the other PC calls itself — anyone can choose any name. If you are not sure, compare
+  the ID with the one shown on that person's screen;
+- a chip saying how they asked (**Accept prompt**);
+- **Allow this device to:** one chip per permission (see the screen, use the mouse, use the
+  keyboard, share the clipboard, transfer files, hear the sound, chat, ...). The chips that are
+  on come from **Settings > Incoming connections**. Click a chip to switch it off (or on) for this
+  connection only. Seeing the screen is what a session is, so it cannot be switched off;
+- **Trust this device**: remembered on this PC for later. It does not skip this question yet;
+- a ring around the badge that empties while time runs out, and *Declines automatically in N s*.
 
-Click **Accept** to let them in, or **Decline** to refuse. If you do nothing for 60 seconds, the
-request is declined automatically. If the other person cancels first, the prompt disappears.
+Click **Accept** to let them in with the permissions that are on, or **Decline** to refuse
+(**Esc** also declines). To prevent accidents, the buttons only react a moment after the window
+appears, and **Enter never accepts**. If you do nothing until the countdown ends, the request is
+declined automatically. If the other person cancels first, the window disappears.
 
-**What Accept allows:** the other person can **see your screen and use your mouse and keyboard**.
-Nothing else — no files, no clipboard, no sound (those features need their own permission).
+You can still take any permission back during the session.
+
+Prefer the old behaviour? Untick **Show connection requests in their own window** in
+**Settings > Incoming connections**: the same card then appears inside the TLP-Desk window. The
+sound has its own switch next to it. If the window cannot be shown for any reason, TLP-Desk falls
+back to asking inside its main window.
 
 Only accept people you know and expect. If prompts keep appearing from a PC you do not recognise,
 decline them; after more than 5 requests in a minute TLP-Desk blocks that PC for 10 minutes.

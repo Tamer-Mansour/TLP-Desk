@@ -928,6 +928,27 @@ pub trait Backend: Send + Sync {
     fn drag_out_cancel(&self, session: SessionId) {
         let _ = session;
     }
+
+    // --- accept popup (TLP-accept-popup) ---
+    /// Host side: answer an [`BackendEvent::IncomingRequest`], granting `permissions` instead
+    /// of the host defaults when accepting (the user switched some off or on in the Accept
+    /// window). `None` = the defaults. Backends that cannot narrow grant the defaults.
+    fn respond_to_request_with(
+        &self,
+        request: RequestId,
+        accept: bool,
+        permissions: Option<Permissions>,
+    ) {
+        let _ = permissions;
+        self.respond_to_request(request, accept);
+    }
+
+    /// Whether [`Backend::respond_to_request_with`] can grant other permissions than the
+    /// defaults for `request` (the Accept window locks its chips otherwise).
+    fn can_choose_permissions(&self, request: RequestId) -> bool {
+        let _ = request;
+        true
+    }
 }
 
 #[cfg(test)]

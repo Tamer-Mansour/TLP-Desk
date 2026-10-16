@@ -60,6 +60,8 @@ pub struct Settings {
     /// scancodes (the host's layout). See `text_route`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub type_with_my_layout: bool,
+    /// The stand-alone Accept window (TLP-accept-popup).
+    pub accept_popup: AcceptPopupSettings,
 }
 
 impl Default for Settings {
@@ -75,7 +77,49 @@ impl Default for Settings {
             clipboard_sync_off: false,
             mute_remote_audio: false,
             type_with_my_layout: false,
+            accept_popup: AcceptPopupSettings::default(),
         }
+    }
+}
+
+/// How incoming Accept requests are shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AcceptPopupSettings {
+    /// Show each request in its own always-on-top window (`--accept-prompt`), even while the
+    /// main window is hidden. Off: the dialog inside the main window only.
+    pub enabled: bool,
+    /// Play the Windows notification sound when the window appears.
+    pub sound: bool,
+    /// Device IDs the user ticked "Trust this device" for. Kept for a future auto-accept;
+    /// grants nothing today.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub trusted: Vec<u32>,
+}
+
+impl Default for AcceptPopupSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sound: true,
+            trusted: Vec::new(),
+        }
+    }
+}
+
+impl AcceptPopupSettings {
+    /// Most trusted IDs remembered (oldest dropped first).
+    pub const MAX_TRUSTED: usize = 256;
+
+    /// Remember `device_id` as trusted (no duplicates, bounded).
+    pub fn trust(&mut self, device_id: u32) {
+        if self.trusted.contains(&device_id) {
+            return;
+        }
+        if self.trusted.len() >= Self::MAX_TRUSTED {
+            self.trusted.remove(0);
+        }
+        self.trusted.push(device_id);
     }
 }
 
@@ -434,5 +478,21 @@ mod tests {
         );
         assert_eq!(app_data_dir_in(false, None, None, os("")), None);
         assert_eq!(app_data_dir_in(false, None, None, None), None);
+    }
+
+    #[test]
+    fn accept_popup_defaults_on_and_trust_is_bounded() {
+        // Files written before the popup existed get it switched on with sound.
+        let s: Settings = serde_json::from_str(r#"{"lang":"ar"}"#).unwrap();
+        assert!(s.accept_popup.enabled && s.accept_popup.sound);
+        let mut p = AcceptPopupSettings::default();
+        p.trust(950_442_118);
+        p.trust(950_442_118);
+        assert_eq!(p.trusted, vec![950_442_118]);
+        for id in 0..300 {
+            p.trust(id);
+        }
+        assert_eq!(p.trusted.len(), AcceptPopupSettings::MAX_TRUSTED);
+        assert!(!p.trusted.contains(&950_442_118));
     }
 }

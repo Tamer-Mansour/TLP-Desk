@@ -737,6 +737,10 @@ pub enum GuiCommand {
     /// An app-defined command (postcard bytes of the app's own type), answered with
     /// [`GuiReply::App`] (v2).
     App(Vec<u8>),
+    /// Re-read the permanent password and the reconnect tickets from the data directory (the
+    /// GUI sends it after saving the unattended password; audit F5). Appended last: the
+    /// encoding of the other commands is unchanged.
+    ReloadCredentials,
 }
 
 /// Service -> GUI answer to a [`GuiCommand`].
