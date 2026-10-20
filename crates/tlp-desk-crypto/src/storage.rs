@@ -224,7 +224,8 @@ mod tests {
     fn macos_dir_is_under_application_support() {
         let home = Path::new("/Users/\u{645}\u{62d}\u{645}\u{62f}");
         let d = macos_dir(home);
-        assert!(d.ends_with("Library/Application Support/TLP-Desk"));
+        // APP_DIR is lowercase off Windows (the folder name older builds used).
+        assert!(d.ends_with(Path::new("Library/Application Support").join(APP_DIR)));
         assert!(d.starts_with(home));
     }
 
