@@ -400,8 +400,24 @@ async fn static_screen_is_not_reencoded() {
     // Let the first frames settle, then watch a full second of a static desktop
     // (the fake delivers ~60 identical frames per second).
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let _ = r.session.take_frame();
     let enc_before = encoded(&r.enc);
+    // Frames encoded before the snapshot may still be decoding (slow under a loaded CI box):
+    // drain until the stream has been quiet for a while, so only new frames count below.
+    within("the stream to go quiet", async {
+        let mut quiet_since = tokio::time::Instant::now();
+        while quiet_since.elapsed() < Duration::from_millis(300) {
+            if r.session.take_frame().is_some() {
+                quiet_since = tokio::time::Instant::now();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert_eq!(
+        encoded(&r.enc),
+        enc_before,
+        "a static frame was encoded while draining"
+    );
     tokio::time::sleep(Duration::from_millis(1200)).await;
     let enc_after = encoded(&r.enc);
     assert!(

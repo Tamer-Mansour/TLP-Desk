@@ -1252,6 +1252,8 @@ async fn live_options_apply_to_the_next_session() {
     .unwrap()
     .expect("code access switched back on");
     assert_eq!(session.permissions(), Permissions::VIEW);
+    // The viewer hears "accepted" a moment before the host lists the session.
+    let _ = host_event(&mut h.events, |e| matches!(e, HostEvent::SessionStarted(_))).await;
     assert_eq!(h.host.sessions()[0].permissions, Permissions::VIEW);
     session.disconnect();
 }
