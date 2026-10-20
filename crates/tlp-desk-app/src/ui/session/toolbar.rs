@@ -19,6 +19,8 @@ use super::*;
 pub enum Item {
     /// Fit-to-window and actual-size toggles.
     Mode,
+    /// Zoom level menu (25-300 %, fit).
+    Zoom,
     /// Full screen.
     Fullscreen,
     /// View-only switch.
@@ -71,6 +73,7 @@ const fn entry(item: Item, sep: bool, rank: Option<u8>) -> Entry {
 /// Bar order (reading direction) and overflow priority.
 const ENTRIES: &[Entry] = &[
     entry(Item::Mode, true, None),
+    entry(Item::Zoom, false, Some(10)),
     entry(Item::Fullscreen, true, None),
     entry(Item::ViewOnly, false, None),
     entry(Item::Stats, false, None),
@@ -360,6 +363,7 @@ impl ViewerSession {
     /// Text next to an item's button in the "More" menu.
     fn overflow_label(&self, item: Item, tx: Tx) -> Option<&'static str> {
         let key = match item {
+            Item::Zoom => S::Zoom,
             Item::Privacy => S::PrivacyMode,
             Item::DeviceInfo => S::DeviceInfoTitle,
             Item::Tunnels => S::PortForwarding,
@@ -375,6 +379,38 @@ impl ViewerSession {
         Some(tx.t(key))
     }
 
+    /// Zoom levels for the actual-size view; picking one leaves fit-to-window.
+    fn zoom_menu(&mut self, ui: &mut egui::Ui, tx: Tx) {
+        let pct = |z: u16| tx.n(&format!("{z}%"));
+        let label = if self.mode == ViewMode::Fit {
+            tx.t(S::ZoomFit).to_owned()
+        } else {
+            pct(self.zoom_pct)
+        };
+        let resp = ui.menu_button(label, |ui| {
+            for z in view_scale::ZOOM_STEPS {
+                let on = self.mode == ViewMode::Original && self.zoom_pct == z;
+                if ui.selectable_label(on, pct(z)).clicked() {
+                    self.mode = ViewMode::Original;
+                    self.zoom_pct = z;
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui
+                .selectable_label(self.mode == ViewMode::Fit, tx.t(S::FitToWindow))
+                .clicked()
+            {
+                self.mode = ViewMode::Fit;
+                ui.close();
+            }
+        });
+        let name = tx.t(S::Zoom);
+        resp.response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+        resp.response.on_hover_text(name);
+    }
+
     /// Draws one toolbar item and applies its clicks.
     fn draw_item(&mut self, item: Item, ui: &mut egui::Ui, tx: Tx, backend: &dyn Backend) {
         let dark = ui.visuals().dark_mode;
@@ -387,9 +423,13 @@ impl ViewerSession {
                     let selected = self.mode == mode;
                     if icons::icon_toggle(ui, tx, selected, icon, tx.t(key)).clicked() {
                         self.mode = mode;
+                        if mode == ViewMode::Original {
+                            self.zoom_pct = 100;
+                        }
                     }
                 }
             }
+            Item::Zoom => self.zoom_menu(ui, tx),
             Item::Fullscreen => {
                 let fs = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 let (fs_icon, fs_label) = if fs {

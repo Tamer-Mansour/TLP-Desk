@@ -837,6 +837,8 @@ strings! {
     QuickConnectHint => "Connect to an ID or address", "اتصل بمعرّف أو عنوان";
     TitleConnectedTo => "Connected to {name}", "متصل بـ {name}";
     IntegratedTitleBar => "Menus in the title bar (TLP-Desk draws the window frame)", "القوائم في شريط العنوان (يرسم TLP-Desk إطار النافذة)";
+    Zoom => "Zoom", "التكبير";
+    ZoomFit => "Fit", "ملاءمة";
     IntegratedTitleBarHint => "Off: the standard system title bar, with the menus under it.", "عند الإيقاف: شريط عنوان النظام العادي، والقوائم تحته.";
 }
 

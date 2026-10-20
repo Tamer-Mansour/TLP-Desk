@@ -31,7 +31,8 @@ use crate::text_route::TextRouter;
 pub enum ViewMode {
     /// Scale the remote screen to fit the window, preserving aspect ratio.
     Fit,
-    /// One remote pixel per physical screen pixel, with scroll bars.
+    /// One remote pixel per physical screen pixel (scaled by the session's zoom level), with
+    /// scroll bars.
     Original,
 }
 
@@ -45,6 +46,8 @@ pub struct ViewerSession {
     view: super::view_scale::RemoteView,
     frame_size: [usize; 2],
     pub mode: ViewMode,
+    /// Zoom level of [`ViewMode::Original`], percent (100 = actual size).
+    pub zoom_pct: u16,
     pub view_only: bool,
     pub show_stats: bool,
     pub stats: Option<SessionStats>,
@@ -130,6 +133,7 @@ impl ViewerSession {
             view: Default::default(),
             frame_size: [0, 0],
             mode: ViewMode::Fit,
+            zoom_pct: 100,
             view_only: false,
             show_stats: true,
             stats: None,
@@ -382,8 +386,9 @@ impl ViewerSession {
                         (resp, image_rect, image_rect)
                     }
                     ViewMode::Original => {
+                        let zoom = self.zoom_pct;
                         let size =
-                            egui::vec2(self.frame_size[0] as f32, self.frame_size[1] as f32) / ppp;
+                            view_scale::zoom_rect(Pos2::ZERO, self.frame_size, ppp, zoom).size();
                         let source = if self.can_mouse() {
                             egui::scroll_area::ScrollSource::SCROLL_BAR
                         } else {
@@ -395,9 +400,10 @@ impl ViewerSession {
                             .show(ui, |ui| {
                                 let (rect, resp) =
                                     ui.allocate_exact_size(size, Sense::click_and_drag());
-                                // One texel per physical pixel, at a physical-pixel origin.
+                                // One texel per physical pixel times the zoom, at a
+                                // physical-pixel origin.
                                 let rect =
-                                    view_scale::original_rect(rect.min, self.frame_size, ppp);
+                                    view_scale::zoom_rect(rect.min, self.frame_size, ppp, zoom);
                                 let id = self.view.texture_for(ui.ctx(), &mut tex, rect, now);
                                 ui.painter().image(id, rect, uv, Color32::WHITE);
                                 let visible = ui.clip_rect().intersect(rect);
