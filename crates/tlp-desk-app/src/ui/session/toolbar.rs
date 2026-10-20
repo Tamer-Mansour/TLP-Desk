@@ -485,7 +485,7 @@ impl ViewerSession {
             Item::Quality => {
                 if let Some(q) = perf::quality_menu(ui, tx, self.quality) {
                     self.quality = q;
-                    backend.request_quality(self.id, q.to_proto());
+                    self.send_quality(backend);
                 }
             }
             Item::System => {

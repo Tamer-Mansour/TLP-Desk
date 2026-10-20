@@ -9,6 +9,7 @@ use eframe::egui::{
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
 mod toolbar;
+mod viewport_hint;
 
 use super::chat::{self, ChatState};
 use super::file_browser::FileBrowser;
@@ -76,6 +77,8 @@ pub struct ViewerSession {
     pub remote_desktop: Option<crate::backend::service::RemoteDesktop>,
     /// Quality preset requested from the host (toolbar menu; starts as the Settings default).
     pub quality: QualityChoice,
+    /// The picture area's size as last told to the host (fit-to-window streaming).
+    viewport: viewport_hint::ViewportHint,
     /// Remote device-info window (toolbar button).
     pub device_info: super::device_info::DeviceInfoPanel,
     /// Port forwarding window (TLP-tunnel).
@@ -147,6 +150,7 @@ impl ViewerSession {
             unattended: Default::default(),
             remote_desktop: None,
             quality: QualityChoice::default(),
+            viewport: Default::default(),
             device_info: Default::default(),
             tunnels: Default::default(),
             whiteboard: WhiteboardUi::new(),
@@ -159,6 +163,31 @@ impl ViewerSession {
             typing: TextRouter::default(),
             wheel: Default::default(),
             toolbar_layout: Default::default(),
+        }
+    }
+
+    /// Asks the host for `self.quality`, with the picture area's size when fitting to the
+    /// window (see `viewport_hint`).
+    pub fn send_quality(&self, backend: &dyn Backend) {
+        backend.request_quality(
+            self.id,
+            viewport_hint::request(self.quality, self.viewport.current()),
+        );
+    }
+
+    /// Feeds this frame's wanted viewport hint; sends it once it has settled.
+    fn update_viewport_hint(
+        &mut self,
+        ctx: &egui::Context,
+        want: Option<(u32, u32)>,
+        backend: &dyn Backend,
+    ) {
+        if self.viewport.update(want, Instant::now()).is_some() {
+            tracing::debug!(session = self.id.0, hint = ?want, "picture area changed; telling the host");
+            self.send_quality(backend);
+        }
+        if self.viewport.pending() {
+            ctx.request_repaint_after(viewport_hint::SETTLE);
         }
     }
 
@@ -329,6 +358,14 @@ impl ViewerSession {
                 let ppp = ui.ctx().pixels_per_point();
                 let now = Instant::now();
                 let uv = Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
+                let hint = match self.mode {
+                    ViewMode::Fit => {
+                        let a = ui.available_rect_before_wrap();
+                        viewport_hint::area_hint(a.width() * ppp, a.height() * ppp)
+                    }
+                    ViewMode::Original => None,
+                };
+                self.update_viewport_hint(ui.ctx(), hint, backend);
                 let (resp, image_rect, visible) = match self.mode {
                     ViewMode::Fit => {
                         let avail = ui.available_rect_before_wrap();

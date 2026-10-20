@@ -44,6 +44,11 @@ impl Sampling {
 const MIN_PRESCALE_RATIO: f32 = 0.2;
 /// Tolerance when deciding that a displayed size equals the frame size, in physical pixels.
 const ONE_TO_ONE_EPS: f32 = 0.5;
+/// A frame at most this many physical pixels smaller than the picture area is shown 1:1 with
+/// a thin border instead of being enlarged by a fraction of a percent (which resamples every
+/// pixel and blurs text). The host streams frames sized to the area rounded down to even
+/// numbers, so they are typically 0-2 px short.
+const MAX_ENLARGE_TO_SKIP_PX: f32 = 8.0;
 
 /// Rounds a coordinate in points to the nearest physical pixel.
 pub fn snap(v: f32, ppp: f32) -> f32 {
@@ -75,7 +80,9 @@ pub fn fit_rect_snapped(avail: Rect, tex: [usize; 2], ppp: f32) -> Rect {
     }
     // Scale in physical pixels per texel.
     let s = (avail.width() * ppp / tw).min(avail.height() * ppp / th);
-    let (pw, ph) = if (s - 1.0).abs() * tw.max(th) < ONE_TO_ONE_EPS {
+    let nearly_same = (s - 1.0).abs() * tw.max(th) < ONE_TO_ONE_EPS;
+    let barely_smaller = s >= 1.0 && (s - 1.0) * tw.max(th) <= MAX_ENLARGE_TO_SKIP_PX;
+    let (pw, ph) = if nearly_same || barely_smaller {
         (tw, th)
     } else {
         ((tw * s).round().max(1.0), (th * s).round().max(1.0))
@@ -330,6 +337,21 @@ mod tests {
         // But 10 px short is a real downscale.
         let r = fit_rect_snapped(avail(1910.0, 1080.0), [1920, 1080], 1.0);
         assert_eq!(sampling_for([1920, 1080], r, 1.0), Sampling::Linear);
+    }
+
+    /// The host sized the frame to the window (rounded down to even): show it 1:1, never
+    /// stretch it by a pixel or two. A clearly smaller frame is still enlarged to fit.
+    #[test]
+    fn a_frame_slightly_smaller_than_the_window_is_shown_one_to_one() {
+        for ppp in [1.0, 1.5] {
+            let a = avail(1905.0 / ppp, 1003.0 / ppp);
+            let r = fit_rect_snapped(a, [1904, 1002], ppp);
+            assert_eq!(physical_size(r, ppp), (1904.0, 1002.0), "ppp {ppp}");
+            assert_eq!(sampling_for([1904, 1002], r, ppp), Sampling::Nearest);
+            assert!(a.contains_rect(r));
+        }
+        let r = fit_rect_snapped(avail(1920.0, 1080.0), [1280, 720], 1.0);
+        assert_eq!(physical_size(r, 1.0), (1920.0, 1080.0));
     }
 
     #[test]
