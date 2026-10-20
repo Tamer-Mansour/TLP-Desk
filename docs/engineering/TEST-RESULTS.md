@@ -51,3 +51,21 @@ that use new API (`SelfConnection`) cannot compile there.
 | 11 4K host at 1080p (visual) | 4K monitor + MF encoder | Fit to window: stats overlay shows the frame size equal to the picture area (± 2 px); small IDE text is sharper than with "Actual size" scaled down by the OS; bitrate lower than before |
 | 13 multiple remote monitors with the hint | Real multi-monitor host | Switch monitors and "all monitors" while fitted: the frame keeps matching the picture area |
 | 23 keyboard/mouse, 24 clipboard | Covered by existing e2e tests with fakes; real injection needs Windows | Existing manual test sheet `docs/src/user-guide/en/manual-test.md` |
+
+## After P2.1 (integrated title bar), 2026-10-20
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace --no-fail-fast` | 1,379 passed, 1 failed, 17 ignored. The failure, `perf.rs::static_screen_is_not_reencoded`, passed 5/5 alone and failed 1 in 3 runs of the host suite under load: a test race (a frame encoded before the snapshot arrived inside the watch window). Fixed by draining until quiet. Stressing the suite then exposed `e2e.rs::live_options_apply_to_the_next_session` (indexes the host's session list before the host registered it); fixed by waiting for `SessionStarted`. Afterwards the host suite passed 5/5 in a row |
+
+New UI tests (egui_kittest, no GPU): `ui::title_bar::tests::*` (8): all menus and caption buttons
+in English and Arabic, no caption buttons with the system frame, File → Exit and the close button
+report their actions, narrow windows fold the menus, session context (connected device, Disconnect,
+no quick buttons), quick connect with Arabic-Indic digits, guide links per language;
+`chrome::tests::edges_and_corners_resize_the_right_way`. Writing them found that the caption
+buttons and the quick-connect field had no accessible name (fixed).
+
+Visual check: home (en/ar, light/dark), settings and session scenes rendered with lavapipe and
+inspected; RTL mirrors the bar (File next to the logo on the right, caption buttons on the left).

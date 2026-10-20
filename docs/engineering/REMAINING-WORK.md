@@ -10,7 +10,8 @@ whenever an item is finished or a new one is found.
 | Manual check of the P0 fixes on two PCs: one with VirtualBox/Hyper-V/WSL adapters, Wi-Fi off/on, DHCP renew (`ipconfig /release` + `/renew`), sleep/wake | Needs two physical Windows PCs on one LAN | Follow the "Network recovery" section of `TEST-RESULTS.md`, note the results there |
 | Visual check of viewport-matched streaming: 4K host, 1080p viewer, fit to window, small text in an IDE | Needs a 4K Windows host and the Media Foundation encoder | Compare text sharpness with "Actual size" and with the previous release; record bitrate from the stats overlay |
 | README media regeneration after visible UI changes | `scripts/update-readme-media.ps1` runs on Windows (`readme-media.yml` on CI) | Run the script or the workflow; commit `docs/media/` changes |
-| Integrated title bar (P2) | Window chrome, snap layouts, resize borders and DPI changes must be checked on Windows 10 and 11 | Implement behind a setting with the native frame as fallback; test snap, double-click, drag, resize, multi-monitor DPI |
+| Integrated title bar (P2.1, implemented) | Window chrome behaviour needs Windows 10 and 11 | Check: drag to move, drag to screen edges (snap), double-click maximize/restore, resize from all edges and corners, maximize does not cover the taskbar, moving between monitors with different DPI, Alt+Space, the Settings switch back to the system frame. Snap-layout flyout on the maximize button is not available (DECISIONS.md D9) |
+| README media for the new title bar | Rendered by CI on Windows (WARP) | Take the `readme-media` artifact of the PR run, or merge and let the workflow open `TLP-media-refresh` |
 
 ## P1: streaming (next)
 
@@ -28,7 +29,7 @@ whenever an item is finished or a new one is found.
 
 ## P2: desktop experience
 
-Title bar integration, home screen restructure (My device / Remote connection / Devices /
+Title bar done (P2.1). Left: home screen restructure (My device / Remote connection / Devices /
 Sessions / Settings), session toolbar (latency, bandwidth, security info). Uses the existing
 design tokens in `crates/tlp-desk-app/src/ui/theme.rs` and `docs/src/dev/design.md`.
 

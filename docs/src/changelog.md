@@ -27,6 +27,24 @@ protocol bump is called out below.
   failed" instead of the "host key changed" warning, which wrongly invited forgetting the key.
 - `cargo test` on Linux and macOS: a storage test expected the Windows folder name.
 
+### Added
+
+- **Menus in the title bar.** On Windows, TLP-Desk now draws its own title bar like Visual
+  Studio Code instead of an empty system title bar with the app's header under it: logo, the
+  menus File, Edit, View, Connections, Devices, Tools, Window and Help, a quick-connect field
+  (outside the home screen), quick buttons for the connection log, recordings and settings, the
+  connected device during a session, and minimize / maximize / close. Moving and resizing use
+  Windows' own move and resize loops, so snapping keeps working; double-click maximizes. Narrow
+  windows fold the menus into one button; Arabic mirrors the bar. Settings → Language and display
+  → **Menus in the title bar** switches back to the system frame (live). Shortcuts outside a
+  session: Ctrl+N, Ctrl+, (settings), F1 (user guide, opens the browser), F11.
+- **Theme choice**: Same as the system, Light or Dark (Settings and View → Theme).
+- **About TLP-Desk** (Help menu).
+- The home screen warns when another device on the network announces this device's own ID
+  (a cloned disk, VM or copied TLP-Desk folder).
+- `Endpoint::dial_any` / `Endpoint::authorize` and `NetError::SelfConnection` in
+  `tlp-desk-net`; `ViewerError::SelfConnection` in `tlp-desk-viewer`. No wire change.
+
 ### Changed
 
 - **Sharper picture when the remote screen is bigger than your window** (a 4K PC viewed from a
@@ -38,13 +56,6 @@ protocol bump is called out below.
   (they ignore the hint), no `PROTOCOL_VERSION` change.
 - A frame a few pixels smaller than the picture area is shown 1:1 instead of being enlarged by
   a fraction of a percent.
-
-### Added
-
-- The home screen warns when another device on the network announces this device's own ID
-  (a cloned disk, VM or copied TLP-Desk folder).
-- `Endpoint::dial_any` / `Endpoint::authorize` and `NetError::SelfConnection` in
-  `tlp-desk-net`; `ViewerError::SelfConnection` in `tlp-desk-viewer`. No wire change.
 
 ## [1.0.0-rc.4] - 2026-10-16
 

@@ -15,6 +15,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+Look at the UI headless (Mesa lavapipe: `apt-get install mesa-vulkan-drivers`):
+`cargo run -p tlp-desk-app --example readme_media -- --out /tmp/media --only home` and open the
+PNGs. Do not commit these renders (see DECISIONS.md D10).
+
 The cloud session's disk allowance is about 30 GB: one target dir with full debug info plus a
 second worktree's target dir filled it and the linker died with SIGBUS. Use one target dir.
 
@@ -29,7 +33,9 @@ second worktree's target dir filled it and the linker died with SIGBUS. Use one 
 | P1.1 viewport-matched streaming (4K host → small window) | Done, tested (unit + host e2e with fakes); needs a visual check on a 4K Windows host | `TLP-host: viewport hint…`, `TLP-app: send the picture area…` |
 | P1.2 zoom & pan | Not started | |
 | P1.3 maximum clarity mode | Not started (design notes in REMAINING-WORK.md) | |
-| P2 title bar / UI redesign | Not started (needs Windows for verification) | |
+| P2.1 integrated title bar (menus, caption buttons, drag/snap, edge resize, RTL, theme choice, About) | Done, tested (kittest UI tests + lavapipe renders); needs a Windows check of drag/snap/resize/DPI | `TLP-app: integrated title bar…` |
+| P2.2 home / session / settings redesign beyond the title bar | Not started | |
+| Test races found under load (`static_screen_is_not_reencoded`, `live_options_apply_to_the_next_session`) | Fixed | `TLP-host: fix two load-dependent test races` |
 | P3 updates | Mostly pre-existing (rc.4); small items left | |
 
 ## What changed, by crate
@@ -45,6 +51,9 @@ second worktree's target dir filled it and the linker died with SIGBUS. Use one 
 * `tlp-desk-app`: self-connection message, own-ID filter incl. service ID, identity conflict
   warning (`ui/home.rs`), `ui/session/viewport_hint.rs`, 1:1 for barely smaller frames
   (`ui/view_scale.rs`).
+* `tlp-desk-app` (P2): `ui/title_bar/{mod,chrome,app_glue}.rs` (bar, menus, caption buttons,
+  drag/resize, actions, About), `settings` (`ThemeChoice`, `integrated_title_bar`), `main.rs`
+  (`with_decorations`), old `home::top_bar` removed, i18n strings (en + ar).
 * `tlp-desk-cli`: exit code for `SelfConnection` (`Usage`).
 * Docs: changelog, troubleshooting (en + ar), `docs/protocol.md` (SetQuality preset fields),
   `docs/engineering/*`, CLAUDE.md layout table.
