@@ -19,6 +19,7 @@ use super::{theme, widgets};
 use crate::app::{App, Screen};
 use crate::i18n::{DigitStyle, Lang, Tx, S};
 use crate::settings::allow_list::CidrError;
+use crate::settings::ThemeChoice;
 
 /// Transient state of the settings screen (not persisted).
 #[derive(Debug, Default)]
@@ -33,6 +34,8 @@ pub struct SettingsUi {
     pub autostart_error: Option<String>,
     /// Scroll the screen to this offset on the next frame (README media only).
     pub scroll_offset: Option<f32>,
+    /// Help → About is open.
+    pub about_open: bool,
 }
 
 /// An on/off switch whose label sits on the reading side (RTL-aware); returns `true` if toggled.
@@ -46,7 +49,6 @@ pub(crate) fn check_row(ui: &mut egui::Ui, tx: Tx, value: &mut bool, text: &str)
 impl App {
     /// The whole settings screen.
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        self.settings_top_bar(ui);
         let tx = self.tx;
         let mut back = false;
         egui::CentralPanel::default()
@@ -131,6 +133,8 @@ impl App {
         let tx = self.tx;
         let mut new_lang = None;
         let mut new_digits = None;
+        let mut new_theme = None;
+        let mut integrated = self.settings.integrated_title_bar;
         theme::card(ui, |ui| {
             theme::column(ui, tx.rtl(), |ui| {
                 widgets::icon_heading(ui, tx, Icon::Language, tx.t(S::Appearance));
@@ -161,8 +165,28 @@ impl App {
                     new_digits = Some(digits);
                 }
                 ui.label(theme::caption(ui, tx.t(S::DigitsHint)));
+                ui.add_space(theme::space::S);
+                ui.label(theme::caption(ui, tx.t(S::MenuTheme)));
+                let mut choice = self.settings.theme;
+                let themes = [
+                    (ThemeChoice::System, None, tx.t(S::ThemeSystem)),
+                    (ThemeChoice::Light, Some(Icon::Sun), tx.t(S::ThemeLight)),
+                    (ThemeChoice::Dark, Some(Icon::Moon), tx.t(S::ThemeDark)),
+                ];
+                if widgets::segmented(ui, tx, &mut choice, &themes) {
+                    new_theme = Some(choice);
+                }
+                ui.add_space(theme::space::S);
+                check_row(ui, tx, &mut integrated, tx.t(S::IntegratedTitleBar));
+                ui.label(theme::caption(ui, tx.t(S::IntegratedTitleBarHint)));
             });
         });
+        if let Some(t) = new_theme {
+            self.set_theme(ui.ctx(), t);
+        }
+        if integrated != self.settings.integrated_title_bar {
+            self.set_integrated_title_bar(ui.ctx(), integrated);
+        }
         if let Some(l) = new_lang {
             self.set_lang(ui.ctx(), l);
         }

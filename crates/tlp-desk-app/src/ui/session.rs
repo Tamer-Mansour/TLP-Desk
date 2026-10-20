@@ -166,6 +166,12 @@ impl ViewerSession {
         }
     }
 
+    /// Ends the session from outside the toolbar (title bar menu): nothing stays pressed.
+    pub fn disconnect(&mut self, backend: &dyn Backend) {
+        self.release_all(backend);
+        backend.disconnect(self.id);
+    }
+
     /// Asks the host for `self.quality`, with the picture area's size when fitting to the
     /// window (see `viewport_hint`).
     pub fn send_quality(&self, backend: &dyn Backend) {

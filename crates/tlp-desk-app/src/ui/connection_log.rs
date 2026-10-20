@@ -106,7 +106,6 @@ impl App {
 
     /// The whole connection-log screen.
     pub fn connection_log_ui(&mut self, ui: &mut egui::Ui) {
-        self.settings_top_bar(ui);
         let tx = self.tx;
         let mut back = false;
         let mut refresh = false;

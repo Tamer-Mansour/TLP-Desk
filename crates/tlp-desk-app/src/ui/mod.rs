@@ -22,6 +22,7 @@ pub mod service;
 pub mod session;
 pub mod settings;
 pub mod theme;
+pub mod title_bar;
 pub mod transfer_conflict;
 pub mod transfer_queue;
 pub mod transfer_toast;

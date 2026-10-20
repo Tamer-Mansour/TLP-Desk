@@ -90,6 +90,8 @@ fn main() -> anyhow::Result<()> {
         .with_title(tr_raw(lang, S::AppTitle))
         .with_inner_size([1000.0, 660.0])
         .with_min_inner_size([760.0, 520.0])
+        // The integrated title bar replaces the system one (Settings → Language and display).
+        .with_decorations(!settings.integrated_title_bar)
         .with_icon(window_icon());
     let options = eframe::NativeOptions {
         viewport,

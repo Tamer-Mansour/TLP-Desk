@@ -94,6 +94,8 @@ pub fn harness(look: Look) -> Harness<'static, App> {
         lang: look.lang,
         digits: DigitStyle::Western,
         device_name: None,
+        // The Windows default, on every OS, so the media do not depend on where they render.
+        integrated_title_bar: true,
         ..Settings::default()
     };
     let opts = StartOptions {
