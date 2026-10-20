@@ -8,6 +8,32 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **"It says I am connecting to my own device."** A device's address list could contain an
+  address that really belongs to your own PC (virtual adapters such as VirtualBox, Docker,
+  Hyper-V and WSL use the same address on every PC; an old DHCP lease can now be yours). These
+  sorted first, and dialing them reached your own PC. Your own addresses are now never dialed,
+  an address that answers with your own key is skipped (and never shows you an Accept prompt
+  for yourself), and typing your own ID (or the service's ID on the home screen) says "That is
+  this device".
+- **"The device is listed but connecting fails until I restart Wi-Fi."** Addresses a device no
+  longer uses were kept forever and dialed one by one, each waiting 15 s. Now the latest mDNS
+  answer replaces the old address set, broadcast addresses expire individually, addresses are
+  tried best first (just heard from, then your own subnet), all of a device's addresses are
+  dialed in parallel 250 ms apart with a bounded handshake, and a network change (Wi-Fi
+  reconnect, new DHCP lease, VPN, sleep/wake) refreshes discovery at once.
+- A different PC answering at a remembered PC's old address is reported as "identity check
+  failed" instead of the "host key changed" warning, which wrongly invited forgetting the key.
+- `cargo test` on Linux and macOS: a storage test expected the Windows folder name.
+
+### Added
+
+- The home screen warns when another device on the network announces this device's own ID
+  (a cloned disk, VM or copied TLP-Desk folder).
+- `Endpoint::dial_any` / `Endpoint::authorize` and `NetError::SelfConnection` in
+  `tlp-desk-net`; `ViewerError::SelfConnection` in `tlp-desk-viewer`. No wire change.
+
 ## [1.0.0-rc.4] - 2026-10-16
 
 In-app updates: a LAN notice when a peer runs a newer version, an opt-in GitHub update check with signed-manifest verification (minisign), and the Download & install flow.
