@@ -38,6 +38,9 @@ protocol bump is called out below.
   windows fold the menus into one button; Arabic mirrors the bar. Settings → Language and display
   → **Menus in the title bar** switches back to the system frame (live). Shortcuts outside a
   session: Ctrl+N, Ctrl+, (settings), F1 (user guide, opens the browser), F11.
+- **Zoom** in sessions: 25–300 % of actual size from the toolbar (or **More**). 200 % and 300 %
+  show each remote pixel as a crisp square for reading tiny text; an exact 2x fit (1080p host on a
+  4K viewer) also doubles pixels exactly instead of blurring them.
 - **Theme choice**: Same as the system, Light or Dark (Settings and View → Theme).
 - **About TLP-Desk** (Help menu).
 - The home screen warns when another device on the network announces this device's own ID

@@ -15,8 +15,9 @@ whenever an item is finished or a new one is found.
 
 ## P1: streaming (next)
 
-1. **Zoom & pan** in the session view (25–400 %, Ctrl+wheel, keyboard shortcuts), reusing
-   `view_scale.rs`; send the viewport hint for the zoomed size up to native.
+1. Zoom is done (toolbar menu, scroll bars pan). Not done: Ctrl+wheel / keyboard zoom (in a
+   session every key and wheel goes to the remote PC, so it needs a deliberate modifier
+   design), and a viewport hint for zoom levels below 100 %.
 2. **Maximum clarity / lossless mode.** Today's best is the static refinement (very low QP
    keyframe after 300 ms still). Options: a `QualityPreset` value is a wire change (needs a
    `PROTOCOL_VERSION` bump), so prefer `Custom` with a high fixed bitrate floor first and

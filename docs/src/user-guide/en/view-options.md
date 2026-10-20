@@ -13,8 +13,19 @@ The buttons are icons — hover over one to see its name (see the table in
 
 Clicks land correctly in both modes.
 
-Note that very large remote screens (larger than 1920 × 1200, such as 4K monitors) are sent at a
-reduced size to keep the session smooth, so **Actual size** shows that reduced picture.
+In **Fit**, TLP-Desk tells the other computer how big the picture is in your window and gets
+exactly that size, scaled once on the other computer's graphics card, so a 4K screen in a smaller
+window stays sharp. A remote screen exactly half the size of your picture area (1080p on a 4K
+monitor) is shown with each remote pixel doubled exactly, not blurred.
+
+**Zoom** (the percentage next to the two buttons): 25 %, 50 %, 75 %, 100 %, 125 %, 150 %, 200 % or
+300 % of actual size, with scroll bars. 200 % and 300 % show every remote pixel as a crisp square:
+the easiest way to read very small text. Choosing a zoom leaves Fit; **Fit** in the same menu goes
+back. On a narrow window the zoom menu moves into **More** (⋯).
+
+In **Actual size** and the zoom levels, very large remote screens are sent at the quality
+preset's size (1920 × 1200 for Balanced; up to 3840 × 2160 for Quality), so pick **Quality** to
+see a 4K screen at its full resolution.
 
 ## Full screen
 
