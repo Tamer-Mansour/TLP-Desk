@@ -8,6 +8,58 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **"It says I am connecting to my own device."** A device's address list could contain an
+  address that really belongs to your own PC (virtual adapters such as VirtualBox, Docker,
+  Hyper-V and WSL use the same address on every PC; an old DHCP lease can now be yours). These
+  sorted first, and dialing them reached your own PC. Your own addresses are now never dialed,
+  an address that answers with your own key is skipped (and never shows you an Accept prompt
+  for yourself), and typing your own ID (or the service's ID on the home screen) says "That is
+  this device".
+- **"The device is listed but connecting fails until I restart Wi-Fi."** Addresses a device no
+  longer uses were kept forever and dialed one by one, each waiting 15 s. Now the latest mDNS
+  answer replaces the old address set, broadcast addresses expire individually, addresses are
+  tried best first (just heard from, then your own subnet), all of a device's addresses are
+  dialed in parallel 250 ms apart with a bounded handshake, and a network change (Wi-Fi
+  reconnect, new DHCP lease, VPN, sleep/wake) refreshes discovery at once.
+- A different PC answering at a remembered PC's old address is reported as "identity check
+  failed" instead of the "host key changed" warning, which wrongly invited forgetting the key.
+- `cargo test` on Linux and macOS: a storage test expected the Windows folder name.
+
+### Added
+
+- **Menus in the title bar.** On Windows, TLP-Desk now draws its own title bar like Visual
+  Studio Code instead of an empty system title bar with the app's header under it: logo, the
+  menus File, Edit, View, Connections, Devices, Tools, Window and Help, a quick-connect field
+  (outside the home screen), quick buttons for the connection log, recordings and settings, the
+  connected device during a session, and minimize / maximize / close. Moving and resizing use
+  Windows' own move and resize loops, so snapping keeps working; double-click maximizes. Narrow
+  windows fold the menus into one button; Arabic mirrors the bar. Settings → Language and display
+  → **Menus in the title bar** switches back to the system frame (live). Shortcuts outside a
+  session: Ctrl+N, Ctrl+, (settings), F1 (user guide, opens the browser), F11.
+- **Zoom** in sessions: 25–300 % of actual size from the toolbar (or **More**). 200 % and 300 %
+  show each remote pixel as a crisp square for reading tiny text; an exact 2x fit (1080p host on a
+  4K viewer) also doubles pixels exactly instead of blurring them.
+- **Theme choice**: Same as the system, Light or Dark (Settings and View → Theme).
+- **About TLP-Desk** (Help menu).
+- The home screen warns when another device on the network announces this device's own ID
+  (a cloned disk, VM or copied TLP-Desk folder).
+- `Endpoint::dial_any` / `Endpoint::authorize` and `NetError::SelfConnection` in
+  `tlp-desk-net`; `ViewerError::SelfConnection` in `tlp-desk-viewer`. No wire change.
+
+### Changed
+
+- **Sharper picture when the remote screen is bigger than your window** (a 4K PC viewed from a
+  1080p laptop). In "fit to window" the viewer now tells the host the exact size of its picture
+  area, and the host scales the capture straight to it on its GPU. The viewer then shows it
+  pixel for pixel instead of scaling a second time, so text is no longer softened twice, and no
+  bandwidth is spent on pixels that are not shown. The size is sent once the window has kept one
+  size for 0.4 s. "Actual size" streams the preset's own size as before. Works with older hosts
+  (they ignore the hint), no `PROTOCOL_VERSION` change.
+- A frame a few pixels smaller than the picture area is shown 1:1 instead of being enlarged by
+  a fraction of a percent.
+
 ## [1.0.0-rc.4] - 2026-10-16
 
 In-app updates: a LAN notice when a peer runs a newer version, an opt-in GitHub update check with signed-manifest verification (minisign), and the Download & install flow.

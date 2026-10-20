@@ -215,13 +215,13 @@ fn open(
 
 /// One attempt to open `index` with the current quality cap and resolution step.
 fn open_now(ctx: &PipelineCtx, mailbox: &Mailbox, index: u32) -> Result<Source, CaptureError> {
-    let quality_cap = ctx.quality.borrow().max_size;
+    let quality = *ctx.quality.borrow();
     let scale = mailbox.scale.load(Ordering::Acquire);
     let s = open_source(
         &ctx.capturer_factory,
         &ctx.monitor_lister,
         index,
-        quality_cap,
+        &quality,
         scale,
     )?;
     let m = s.cap.monitor();
@@ -379,9 +379,9 @@ fn capture_loop(
 /// Reopens the current source when the quality preset or the adaptive resolution step asks
 /// for another size cap. One attempt per wanted cap; on failure the current source stays.
 fn reopen_if_cap_changed(ctx: &PipelineCtx, mailbox: &Mailbox, st: &mut CaptureState) {
-    let quality_cap = ctx.quality.borrow().max_size;
+    let quality = *ctx.quality.borrow();
     let scale = mailbox.scale.load(Ordering::Acquire);
-    let want = wanted_cap(st.src.cap.monitor(), quality_cap, scale);
+    let want = wanted_cap(st.src.cap.monitor(), &quality, scale);
     if want == st.src.max_size || st.failed_cap == Some(want) {
         return;
     }

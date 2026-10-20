@@ -400,8 +400,24 @@ async fn static_screen_is_not_reencoded() {
     // Let the first frames settle, then watch a full second of a static desktop
     // (the fake delivers ~60 identical frames per second).
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let _ = r.session.take_frame();
     let enc_before = encoded(&r.enc);
+    // Frames encoded before the snapshot may still be decoding (slow under a loaded CI box):
+    // drain until the stream has been quiet for a while, so only new frames count below.
+    within("the stream to go quiet", async {
+        let mut quiet_since = tokio::time::Instant::now();
+        while quiet_since.elapsed() < Duration::from_millis(300) {
+            if r.session.take_frame().is_some() {
+                quiet_since = tokio::time::Instant::now();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert_eq!(
+        encoded(&r.enc),
+        enc_before,
+        "a static frame was encoded while draining"
+    );
     tokio::time::sleep(Duration::from_millis(1200)).await;
     let enc_after = encoded(&r.enc);
     assert!(
@@ -530,4 +546,43 @@ async fn viewer_feedback_with_losses_lowers_the_bitrate() {
     let a = frame_of_size(&r.session, 640, 400).await;
     let b = frame_of_size(&r.session, 640, 400).await;
     assert!(b.seq > a.seq);
+}
+
+/// A viewer that fits the screen into a window smaller than the screen sends its picture
+/// area with the preset: the host scales the capture straight to that size (one scaling pass,
+/// shown 1:1 by the viewer) and the bitrate follows the smaller frame. Withdrawing the hint
+/// (actual-size view) streams the preset's own size again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn viewport_hint_scales_the_stream_to_the_viewer_window() {
+    let r = rig(Setup::default()).await;
+    // The fake monitor is 640x400; Quality streams it natively.
+    assert!(r
+        .session
+        .send_message(Message::SetQuality(quality(QualityPreset::Quality))));
+    frame_of_size(&r.session, 640, 400).await;
+    let native = *created(&r.enc).last().unwrap();
+
+    // A 400x300 picture area (a small window): 640x400 fits as 400x250.
+    assert!(r.session.send_message(Message::SetQuality(QualitySettings {
+        max_width: 400,
+        max_height: 300,
+        ..quality(QualityPreset::Quality)
+    })));
+    frame_of_size(&r.session, 400, 250).await;
+    assert!(r.opened.lock().unwrap().contains(&(0, Some((400, 300)))));
+    let small = *created(&r.enc).last().unwrap();
+    assert_eq!((small.width, small.height), (400, 250));
+    assert!(
+        small.bitrate_kbps < native.bitrate_kbps,
+        "{} !< {}",
+        small.bitrate_kbps,
+        native.bitrate_kbps
+    );
+
+    // Actual size again: no hint, the preset's cap.
+    assert!(r
+        .session
+        .send_message(Message::SetQuality(quality(QualityPreset::Quality))));
+    frame_of_size(&r.session, 640, 400).await;
+    drop(r.vevents);
 }

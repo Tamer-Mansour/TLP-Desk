@@ -348,10 +348,19 @@ impl App {
             self.settings.save();
         }
         if check {
-            self.update.interactive = true;
-            let cfg = self.update_cfg();
-            self.update.worker(ui.ctx()).check(cfg);
+            self.start_update_check(ui.ctx());
         }
+    }
+
+    /// "Check for updates now" (Settings → Updates, Tools menu): user-initiated, so a
+    /// failure is shown.
+    pub(crate) fn start_update_check(&mut self, ctx: &egui::Context) {
+        if self.update.phase().busy() {
+            return;
+        }
+        self.update.interactive = true;
+        let cfg = self.update_cfg();
+        self.update.worker(ctx).check(cfg);
     }
 
     /// Home screen: "A newer version (x) is running on <device> — Download".

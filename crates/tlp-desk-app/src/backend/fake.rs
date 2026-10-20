@@ -131,6 +131,7 @@ impl FakeBackend {
                         IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
                     ],
                     one_time_code: next_code(&mut rng),
+                    identity_conflict: None,
                 },
                 devices: vec![
                     device(715_204_386, "Office-PC", [192, 168, 1, 40], true),

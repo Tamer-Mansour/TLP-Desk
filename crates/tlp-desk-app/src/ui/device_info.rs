@@ -317,6 +317,7 @@ mod tests {
                     device_name: "اختبار".into(),
                     addresses: Vec::new(),
                     one_time_code: "000000".into(),
+                    identity_conflict: None,
                 }
             }
             fn set_device_name(&self, _: String) {}

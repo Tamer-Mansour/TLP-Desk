@@ -163,6 +163,10 @@ pub struct App {
     pub(crate) start_hidden: bool,
     /// Update check / download / install state (TLP-updater).
     pub update: crate::ui::update::UpdateUi,
+    /// The integrated title bar (menus, quick connect, window buttons).
+    pub title_bar: crate::ui::title_bar::TitleBar,
+    /// Focus the connect box on the next home frame (File → New connection).
+    pub focus_connect: bool,
 }
 
 impl App {
@@ -233,7 +237,10 @@ impl App {
             accept_card: None,
             start_hidden: opts.start_hidden,
             update: Default::default(),
+            title_bar: Default::default(),
+            focus_connect: false,
         };
+        cc.egui_ctx.set_theme(app.settings.theme.preference());
         // The Run key is the truth for "start with Windows" (it can be removed outside the app).
         if let Ok(on) = app.autostart.is_enabled() {
             app.settings.startup.start_with_windows = on;
@@ -358,6 +365,7 @@ impl App {
                 .into(),
             ConnectError::Unreachable => tx.t(S::ErrUnreachable).into(),
             ConnectError::IdentityMismatch => tx.t(S::ErrIdentity).into(),
+            ConnectError::SelfConnection => tx.t(S::ErrSelfConnection).into(),
             // Normally shown as its own warning dialog (see `KeyWarning`).
             ConnectError::HostKeyChanged { .. } => tx.t(S::KeyChangedTitle).into(),
             ConnectError::NotLocalNetwork => tx.t(S::ErrNotLan).into(),
@@ -1073,6 +1081,21 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.drain_events(&ctx);
+        self.title_bar_ui(ui);
+        self.screen_ui(ui);
+        self.window_edges(&ctx);
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // A drag out of the file browser ran the OS drag loop, which took the mouse-up.
+        crate::ui::file_browser::release_pointer_if_requested(ctx, raw_input);
+    }
+}
+
+impl App {
+    /// Everything under the title bar.
+    fn screen_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         self.popup_frame(&ctx);
         self.tray_frame(&ctx);
         self.banner_window(&ctx);
@@ -1106,10 +1129,5 @@ impl eframe::App for App {
             Screen::Settings => self.settings_ui(ui),
             Screen::ConnectionLog => self.connection_log_ui(ui),
         }
-    }
-
-    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        // A drag out of the file browser ran the OS drag loop, which took the mouse-up.
-        crate::ui::file_browser::release_pointer_if_requested(ctx, raw_input);
     }
 }

@@ -4,6 +4,8 @@
 //!   drawn at a half-pixel offset is resampled by the GPU and looks blurry even at 1:1.
 //! * When the displayed size equals the frame size (actual size, or a fit that happens to be
 //!   1:1) the texture is sampled with **nearest** filtering: exact pixels, no blur at all.
+//! * At an exact integer enlargement (2x, 3x: a 1080p host fitted on a 4K viewer, or the
+//!   200 % / 300 % zoom) it is **nearest** too: each remote pixel becomes a crisp block.
 //! * Otherwise it is **linear** (smooth up- and down-scaling). egui's wgpu backend has no mip
 //!   chains, so when the picture is shrunk and the screen has been still for a moment,
 //!   [`downscale_rgba`] pre-scales it once with a Lanczos-2 filter to the exact physical size
@@ -44,6 +46,11 @@ impl Sampling {
 const MIN_PRESCALE_RATIO: f32 = 0.2;
 /// Tolerance when deciding that a displayed size equals the frame size, in physical pixels.
 const ONE_TO_ONE_EPS: f32 = 0.5;
+/// A frame at most this many physical pixels smaller than the picture area is shown 1:1 with
+/// a thin border instead of being enlarged by a fraction of a percent (which resamples every
+/// pixel and blurs text). The host streams frames sized to the area rounded down to even
+/// numbers, so they are typically 0-2 px short.
+const MAX_ENLARGE_TO_SKIP_PX: f32 = 8.0;
 
 /// Rounds a coordinate in points to the nearest physical pixel.
 pub fn snap(v: f32, ppp: f32) -> f32 {
@@ -75,7 +82,9 @@ pub fn fit_rect_snapped(avail: Rect, tex: [usize; 2], ppp: f32) -> Rect {
     }
     // Scale in physical pixels per texel.
     let s = (avail.width() * ppp / tw).min(avail.height() * ppp / th);
-    let (pw, ph) = if (s - 1.0).abs() * tw.max(th) < ONE_TO_ONE_EPS {
+    let nearly_same = (s - 1.0).abs() * tw.max(th) < ONE_TO_ONE_EPS;
+    let barely_smaller = s >= 1.0 && (s - 1.0) * tw.max(th) <= MAX_ENLARGE_TO_SKIP_PX;
+    let (pw, ph) = if nearly_same || barely_smaller {
         (tw, th)
     } else {
         ((tw * s).round().max(1.0), (th * s).round().max(1.0))
@@ -88,8 +97,24 @@ pub fn fit_rect_snapped(avail: Rect, tex: [usize; 2], ppp: f32) -> Rect {
 
 /// "Actual size" rectangle: exactly one physical pixel per texel at a physical-pixel origin.
 pub fn original_rect(origin: Pos2, tex: [usize; 2], ppp: f32) -> Rect {
-    let size = Vec2::new(tex[0] as f32, tex[1] as f32) / ppp.max(f32::EPSILON);
-    Rect::from_min_size(Pos2::new(snap(origin.x, ppp), snap(origin.y, ppp)), size)
+    zoom_rect(origin, tex, ppp, 100)
+}
+
+/// Zoom levels offered in the session toolbar (percent of actual size).
+pub const ZOOM_STEPS: [u16; 8] = [25, 50, 75, 100, 125, 150, 200, 300];
+
+/// Rectangle for showing `tex` at `percent` of actual size: an integer physical size (rounded)
+/// at a physical-pixel origin, so 100 % is exactly one texel per physical pixel and 200 % /
+/// 300 % are exact pixel multiples.
+pub fn zoom_rect(origin: Pos2, tex: [usize; 2], ppp: f32, percent: u16) -> Rect {
+    let ppp = ppp.max(f32::EPSILON);
+    let z = f32::from(percent.clamp(10, 800)) / 100.0;
+    let w = (tex[0] as f32 * z).round().max(1.0);
+    let h = (tex[1] as f32 * z).round().max(1.0);
+    Rect::from_min_size(
+        Pos2::new(snap(origin.x, ppp), snap(origin.y, ppp)),
+        Vec2::new(w, h) / ppp,
+    )
 }
 
 /// Displayed size in physical pixels.
@@ -97,11 +122,17 @@ fn physical_size(rect: Rect, ppp: f32) -> (f32, f32) {
     (rect.width() * ppp, rect.height() * ppp)
 }
 
-/// The texture filter for showing `tex` in `rect`.
+/// The texture filter for showing `tex` in `rect`: nearest at 1:1 and at exact integer
+/// enlargements (200 %, 300 %: crisp pixels for reading small text), linear otherwise.
 pub fn sampling_for(tex: [usize; 2], rect: Rect, ppp: f32) -> Sampling {
     let (pw, ph) = physical_size(rect, ppp);
-    if (pw - tex[0] as f32).abs() <= ONE_TO_ONE_EPS && (ph - tex[1] as f32).abs() <= ONE_TO_ONE_EPS
-    {
+    let (tw, th) = (tex[0] as f32, tex[1] as f32);
+    if tw <= 0.0 || th <= 0.0 {
+        return Sampling::Linear;
+    }
+    let k = (pw / tw).round();
+    let exact = |p: f32, t: f32| (p - t * k).abs() <= ONE_TO_ONE_EPS;
+    if (1.0..=8.0).contains(&k) && exact(pw, tw) && exact(ph, th) {
         Sampling::Nearest
     } else {
         Sampling::Linear
@@ -332,6 +363,21 @@ mod tests {
         assert_eq!(sampling_for([1920, 1080], r, 1.0), Sampling::Linear);
     }
 
+    /// The host sized the frame to the window (rounded down to even): show it 1:1, never
+    /// stretch it by a pixel or two. A clearly smaller frame is still enlarged to fit.
+    #[test]
+    fn a_frame_slightly_smaller_than_the_window_is_shown_one_to_one() {
+        for ppp in [1.0, 1.5] {
+            let a = avail(1905.0 / ppp, 1003.0 / ppp);
+            let r = fit_rect_snapped(a, [1904, 1002], ppp);
+            assert_eq!(physical_size(r, ppp), (1904.0, 1002.0), "ppp {ppp}");
+            assert_eq!(sampling_for([1904, 1002], r, ppp), Sampling::Nearest);
+            assert!(a.contains_rect(r));
+        }
+        let r = fit_rect_snapped(avail(1920.0, 1080.0), [1280, 720], 1.0);
+        assert_eq!(physical_size(r, 1.0), (1920.0, 1080.0));
+    }
+
     #[test]
     fn fit_has_integer_physical_size_and_origin_and_stays_inside() {
         for ppp in [1.0, 1.25, 1.5, 2.0] {
@@ -350,6 +396,39 @@ mod tests {
     }
 
     #[test]
+    fn integer_zoom_is_exact_pixels_and_other_zooms_are_smooth() {
+        for ppp in [1.0, 1.25, 1.5, 2.0] {
+            for (pct, k) in [(200u16, 2.0f32), (300, 3.0)] {
+                let r = zoom_rect(pos2(3.3, 7.7), [1920, 1080], ppp, pct);
+                assert_eq!(
+                    physical_size(r, ppp),
+                    (1920.0 * k, 1080.0 * k),
+                    "{pct}% @ {ppp}"
+                );
+                assert!(on_grid(r.min.x, ppp) && on_grid(r.min.y, ppp));
+                assert_eq!(sampling_for([1920, 1080], r, ppp), Sampling::Nearest);
+            }
+            for pct in [25u16, 50, 75, 125, 150] {
+                let r = zoom_rect(pos2(0.0, 0.0), [1920, 1080], ppp, pct);
+                assert_eq!(
+                    sampling_for([1920, 1080], r, ppp),
+                    Sampling::Linear,
+                    "{pct}%"
+                );
+                let (pw, ph) = physical_size(r, ppp);
+                assert!((pw - pw.round()).abs() < 1e-3 && (ph - ph.round()).abs() < 1e-3);
+            }
+        }
+        // Shrinking keeps the still-screen Lanczos pre-scale path.
+        let r = zoom_rect(pos2(0.0, 0.0), [3840, 2160], 1.0, 50);
+        assert_eq!(prescale_target([3840, 2160], r, 1.0), Some([1920, 1080]));
+        assert_eq!(
+            zoom_rect(pos2(0.0, 0.0), [10, 10], 1.0, 100),
+            original_rect(pos2(0.0, 0.0), [10, 10], 1.0)
+        );
+    }
+
+    #[test]
     fn original_mode_is_one_texel_per_physical_pixel_at_any_dpi() {
         for ppp in [1.0, 1.25, 1.5, 2.0] {
             let r = original_rect(pos2(13.37, 4.2), [1920, 1080], ppp);
@@ -359,12 +438,16 @@ mod tests {
         }
     }
 
+    /// Non-integer enlargement and any shrink are smooth; an exact 2x enlargement (a 1080p
+    /// host fitted on a 4K viewer) doubles pixels exactly, which keeps text crisp.
     #[test]
-    fn sampling_is_linear_for_up_and_down_scaling() {
-        let r = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(3840.0, 2160.0));
+    fn sampling_is_linear_except_at_exact_integer_scales() {
+        let r = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(2880.0, 1620.0));
         assert_eq!(sampling_for([1920, 1080], r, 1.0), Sampling::Linear);
         let r = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(960.0, 540.0));
         assert_eq!(sampling_for([1920, 1080], r, 1.0), Sampling::Linear);
+        let r = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(3840.0, 2160.0));
+        assert_eq!(sampling_for([1920, 1080], r, 1.0), Sampling::Nearest);
     }
 
     #[test]
@@ -452,9 +535,13 @@ mod tests {
         let much_later = later + Duration::from_secs(5);
         assert_eq!(view.texture_for(&ctx, &mut tex, exact, much_later), main);
         assert_eq!(view.sampling, Some(Sampling::Nearest));
-        let big = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(1280.0, 720.0));
+        let big = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(960.0, 540.0));
         assert_eq!(view.texture_for(&ctx, &mut tex, big, much_later), main);
         assert_eq!(view.sampling, Some(Sampling::Linear));
+        // Exactly 2x: pixels are doubled, not blurred.
+        let double = Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(1280.0, 720.0));
+        assert_eq!(view.texture_for(&ctx, &mut tex, double, much_later), main);
+        assert_eq!(view.sampling, Some(Sampling::Nearest));
     }
 
     #[test]

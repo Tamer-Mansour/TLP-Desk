@@ -9,6 +9,7 @@ use eframe::egui::{
 use tlp_desk_proto::{InputEvent, MouseButton, Permissions};
 
 mod toolbar;
+mod viewport_hint;
 
 use super::chat::{self, ChatState};
 use super::file_browser::FileBrowser;
@@ -30,7 +31,8 @@ use crate::text_route::TextRouter;
 pub enum ViewMode {
     /// Scale the remote screen to fit the window, preserving aspect ratio.
     Fit,
-    /// One remote pixel per physical screen pixel, with scroll bars.
+    /// One remote pixel per physical screen pixel (scaled by the session's zoom level), with
+    /// scroll bars.
     Original,
 }
 
@@ -44,6 +46,8 @@ pub struct ViewerSession {
     view: super::view_scale::RemoteView,
     frame_size: [usize; 2],
     pub mode: ViewMode,
+    /// Zoom level of [`ViewMode::Original`], percent (100 = actual size).
+    pub zoom_pct: u16,
     pub view_only: bool,
     pub show_stats: bool,
     pub stats: Option<SessionStats>,
@@ -76,6 +80,8 @@ pub struct ViewerSession {
     pub remote_desktop: Option<crate::backend::service::RemoteDesktop>,
     /// Quality preset requested from the host (toolbar menu; starts as the Settings default).
     pub quality: QualityChoice,
+    /// The picture area's size as last told to the host (fit-to-window streaming).
+    viewport: viewport_hint::ViewportHint,
     /// Remote device-info window (toolbar button).
     pub device_info: super::device_info::DeviceInfoPanel,
     /// Port forwarding window (TLP-tunnel).
@@ -127,6 +133,7 @@ impl ViewerSession {
             view: Default::default(),
             frame_size: [0, 0],
             mode: ViewMode::Fit,
+            zoom_pct: 100,
             view_only: false,
             show_stats: true,
             stats: None,
@@ -147,6 +154,7 @@ impl ViewerSession {
             unattended: Default::default(),
             remote_desktop: None,
             quality: QualityChoice::default(),
+            viewport: Default::default(),
             device_info: Default::default(),
             tunnels: Default::default(),
             whiteboard: WhiteboardUi::new(),
@@ -159,6 +167,37 @@ impl ViewerSession {
             typing: TextRouter::default(),
             wheel: Default::default(),
             toolbar_layout: Default::default(),
+        }
+    }
+
+    /// Ends the session from outside the toolbar (title bar menu): nothing stays pressed.
+    pub fn disconnect(&mut self, backend: &dyn Backend) {
+        self.release_all(backend);
+        backend.disconnect(self.id);
+    }
+
+    /// Asks the host for `self.quality`, with the picture area's size when fitting to the
+    /// window (see `viewport_hint`).
+    pub fn send_quality(&self, backend: &dyn Backend) {
+        backend.request_quality(
+            self.id,
+            viewport_hint::request(self.quality, self.viewport.current()),
+        );
+    }
+
+    /// Feeds this frame's wanted viewport hint; sends it once it has settled.
+    fn update_viewport_hint(
+        &mut self,
+        ctx: &egui::Context,
+        want: Option<(u32, u32)>,
+        backend: &dyn Backend,
+    ) {
+        if self.viewport.update(want, Instant::now()).is_some() {
+            tracing::debug!(session = self.id.0, hint = ?want, "picture area changed; telling the host");
+            self.send_quality(backend);
+        }
+        if self.viewport.pending() {
+            ctx.request_repaint_after(viewport_hint::SETTLE);
         }
     }
 
@@ -329,6 +368,14 @@ impl ViewerSession {
                 let ppp = ui.ctx().pixels_per_point();
                 let now = Instant::now();
                 let uv = Rect::from_min_max(Pos2::ZERO, egui::pos2(1.0, 1.0));
+                let hint = match self.mode {
+                    ViewMode::Fit => {
+                        let a = ui.available_rect_before_wrap();
+                        viewport_hint::area_hint(a.width() * ppp, a.height() * ppp)
+                    }
+                    ViewMode::Original => None,
+                };
+                self.update_viewport_hint(ui.ctx(), hint, backend);
                 let (resp, image_rect, visible) = match self.mode {
                     ViewMode::Fit => {
                         let avail = ui.available_rect_before_wrap();
@@ -339,8 +386,9 @@ impl ViewerSession {
                         (resp, image_rect, image_rect)
                     }
                     ViewMode::Original => {
+                        let zoom = self.zoom_pct;
                         let size =
-                            egui::vec2(self.frame_size[0] as f32, self.frame_size[1] as f32) / ppp;
+                            view_scale::zoom_rect(Pos2::ZERO, self.frame_size, ppp, zoom).size();
                         let source = if self.can_mouse() {
                             egui::scroll_area::ScrollSource::SCROLL_BAR
                         } else {
@@ -352,9 +400,10 @@ impl ViewerSession {
                             .show(ui, |ui| {
                                 let (rect, resp) =
                                     ui.allocate_exact_size(size, Sense::click_and_drag());
-                                // One texel per physical pixel, at a physical-pixel origin.
+                                // One texel per physical pixel times the zoom, at a
+                                // physical-pixel origin.
                                 let rect =
-                                    view_scale::original_rect(rect.min, self.frame_size, ppp);
+                                    view_scale::zoom_rect(rect.min, self.frame_size, ppp, zoom);
                                 let id = self.view.texture_for(ui.ctx(), &mut tex, rect, now);
                                 ui.painter().image(id, rect, uv, Color32::WHITE);
                                 let visible = ui.clip_rect().intersect(rect);
@@ -808,6 +857,7 @@ mod tests {
                 device_name: String::new(),
                 addresses: vec![],
                 one_time_code: String::new(),
+                identity_conflict: None,
             }
         }
         fn set_device_name(&self, _: String) {}

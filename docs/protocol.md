@@ -378,6 +378,13 @@ restart fails. Before anyone logs in the host only answers if the TLP-Desk servi
 
 - `SetQuality(QualitySettings { preset: Speed | Balanced | Quality | Custom, max_width, max_height,
   fps, bitrate_kbps: Option<u32> })`: zero fields mean "host default", `None` bitrate = adaptive.
+  For `Custom` the fields are the request. For the presets (`Speed`, `Balanced`, `Quality`) a
+  non-zero `max_width` x `max_height` is the viewer's **picture area in physical pixels** when it
+  fits the screen to its window (0 x 0 in actual-size view): the host limits the capture to it,
+  after turning the preset cap to the monitor's orientation and before the adaptive resolution
+  step, so the picture is scaled once on the host and shown 1:1. Other fields are ignored for
+  presets. Hosts before 1.0.0-rc.5 ignore these fields for presets and viewers before it send
+  zeros, so this needs no `PROTOCOL_VERSION` change.
 - `ViewerFeedback { decode_us, frames_dropped, rtt_us }` about once per second drives adaptive
   bitrate on the host.
 - `LatencyProbe { t_viewer_us }` → `LatencyEcho { t_viewer_us, t_host_capture_us }` lets the viewer

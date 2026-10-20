@@ -2,8 +2,8 @@
 
 ![The settings screen](../../media/settings-en-light.png)
 
-Open **Settings** from the top bar of the home screen. Click **Back** to return. Changes apply
-immediately and are remembered.
+Open **Settings** with the gear button in the title bar, **File → Settings** or **Ctrl+,**.
+Click **Back** to return. Changes apply immediately and are remembered.
 
 ## Language and display
 
@@ -13,8 +13,8 @@ Choose **English** or **العربية** (Arabic). The whole interface switches 
 layout: in Arabic everything is mirrored right-to-left.
 
 On first start TLP-Desk uses Arabic if your Windows display language is Arabic, and English
-otherwise. You can also switch the language from the menu in the top bar of the home screen, or
-start TLP-Desk once in a specific language with `TLP-Desk.exe --lang ar` (or `--lang en`).
+otherwise. You can also switch the language with **View → Language**, or start TLP-Desk once in a
+specific language with `TLP-Desk.exe --lang ar` (or `--lang en`).
 
 ### Digits
 
@@ -25,6 +25,25 @@ Choose how numbers are **displayed**:
 
 This affects only what you see. **IDs, codes and addresses are always copied with 0-9 digits**, so
 they work when pasted anywhere. You can type IDs and codes with either kind of digits.
+
+### Theme
+
+**Same as the system** (default), **Light** or **Dark**. Also under **View → Theme**.
+
+### Menus in the title bar
+
+On (the default on Windows), TLP-Desk draws its own title bar, like Visual Studio Code: the logo,
+the menus **File, Edit, View, Connections, Devices, Tools, Window, Help**, quick buttons for the
+connection log, recordings and settings, and the minimize / maximize / close buttons. Drag the
+empty part of the bar to move the window (dragging it to a screen edge snaps it as usual),
+double-click it to maximize or restore, and drag any window edge to resize. During a session the
+bar shows which device you are connected to; in full screen it is hidden.
+
+Off, Windows draws its normal title bar and the same TLP-Desk bar (menus and quick buttons) sits
+under it. The switch applies at once.
+
+Shortcuts outside a session: **Ctrl+N** new connection, **Ctrl+,** settings, **F1** user guide,
+**F11** full screen. During a session every key goes to the remote computer.
 
 ## This device
 
@@ -77,6 +96,12 @@ Changes apply to the next connection attempt.
 
 **Speed**, **Balanced** or **Quality**: the preset used when you connect to another device. It is
 remembered and sent to the host as a quality request.
+
+When the remote screen is shown **fitted to the window**, TLP-Desk also tells the other computer
+how big the picture is on your screen, and the other computer sends exactly that size. A 4K
+screen viewed in a smaller window is therefore scaled once, on the other computer's graphics
+card, and shown pixel for pixel here: text stays sharper and less data is sent. In **actual
+size** the preset's own size is used.
 
 ## Start-up and notification area
 

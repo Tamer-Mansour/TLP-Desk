@@ -32,6 +32,9 @@ pub enum NetError {
         actual_id: DeviceId,
         actual_fp: Fingerprint,
     },
+    /// The address answered with this install's own key: it is this device, not a peer.
+    #[error("that address is this device itself")]
+    SelfConnection,
     #[error("peer {0} is not in the allow-list")]
     NotAllowed(SocketAddr),
     #[error("protocol version mismatch: ours {ours}, theirs {theirs}")]

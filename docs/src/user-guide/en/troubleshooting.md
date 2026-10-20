@@ -25,7 +25,7 @@ Common causes:
 | **Guest Wi-Fi** or **AP / client isolation** | Many routers and mesh systems keep wireless devices from seeing each other on guest networks or when "AP isolation", "client isolation" or "wireless isolation" is on. Use the main (non-guest) network, or turn isolation off in the router's settings. Connecting by IP will not work either while isolation is on. |
 | One PC on **Wi-Fi**, the other on **cable**, through different routers | They must be on the same network (same IP range, e.g. both `192.168.1.x`). |
 | A **VPN** is connected | Many VPN clients route all traffic through the VPN or block the local network. Disconnect the VPN, or enable its "allow local network access / LAN access" option. |
-| **Virtual network adapters** (Hyper-V, VirtualBox, VMware, WSL, Docker) | Discovery and the "Local address" list may include addresses of virtual networks that the other PC cannot reach. Use the address of your real Ethernet or Wi-Fi adapter (`ipconfig` shows which). |
+| **Virtual network adapters** (Hyper-V, VirtualBox, VMware, WSL, Docker) | The "Local address" list may include addresses of virtual networks that the other PC cannot reach. When you type an address, use the one of your real Ethernet or Wi-Fi adapter (`ipconfig` shows which). Connecting from the device list handles this by itself: TLP-Desk tries the other PC's addresses in parallel, best first, and never dials an address that belongs to your own PC. |
 | Waited only a few seconds | Devices announce themselves every few seconds; give it 15–20 seconds. |
 
 ## "The device cannot be reached"
@@ -39,6 +39,28 @@ The address answered nothing. Check:
 - no VPN or isolation issue (see the table above);
 - you can reach the other PC at all: `ping 192.168.1.40` in a command prompt (some PCs do not
   answer ping even when everything is fine, so this is only a hint).
+
+## "That is this device"
+
+You typed this PC's own ID (or its address), or every address the other PC announced turned out
+to be this PC. Type the ID or address shown on the **other** PC's home screen.
+
+## "Another device on this network uses this device's ID"
+
+Two PCs have the same TLP-Desk identity, almost always because one was cloned from the other (a
+disk image, a copied virtual machine, or a copied `C:\ProgramData\TLP-Desk` folder). Connections
+by ID cannot tell them apart. On one of the two PCs, uninstall TLP-Desk, delete
+`C:\ProgramData\TLP-Desk` and `%LOCALAPPDATA%\TLP-Desk`, and install it again: it creates a new
+key and a new ID. Other PCs that connected to it before will warn once that its key changed.
+
+## The device is listed but connecting fails until Wi-Fi is restarted
+
+Fixed in this version: TLP-Desk notices when your network changes (Wi-Fi reconnects, a new
+address from the router, a VPN, waking from sleep), forgets addresses learned on the old network
+and asks the network again at once. It also tries all of a device's addresses at the same time,
+so an old address no longer delays the connection. If it still happens, check that the network
+is set to **Private** on both PCs: on a network Windows treats as **Public** the firewall blocks
+incoming connections while the PC is still listed.
 
 ## "Port 47400 is already in use"
 

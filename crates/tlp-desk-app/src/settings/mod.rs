@@ -64,6 +64,32 @@ pub struct Settings {
     pub accept_popup: AcceptPopupSettings,
     /// Opt-in update check against GitHub Releases (TLP-updater).
     pub updates: UpdateSettings,
+    /// Light, dark, or the same as Windows.
+    pub theme: ThemeChoice,
+    /// TLP-Desk draws its own title bar with the menus and window buttons (like VS Code)
+    /// instead of the system one with the app's header under it. Default on, on Windows.
+    pub integrated_title_bar: bool,
+}
+
+/// Color theme choice (View → Theme, Settings → Language and display).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThemeChoice {
+    /// Follow the operating system.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemeChoice {
+    /// The egui preference for this choice.
+    pub fn preference(self) -> eframe::egui::ThemePreference {
+        match self {
+            Self::System => eframe::egui::ThemePreference::System,
+            Self::Light => eframe::egui::ThemePreference::Light,
+            Self::Dark => eframe::egui::ThemePreference::Dark,
+        }
+    }
 }
 
 /// Update check options. Nothing contacts the internet unless the user presses "Check for
@@ -104,6 +130,10 @@ impl Default for Settings {
             type_with_my_layout: false,
             accept_popup: AcceptPopupSettings::default(),
             updates: UpdateSettings::default(),
+            theme: ThemeChoice::default(),
+            // The integrated bar uses Windows' own move/resize loops; elsewhere the window
+            // manager's frame is the better default.
+            integrated_title_bar: cfg!(windows),
         }
     }
 }

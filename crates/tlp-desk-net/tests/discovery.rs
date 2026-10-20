@@ -121,3 +121,75 @@ async fn mdns_advertise_and_browse() {
     assert!(dev.addrs.iter().all(|a| a.port() == 47400));
     drop(a);
 }
+
+/// Regression (BUG 2, "visible but cannot connect until Wi-Fi is restarted"): a device that
+/// moved to a new address (new DHCP lease, other adapter) must be dialed at the new address
+/// first, and the old one must disappear once the device stops announcing from it, instead
+/// of staying first in the list forever. Linux only: it needs two loopback source addresses
+/// (all of 127/8 answers there; Windows and macOS only configure 127.0.0.1).
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn moved_device_is_dialed_at_its_new_address_and_the_old_one_expires() {
+    use tlp_desk_net::{BroadcastPacket, PacketKind, APP_VERSION};
+
+    let pb = free_udp_port();
+    let b = Discovery::start(DiscoveryConfig {
+        advertise: None,
+        enable_mdns: false,
+        broadcast_port: pb,
+        broadcast_targets: Some(Vec::new()),
+        announce_interval: Duration::from_secs(60),
+        expiry: Duration::from_millis(1200),
+        ..DiscoveryConfig::default()
+    })
+    .await
+    .unwrap();
+    let announce = BroadcastPacket {
+        kind: PacketKind::Announce,
+        protocol_version: tlp_desk_proto::PROTOCOL_VERSION,
+        device_id: 222_333_444,
+        name: "حاسوب المكتب".into(),
+        port: 47400,
+        app_version: Some(APP_VERSION.into()),
+    }
+    .encode();
+    let old_home = UdpSocket::bind("127.0.0.2:0").unwrap();
+    let new_home = UdpSocket::bind("127.0.0.3:0").unwrap();
+    let to = SocketAddr::from(([127, 0, 0, 1], pb));
+    let old_addr = SocketAddr::from(([127, 0, 0, 2], 47400));
+    let new_addr = SocketAddr::from(([127, 0, 0, 3], 47400));
+
+    old_home.send_to(&announce, to).unwrap();
+    let dev = wait_for(&b, 222_333_444).await;
+    assert_eq!(dev.addrs, vec![old_addr]);
+
+    // The device moved: it now announces from the new address only.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    new_home.send_to(&announce, to).unwrap();
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let d = wait_for(&b, 222_333_444).await;
+            if d.addrs.first() == Some(&new_addr) {
+                assert_eq!(d.addrs, vec![new_addr, old_addr], "newest first");
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the new address never came first");
+
+    // Keep announcing from the new address; the old one must age out on its own.
+    timeout(Duration::from_secs(10), async {
+        loop {
+            new_home.send_to(&announce, to).unwrap();
+            let d = wait_for(&b, 222_333_444).await;
+            if d.addrs == vec![new_addr] {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("the stale address was never dropped");
+}

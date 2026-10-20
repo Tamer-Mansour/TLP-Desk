@@ -137,6 +137,8 @@ strings! {
     ErrVersion => "The other device runs an incompatible version.", "الجهاز الآخر يعمل بإصدار غير متوافق.";
     ErrUnreachable => "The device cannot be reached.", "تعذّر الوصول إلى الجهاز.";
     ErrIdentity => "Identity check failed. Connection stopped.", "فشل التحقق من الهوية. أُوقف الاتصال.";
+    IdentityConflict => "Another device on this network ({addr}) uses this device's ID, probably because its disk or TLP-Desk folder was copied from this one. Connections by ID may reach the wrong PC. Reinstall TLP-Desk on one of them so it gets its own ID.", "جهاز آخر على هذه الشبكة ({addr}) يستخدم معرّف هذا الجهاز، والأرجح أن قرصه أو مجلد TLP-Desk فيه نُسخ من هذا الجهاز. قد يصل الاتصال بالمعرّف إلى الحاسوب الخطأ. أعد تثبيت TLP-Desk على أحدهما ليحصل على معرّف خاص به.";
+    ErrSelfConnection => "That is this device. Enter the ID or address of the other device.", "هذا هو جهازك نفسه. أدخل معرّف الجهاز الآخر أو عنوانه.";
     ErrTimeout => "The connection timed out.", "انتهت مهلة الاتصال.";
     ErrOther => "Connection failed: {detail}", "فشل الاتصال: {detail}";
     ErrNotLan => "Only addresses on the local network can be used.", "لا يمكن استخدام إلا عناوين الشبكة المحلية.";
@@ -804,6 +806,40 @@ strings! {
     UpdLanNotice => "A newer version ({ver}) is running on {device}", "إصدار أحدث ({ver}) يعمل على {device}";
     UpdDownload => "Download", "تنزيل";
     UpdDismiss => "Hide", "إخفاء";
+    MenuFile => "File", "ملف";
+    MenuEdit => "Edit", "تحرير";
+    MenuView => "View", "عرض";
+    MenuConnections => "Connections", "الاتصالات";
+    MenuDevices => "Devices", "الأجهزة";
+    MenuTools => "Tools", "أدوات";
+    MenuWindow => "Window", "نافذة";
+    MenuHelp => "Help", "مساعدة";
+    MenuMore => "Menu", "القائمة";
+    MenuNewConnection => "New connection", "اتصال جديد";
+    MenuExit => "Exit", "خروج";
+    MenuCopyId => "Copy device ID", "نسخ معرّف الجهاز";
+    MenuCopyCode => "Copy one-time code", "نسخ الرمز لمرة واحدة";
+    MenuHome => "Home", "الرئيسية";
+    MenuTheme => "Theme", "السمة";
+    ThemeSystem => "Same as the system", "مثل النظام";
+    ThemeLight => "Light", "فاتحة";
+    ThemeDark => "Dark", "داكنة";
+    MenuMinimize => "Minimize", "تصغير";
+    MenuMaximize => "Maximize", "تكبير";
+    MenuRestore => "Restore down", "استعادة الحجم";
+    MenuClose => "Close", "إغلاق";
+    MenuUserGuide => "User guide (opens in the browser)", "دليل المستخدم (يُفتح في المتصفح)";
+    MenuTroubleshooting => "Troubleshooting (opens in the browser)", "حل المشكلات (يُفتح في المتصفح)";
+    MenuAbout => "About TLP-Desk", "حول TLP-Desk";
+    AboutVersion => "Version {ver}", "الإصدار {ver}";
+    AboutBody => "Free, open-source remote desktop for your local network. No cloud, no account, no telemetry.", "سطح مكتب بعيد مجاني ومفتوح المصدر لشبكتك المحلية. بلا سحابة وبلا حساب وبلا قياس عن بُعد.";
+    AboutLicense => "MIT or Apache-2.0", "MIT أو Apache-2.0";
+    QuickConnectHint => "Connect to an ID or address", "اتصل بمعرّف أو عنوان";
+    TitleConnectedTo => "Connected to {name}", "متصل بـ {name}";
+    IntegratedTitleBar => "Menus in the title bar (TLP-Desk draws the window frame)", "القوائم في شريط العنوان (يرسم TLP-Desk إطار النافذة)";
+    Zoom => "Zoom", "التكبير";
+    ZoomFit => "Fit", "ملاءمة";
+    IntegratedTitleBarHint => "Off: the standard system title bar, with the menus under it.", "عند الإيقاف: شريط عنوان النظام العادي، والقوائم تحته.";
 }
 
 /// Display-ready (pre-shaped) Arabic table, built once.
