@@ -262,31 +262,74 @@ impl Endpoint {
         auth: AuthMethod,
         on_awaiting_accept: Option<AwaitingAcceptFn>,
     ) -> Result<Session, NetError> {
-        let (cfg, observed) = tls::client_config(&self.shared.identity, pin)?;
-        let connecting = self.ep.connect_with(cfg, addr, "tlp-desk")?;
-        let conn = match connecting.await {
-            Ok(c) => c,
-            Err(e) => {
-                let seen = *observed.lock().unwrap_or_else(|p| p.into_inner());
-                if let Some(fp) = seen.filter(|fp| !pin.matches(fp)) {
-                    return Err(NetError::PinMismatch {
-                        expected: pin.describe(),
-                        actual_id: fp.device_id(),
-                        actual_fp: fp,
-                    });
-                }
-                return Err(e.into());
-            }
+        let dialed = dial(self.ep.clone(), self.shared.clone(), addr, pin).await?;
+        self.authorize(dialed, auth, on_awaiting_accept).await
+    }
+
+    /// Viewer: dials every address of one device, staggered by [`DIAL_STAGGER`] (a dead or
+    /// stale address costs a quarter second, not a whole handshake timeout), and returns the
+    /// first that completes a QUIC handshake with a key matching `pin`. The others are
+    /// abandoned. Each attempt is bounded by the handshake timeout.
+    ///
+    /// Addresses that turn out to be this endpoint itself (a virtual adapter address shared
+    /// by both machines, a stale DHCP lease now ours) fail with [`NetError::SelfConnection`]
+    /// and the dial moves on. On total failure every address's reason is returned, in the
+    /// order they failed. Authorize the winner with [`Endpoint::authorize`].
+    pub async fn dial_any(
+        &self,
+        addrs: &[SocketAddr],
+        pin: Pin,
+    ) -> Result<Dialed, Vec<DialFailure>> {
+        let mut queue = addrs.iter().copied();
+        let mut failures = Vec::new();
+        let mut set = tokio::task::JoinSet::new();
+        let spawn = |set: &mut tokio::task::JoinSet<_>, addr: SocketAddr| {
+            let (ep, shared) = (self.ep.clone(), self.shared.clone());
+            set.spawn(async move { (addr, dial(ep, shared, addr, pin).await) });
         };
-        let host_fp = tls::peer_fingerprint(&conn)?;
-        if !pin.matches(&host_fp) {
-            conn.close(CLOSE_REJECTED.into(), b"pin");
-            return Err(NetError::PinMismatch {
-                expected: pin.describe(),
-                actual_id: host_fp.device_id(),
-                actual_fp: host_fp,
-            });
+        match queue.next() {
+            Some(a) => spawn(&mut set, a),
+            None => return Err(failures),
         }
+        let mut more = queue.len() > 0;
+        loop {
+            tokio::select! {
+                joined = set.join_next() => match joined {
+                    Some(Ok((_, Ok(d)))) => {
+                        set.abort_all();
+                        return Ok(d);
+                    }
+                    Some(Ok((addr, Err(error)))) => {
+                        tracing::debug!(%addr, %error, "dial attempt failed");
+                        failures.push(DialFailure { addr, error });
+                        // Do not wait for the stagger when an attempt already failed.
+                        if let Some(a) = queue.next() {
+                            spawn(&mut set, a);
+                        }
+                        more = queue.len() > 0;
+                    }
+                    Some(Err(e)) => tracing::warn!(%e, "dial task failed"),
+                    None => return Err(failures),
+                },
+                () = tokio::time::sleep(DIAL_STAGGER), if more => {
+                    if let Some(a) = queue.next() {
+                        spawn(&mut set, a);
+                    }
+                    more = queue.len() > 0;
+                }
+            }
+        }
+    }
+
+    /// Viewer: runs `Hello` and authorization on a connection from [`Endpoint::dial_any`].
+    /// See [`Endpoint::connect_pinned_with_progress`] for `on_awaiting_accept`.
+    pub async fn authorize(
+        &self,
+        dialed: Dialed,
+        auth: AuthMethod,
+        on_awaiting_accept: Option<AwaitingAcceptFn>,
+    ) -> Result<Session, NetError> {
+        let Dialed { conn, host_fp } = dialed;
         let res = self
             .viewer_handshake(&conn, host_fp, auth, on_awaiting_accept)
             .await;
@@ -557,6 +600,90 @@ async fn accept_loop(ep: quinn::Endpoint, shared: Arc<Shared>, tx: mpsc::Sender<
 }
 
 /// Sends `Rejected`, then gives the viewer a moment to read it and close before we close.
+/// Delay between starting dials to the next address of the same device
+/// ([`Endpoint::dial_any`]).
+pub const DIAL_STAGGER: Duration = Duration::from_millis(250);
+
+/// A pinned QUIC connection to a host that is not authorized yet ([`Endpoint::dial_any`]).
+pub struct Dialed {
+    conn: quinn::Connection,
+    host_fp: Fingerprint,
+}
+
+impl Dialed {
+    /// The address that answered.
+    pub fn addr(&self) -> SocketAddr {
+        let a = self.conn.remote_address();
+        SocketAddr::new(normalize(a.ip()), a.port())
+    }
+
+    /// The host's key.
+    pub fn fingerprint(&self) -> Fingerprint {
+        self.host_fp
+    }
+}
+
+impl std::fmt::Debug for Dialed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dialed")
+            .field("addr", &self.addr())
+            .field("host", &self.host_fp.device_id())
+            .finish()
+    }
+}
+
+/// Why one address of [`Endpoint::dial_any`] did not work.
+#[derive(Debug)]
+pub struct DialFailure {
+    pub addr: SocketAddr,
+    pub error: NetError,
+}
+
+/// QUIC + TLS to `addr` with `pin`, bounded by the handshake timeout. Reaching our own key
+/// is [`NetError::SelfConnection`], never a session with ourselves.
+async fn dial(
+    ep: quinn::Endpoint,
+    shared: Arc<Shared>,
+    addr: SocketAddr,
+    pin: Pin,
+) -> Result<Dialed, NetError> {
+    let own = shared.identity.fingerprint();
+    let (cfg, observed) = tls::client_config(&shared.identity, pin)?;
+    let connecting = ep.connect_with(cfg, addr, "tlp-desk")?;
+    let conn = match timeout(shared.handshake_timeout, connecting).await {
+        Err(_) => return Err(NetError::Timeout),
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => {
+            let seen = *observed.lock().unwrap_or_else(|p| p.into_inner());
+            if seen == Some(own) {
+                return Err(NetError::SelfConnection);
+            }
+            if let Some(fp) = seen.filter(|fp| !pin.matches(fp)) {
+                return Err(NetError::PinMismatch {
+                    expected: pin.describe(),
+                    actual_id: fp.device_id(),
+                    actual_fp: fp,
+                });
+            }
+            return Err(e.into());
+        }
+    };
+    let host_fp = tls::peer_fingerprint(&conn)?;
+    if host_fp == own {
+        conn.close(CLOSE_REJECTED.into(), b"self");
+        return Err(NetError::SelfConnection);
+    }
+    if !pin.matches(&host_fp) {
+        conn.close(CLOSE_REJECTED.into(), b"pin");
+        return Err(NetError::PinMismatch {
+            expected: pin.describe(),
+            actual_id: host_fp.device_id(),
+            actual_fp: host_fp,
+        });
+    }
+    Ok(Dialed { conn, host_fp })
+}
+
 async fn reject_and_close(
     conn: &quinn::Connection,
     send: &mut quinn::SendStream,
@@ -576,6 +703,13 @@ async fn host_handshake(
     let viewer_fp = tls::peer_fingerprint(&conn)?;
     let remote = conn.remote_address();
     let addr = SocketAddr::new(normalize(remote.ip()), remote.port());
+    if viewer_fp == shared.identity.fingerprint() {
+        // This install dialed itself (one of our own addresses was taken for a peer's).
+        // Never prompt the user to accept themselves.
+        tracing::debug!(peer = %addr, "refusing a connection from our own key");
+        conn.close(CLOSE_REJECTED.into(), b"self");
+        return Ok(None);
+    }
     let (mut send, recv) = conn.accept_bi().await?;
     let mut rx = FramedRecv::new(recv);
     let hello = match rx.next().await {

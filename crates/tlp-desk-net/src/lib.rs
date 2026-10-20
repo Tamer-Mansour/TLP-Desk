@@ -5,7 +5,8 @@
 //!   [`AllowList`] are refused before the handshake.
 //! * Host flow: [`Endpoint::accept`] -> [`PendingSession`] -> `accept` / `reject` /
 //!   `verify_code` / `verify_password` -> [`Session`].
-//! * Viewer flow: [`Endpoint::connect`] (or [`Endpoint::connect_pinned`]) -> [`Session`].
+//! * Viewer flow: [`Endpoint::connect`] (or [`Endpoint::connect_pinned`]) -> [`Session`];
+//!   for a device with several addresses, [`Endpoint::dial_any`] -> [`Endpoint::authorize`].
 //! * Feature data: [`Session::open_uni`] / [`Session::open_bi`] /
 //!   [`Session::accept_side_stream`] carry typed side streams ([`StreamKind`]) next to the
 //!   control and video streams.
@@ -54,8 +55,8 @@ pub use discovery::{
     MAX_APP_VERSION_LEN, MDNS_SERVICE_TYPE,
 };
 pub use endpoint::{
-    default_device_name, sanitize_peer_name, AuthKind, AuthMethod, AwaitingAcceptFn, Endpoint,
-    EndpointConfig, PendingSession, MAX_PEER_NAME_CHARS,
+    default_device_name, sanitize_peer_name, AuthKind, AuthMethod, AwaitingAcceptFn, DialFailure,
+    Dialed, Endpoint, EndpointConfig, PendingSession, DIAL_STAGGER, MAX_PEER_NAME_CHARS,
 };
 pub use error::NetError;
 pub use feature::{
