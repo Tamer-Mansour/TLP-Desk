@@ -229,8 +229,12 @@ pub fn checked_abs(path: &str) -> Result<PathBuf, FsError> {
             return Err(FsError::InvalidPath);
         }
     }
+    // `..` between either separator: on Windows both are separators; elsewhere `\` is a
+    // plain character, but a Windows viewer writes `dest\..\` meaning the parent, and no one
+    // means a folder literally named `..`. Refuse it on every host.
     if p.components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
+        || path.split(['\\', '/']).any(|seg| seg == "..")
     {
         return Err(FsError::InvalidPath);
     }
@@ -324,6 +328,19 @@ mod tests {
         assert!(checked_abs(r"C:\a\file.txt:secret").is_err());
         assert!(checked_abs(r"C:\a\..\b").is_err());
         assert!(checked_abs(r"\\.\PhysicalDrive0").is_err());
+    }
+
+    /// Regression: on Linux/macOS hosts `\` is not a separator, so `dest\..\` from a
+    /// Windows viewer was not seen as a parent reference (it failed later as "not found").
+    #[cfg(not(windows))]
+    #[test]
+    fn backslash_parent_references_are_refused_on_unix_hosts() {
+        assert!(checked_abs("/home/u").is_ok());
+        assert!(checked_abs("/home/u/a\\b").is_ok());
+        assert!(checked_abs("/home/u/dest\\..\\").is_err());
+        assert!(checked_abs("/home/u\\..").is_err());
+        assert!(checked_abs("/home/u/../etc").is_err());
+        assert!(checked_abs("/home/u/مستندات\\..\\x").is_err());
     }
 
     #[test]
