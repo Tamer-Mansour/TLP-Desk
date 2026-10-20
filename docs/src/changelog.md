@@ -27,6 +27,18 @@ protocol bump is called out below.
   failed" instead of the "host key changed" warning, which wrongly invited forgetting the key.
 - `cargo test` on Linux and macOS: a storage test expected the Windows folder name.
 
+### Changed
+
+- **Sharper picture when the remote screen is bigger than your window** (a 4K PC viewed from a
+  1080p laptop). In "fit to window" the viewer now tells the host the exact size of its picture
+  area, and the host scales the capture straight to it on its GPU. The viewer then shows it
+  pixel for pixel instead of scaling a second time, so text is no longer softened twice, and no
+  bandwidth is spent on pixels that are not shown. The size is sent once the window has kept one
+  size for 0.4 s. "Actual size" streams the preset's own size as before. Works with older hosts
+  (they ignore the hint), no `PROTOCOL_VERSION` change.
+- A frame a few pixels smaller than the picture area is shown 1:1 instead of being enlarged by
+  a fraction of a percent.
+
 ### Added
 
 - The home screen warns when another device on the network announces this device's own ID
