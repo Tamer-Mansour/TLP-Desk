@@ -75,6 +75,7 @@ pub fn local_info(lang: Lang) -> LocalInfo {
         device_name: pick(lang, "DESKTOP-TLP01", "حاسوب-المنزل"),
         addresses: vec![ip([192, 168, 1, 23]), ip([10, 0, 0, 8])],
         one_time_code: "275931".into(),
+        identity_conflict: None,
     }
 }
 

@@ -358,6 +358,7 @@ impl App {
                 .into(),
             ConnectError::Unreachable => tx.t(S::ErrUnreachable).into(),
             ConnectError::IdentityMismatch => tx.t(S::ErrIdentity).into(),
+            ConnectError::SelfConnection => tx.t(S::ErrSelfConnection).into(),
             // Normally shown as its own warning dialog (see `KeyWarning`).
             ConnectError::HostKeyChanged { .. } => tx.t(S::KeyChangedTitle).into(),
             ConnectError::NotLocalNetwork => tx.t(S::ErrNotLan).into(),

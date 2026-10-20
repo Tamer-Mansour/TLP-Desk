@@ -137,6 +137,8 @@ strings! {
     ErrVersion => "The other device runs an incompatible version.", "الجهاز الآخر يعمل بإصدار غير متوافق.";
     ErrUnreachable => "The device cannot be reached.", "تعذّر الوصول إلى الجهاز.";
     ErrIdentity => "Identity check failed. Connection stopped.", "فشل التحقق من الهوية. أُوقف الاتصال.";
+    IdentityConflict => "Another device on this network ({addr}) uses this device's ID, probably because its disk or TLP-Desk folder was copied from this one. Connections by ID may reach the wrong PC. Reinstall TLP-Desk on one of them so it gets its own ID.", "جهاز آخر على هذه الشبكة ({addr}) يستخدم معرّف هذا الجهاز، والأرجح أن قرصه أو مجلد TLP-Desk فيه نُسخ من هذا الجهاز. قد يصل الاتصال بالمعرّف إلى الحاسوب الخطأ. أعد تثبيت TLP-Desk على أحدهما ليحصل على معرّف خاص به.";
+    ErrSelfConnection => "That is this device. Enter the ID or address of the other device.", "هذا هو جهازك نفسه. أدخل معرّف الجهاز الآخر أو عنوانه.";
     ErrTimeout => "The connection timed out.", "انتهت مهلة الاتصال.";
     ErrOther => "Connection failed: {detail}", "فشل الاتصال: {detail}";
     ErrNotLan => "Only addresses on the local network can be used.", "لا يمكن استخدام إلا عناوين الشبكة المحلية.";

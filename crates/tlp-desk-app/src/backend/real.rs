@@ -331,6 +331,7 @@ fn map_viewer_error(e: &ViewerError) -> ConnectError {
         ViewerError::VersionMismatch { .. } => {
             ConnectError::Rejected(RejectReason::VersionMismatch)
         }
+        ViewerError::SelfConnection => ConnectError::SelfConnection,
         ViewerError::Net(NetError::Timeout) => ConnectError::Timeout,
         other => ConnectError::Other(other.to_string()),
     }
@@ -631,6 +632,7 @@ impl RealBackend {
             device_name,
             addresses: lan_addresses(),
             one_time_code: inner.current_code(),
+            identity_conflict: None,
         };
         lock(&inner.state).local = Some(local);
         lock(&inner.state).password = super::unattended::PasswordState {
@@ -704,6 +706,7 @@ impl Inner {
             device_name: String::new(),
             addresses: Vec::new(),
             one_time_code: String::new(),
+            identity_conflict: None,
         })
     }
 
@@ -1051,11 +1054,26 @@ impl Inner {
                 }
             }
             let addrs = lan_addresses();
-            self.update_local(|l| l.addresses = addrs);
+            let conflict = self.discovery.as_ref().and_then(|d| d.identity_conflict());
+            self.update_local(|l| {
+                l.addresses = addrs;
+                l.identity_conflict = conflict;
+            });
         }
     }
 
     // ----- discovery -------------------------------------------------------------------
+
+    /// True for this install's ID and, when the installed service hosts this PC, the
+    /// service's ID shown on the home screen (a different key, same machine).
+    fn is_own_id(&self, id: DeviceId) -> bool {
+        id == self.own_id
+            || self
+                .state()
+                .local
+                .as_ref()
+                .is_some_and(|l| l.device_id == id)
+    }
 
     fn device_list(&self) -> Vec<DiscoveredDevice> {
         let Some(d) = &self.discovery else {
@@ -1063,7 +1081,7 @@ impl Inner {
         };
         d.devices()
             .into_iter()
-            .filter(|d| app_id(d.device_id) != self.own_id)
+            .filter(|d| !self.is_own_id(app_id(d.device_id)))
             .filter_map(|d| {
                 Some(DiscoveredDevice {
                     device_id: app_id(d.device_id),
@@ -1169,6 +1187,11 @@ impl Inner {
                 "networking is unavailable on this device".into(),
             ));
         };
+        if let ConnectTarget::Id(id) = &target {
+            if self.is_own_id(*id) {
+                return Err(ViewerError::SelfConnection);
+            }
+        }
         let vt = match target {
             ConnectTarget::Id(id) => match tlp_desk_crypto::DeviceId::new(id.0) {
                 Some(id) => ViewerTarget::Id(id),

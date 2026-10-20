@@ -216,6 +216,20 @@ impl App {
                     ui.add_space(theme::space::XS);
                     ui.label(RichText::new(tx.d(&self.local.device_name)).strong());
                 });
+                if let Some(ip) = self.local.identity_conflict {
+                    ui.add_space(theme::space::S);
+                    let (fg, bg) = theme::Tone::Warning.colors(ui.visuals().dark_mode);
+                    egui::Frame::new()
+                        .fill(bg)
+                        .corner_radius(theme::radius::SM)
+                        .inner_margin(egui::Margin::symmetric(10, 6))
+                        .show(ui, |ui| {
+                            // Isolated so the address keeps its order inside Arabic text.
+                            let addr = format!("\u{2066}{ip}\u{2069}");
+                            let text = tx.f(S::IdentityConflict, &[("addr", &addr)]);
+                            ui.add(egui::Label::new(RichText::new(text).color(fg)).wrap());
+                        });
+                }
                 ui.add_space(theme::space::XS);
                 ui.label(theme::caption(ui, tx.t(S::LocalAddress)));
                 for addr in &self.local.addresses {

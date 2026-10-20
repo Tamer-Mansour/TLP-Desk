@@ -100,6 +100,7 @@ mod tests {
                 device_name: String::new(),
                 addresses: vec![],
                 one_time_code: String::new(),
+                identity_conflict: None,
             }
         }
         fn set_device_name(&self, _: String) {}

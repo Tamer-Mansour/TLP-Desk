@@ -97,6 +97,9 @@ pub struct LocalInfo {
     pub addresses: Vec<IpAddr>,
     /// Current one-time 6-digit code (rotates after each use or on request).
     pub one_time_code: String,
+    /// Another machine on the LAN recently announced this device's own ID (a copied disk,
+    /// VM or key file): connections by ID cannot tell the two apart. Shown as a warning.
+    pub identity_conflict: Option<IpAddr>,
 }
 
 /// A device found on the LAN (mDNS / broadcast) or remembered.
@@ -201,6 +204,9 @@ pub enum ConnectError {
         previous: String,
         presented: String,
     },
+    /// The target is this device itself (its own ID, or an address that answered with this
+    /// install's key). Nothing was sent to another device.
+    SelfConnection,
     /// The address is outside the local network (refused before any packet was sent).
     NotLocalNetwork,
     Timeout,
