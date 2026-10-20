@@ -128,8 +128,7 @@ async fn dialing_your_own_id_is_a_self_connection() {
     let err = viewer
         .connect(ConnectTarget::Id(my_ep.device_id()), AuthMethod::AcceptPrompt)
         .await
-        .err()
-        .expect("connected to itself");
+        .expect_err("connected to itself");
     assert!(matches!(err, ViewerError::SelfConnection), "{err}");
 }
 
@@ -144,8 +143,7 @@ async fn dialing_your_own_address_is_a_self_connection() {
             AuthMethod::AcceptPrompt,
         )
         .await
-        .err()
-        .expect("connected to itself");
+        .expect_err("connected to itself");
     assert!(matches!(err, ViewerError::SelfConnection), "{err}");
     assert!(wait::quiet(Duration::from_millis(300), my_ep.accept())
         .await
@@ -184,8 +182,7 @@ async fn two_devices_on_one_lan_are_never_confused() {
     let err = viewer
         .connect(target, AuthMethod::AcceptPrompt)
         .await
-        .err()
-        .expect("connected to the wrong device");
+        .expect_err("connected to the wrong device");
     match err {
         ViewerError::IdentityMismatch {
             expected,
@@ -222,8 +219,7 @@ async fn an_unreachable_device_fails_in_bounded_time() {
     let err = viewer
         .connect(target, AuthMethod::AcceptPrompt)
         .await
-        .err()
-        .expect("connected to a black hole");
+        .expect_err("connected to a black hole");
     assert!(matches!(err, ViewerError::Unreachable(_)), "{err}");
     // 2 s handshake timeout; the last address starts 0.75 s in.
     let took = started.elapsed();
