@@ -531,3 +531,42 @@ async fn viewer_feedback_with_losses_lowers_the_bitrate() {
     let b = frame_of_size(&r.session, 640, 400).await;
     assert!(b.seq > a.seq);
 }
+
+/// A viewer that fits the screen into a window smaller than the screen sends its picture
+/// area with the preset: the host scales the capture straight to that size (one scaling pass,
+/// shown 1:1 by the viewer) and the bitrate follows the smaller frame. Withdrawing the hint
+/// (actual-size view) streams the preset's own size again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn viewport_hint_scales_the_stream_to_the_viewer_window() {
+    let r = rig(Setup::default()).await;
+    // The fake monitor is 640x400; Quality streams it natively.
+    assert!(r
+        .session
+        .send_message(Message::SetQuality(quality(QualityPreset::Quality))));
+    frame_of_size(&r.session, 640, 400).await;
+    let native = *created(&r.enc).last().unwrap();
+
+    // A 400x300 picture area (a small window): 640x400 fits as 400x250.
+    assert!(r.session.send_message(Message::SetQuality(QualitySettings {
+        max_width: 400,
+        max_height: 300,
+        ..quality(QualityPreset::Quality)
+    })));
+    frame_of_size(&r.session, 400, 250).await;
+    assert!(r.opened.lock().unwrap().contains(&(0, Some((400, 300)))));
+    let small = *created(&r.enc).last().unwrap();
+    assert_eq!((small.width, small.height), (400, 250));
+    assert!(
+        small.bitrate_kbps < native.bitrate_kbps,
+        "{} !< {}",
+        small.bitrate_kbps,
+        native.bitrate_kbps
+    );
+
+    // Actual size again: no hint, the preset's cap.
+    assert!(r
+        .session
+        .send_message(Message::SetQuality(quality(QualityPreset::Quality))));
+    frame_of_size(&r.session, 640, 400).await;
+    drop(r.vevents);
+}

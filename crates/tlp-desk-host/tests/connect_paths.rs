@@ -76,8 +76,7 @@ async fn host() -> (Arc<Endpoint>, Host, tlp_desk_host::HostEvents) {
 }
 
 async fn accept_next(host: &Host, events: &mut tlp_desk_host::HostEvents) {
-    let req = match wait::host_event(events, |e| matches!(e, HostEvent::IncomingRequest(_))).await
-    {
+    let req = match wait::host_event(events, |e| matches!(e, HostEvent::IncomingRequest(_))).await {
         HostEvent::IncomingRequest(r) => r.id,
         other => panic!("expected a prompt, got {other:?}"),
     };
@@ -95,7 +94,11 @@ async fn stale_and_own_addresses_ahead_of_the_real_one_still_connect() {
     let (_hole, dead) = black_hole();
     let target = ConnectTarget::Device(device(
         &host_ep,
-        vec![dead, my_ep.local_addr().unwrap(), host_ep.local_addr().unwrap()],
+        vec![
+            dead,
+            my_ep.local_addr().unwrap(),
+            host_ep.local_addr().unwrap(),
+        ],
     ));
 
     let started = Instant::now();
@@ -116,7 +119,9 @@ async fn stale_and_own_addresses_ahead_of_the_real_one_still_connect() {
     );
     // Our own endpoint refused our own key: nobody was asked to accept themselves.
     assert!(
-        wait::quiet(Duration::from_millis(300), my_ep.accept()).await.is_none(),
+        wait::quiet(Duration::from_millis(300), my_ep.accept())
+            .await
+            .is_none(),
         "this PC was prompted to accept a connection from itself"
     );
 }
@@ -126,7 +131,10 @@ async fn stale_and_own_addresses_ahead_of_the_real_one_still_connect() {
 async fn dialing_your_own_id_is_a_self_connection() {
     let (my_ep, viewer) = listening_viewer();
     let err = viewer
-        .connect(ConnectTarget::Id(my_ep.device_id()), AuthMethod::AcceptPrompt)
+        .connect(
+            ConnectTarget::Id(my_ep.device_id()),
+            AuthMethod::AcceptPrompt,
+        )
         .await
         .expect_err("connected to itself");
     assert!(matches!(err, ViewerError::SelfConnection), "{err}");
@@ -196,7 +204,10 @@ async fn two_devices_on_one_lan_are_never_confused() {
     assert!(
         wait::quiet(
             Duration::from_millis(300),
-            wait::host_event(&mut b_events, |e| matches!(e, HostEvent::IncomingRequest(_)))
+            wait::host_event(&mut b_events, |e| matches!(
+                e,
+                HostEvent::IncomingRequest(_)
+            ))
         )
         .await
         .is_none(),
@@ -211,10 +222,7 @@ async fn an_unreachable_device_fails_in_bounded_time() {
     let (_me, viewer) = listening_viewer();
     let holes: Vec<(UdpSocket, SocketAddr)> = (0..4).map(|_| black_hole()).collect();
     let some_host = quick_endpoint(false, "gone");
-    let target = ConnectTarget::Device(device(
-        &some_host,
-        holes.iter().map(|(_, a)| *a).collect(),
-    ));
+    let target = ConnectTarget::Device(device(&some_host, holes.iter().map(|(_, a)| *a).collect()));
     let started = Instant::now();
     let err = viewer
         .connect(target, AuthMethod::AcceptPrompt)
