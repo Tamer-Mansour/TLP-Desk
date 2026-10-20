@@ -48,7 +48,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use tlp_desk_crypto::{CryptoError, DeviceId, Fingerprint, HostKey, KnownHosts, KNOWN_HOSTS_FILE};
-use tlp_desk_net::{AllowList, DiscoveredDevice, Discovery, Endpoint, NetError, Pin, DEFAULT_PORT};
+use tlp_desk_net::{
+    AllowList, DialFailure, DiscoveredDevice, Discovery, Endpoint, NetError, Pin, DEFAULT_PORT,
+};
 use tlp_desk_proto::RejectReason;
 
 pub use device_info::{
@@ -220,6 +222,10 @@ pub enum ViewerError {
         presented: Fingerprint,
         presented_id: DeviceId,
     },
+    /// The target is this device itself: its own ID, or an address that answered with this
+    /// install's key. Nothing was sent to anyone.
+    #[error("that is this device; connect to another device's ID or address")]
+    SelfConnection,
     /// The host failed SPAKE2 key confirmation (it does not know the code/password).
     #[error("host failed to prove it knows the code/password")]
     HostAuthFailed,
@@ -268,16 +274,6 @@ pub enum ViewerError {
     /// The video decoder failed (playback).
     #[error("video decoder: {0}")]
     Decoder(String),
-}
-
-impl ViewerError {
-    /// True for errors where another address of the same device might work.
-    fn is_transport(&self) -> bool {
-        matches!(
-            self,
-            ViewerError::Unreachable(_) | ViewerError::NotAllowed(_)
-        )
-    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -366,6 +362,11 @@ impl Viewer {
         auth: AuthMethod,
         on_awaiting_accept: Option<AwaitingAcceptFn>,
     ) -> Result<(ViewerSession, ViewerEvents), ViewerError> {
+        if let ConnectTarget::Id(id) | ConnectTarget::IdAt(id, _) = &target {
+            if *id == self.endpoint.device_id() {
+                return Err(ViewerError::SelfConnection);
+            }
+        }
         let (addrs, id) = self.resolve(&target).await?;
         let key = match (id, addrs.first()) {
             (Some(id), _) => HostKey::Id(id),
@@ -380,36 +381,28 @@ impl Viewer {
         };
         tracing::info!(%target, ?addrs, ?pin, ?auth, "connecting");
 
-        let mut last_err = ViewerError::NotFound(target.to_string());
-        let mut session = None;
-        for addr in addrs {
-            if !self.cfg.allow_list.is_allowed(addr.ip()) {
-                tracing::warn!(%addr, "refusing to dial a non-LAN address");
-                last_err = ViewerError::NotAllowed(addr);
-                continue;
-            }
-            match self
-                .endpoint
-                .connect_pinned_with_progress(addr, pin, auth.clone(), on_awaiting_accept.clone())
-                .await
-            {
-                Ok(s) => {
-                    session = Some(s);
-                    break;
-                }
-                Err(e) => {
-                    let err = map_net_error(e, pin, &key);
-                    tracing::info!(%addr, %err, "connect attempt failed");
-                    if !err.is_transport() {
-                        return Err(err);
-                    }
-                    last_err = err;
-                }
-            }
+        let (allowed, refused): (Vec<SocketAddr>, Vec<SocketAddr>) = addrs
+            .iter()
+            .partition(|a| self.cfg.allow_list.is_allowed(a.ip()));
+        for addr in &refused {
+            tracing::warn!(%addr, "refusing to dial a non-LAN address");
         }
-        let Some(session) = session else {
-            return Err(last_err);
+        if allowed.is_empty() {
+            return Err(refused.first().map_or_else(
+                || ViewerError::NotFound(target.to_string()),
+                |a| ViewerError::NotAllowed(*a),
+            ));
+        }
+        let dialed = match self.endpoint.dial_any(&allowed, pin).await {
+            Ok(d) => d,
+            Err(failures) => return Err(pick_dial_error(failures, pin, &key, &target)),
         };
+        tracing::info!(addr = %dialed.addr(), "host answered; authorizing");
+        let session = self
+            .endpoint
+            .authorize(dialed, auth, on_awaiting_accept)
+            .await
+            .map_err(|e| map_net_error(e, pin, &key))?;
 
         let peer = session.peer().clone();
         {
@@ -471,30 +464,76 @@ impl Viewer {
     }
 }
 
+/// The error to show when no address of a device worked. A key mismatch is reported over
+/// plain unreachability (it may be an attack, and a stale address now used by another
+/// device must not read as "offline"); "it was only ourselves" only when that is all we
+/// reached.
+fn pick_dial_error(
+    failures: Vec<DialFailure>,
+    pin: Pin,
+    key: &HostKey,
+    target: &ConnectTarget,
+) -> ViewerError {
+    let mut mismatch = None;
+    let mut only_self = !failures.is_empty();
+    let mut last = None;
+    for f in failures {
+        tracing::info!(addr = %f.addr, err = %f.error, "connect attempt failed");
+        match f.error {
+            NetError::SelfConnection => {}
+            e @ NetError::PinMismatch { .. } => {
+                only_self = false;
+                mismatch.get_or_insert(e);
+            }
+            e => {
+                only_self = false;
+                last = Some(e);
+            }
+        }
+    }
+    if only_self {
+        return ViewerError::SelfConnection;
+    }
+    match (mismatch, last) {
+        (Some(m), _) => map_net_error(m, pin, key),
+        (None, Some(e)) => map_net_error(e, pin, key),
+        (None, None) => ViewerError::NotFound(target.to_string()),
+    }
+}
+
 fn map_net_error(e: NetError, pin: Pin, key: &HostKey) -> ViewerError {
     match e {
         NetError::PinMismatch {
             actual_id,
             actual_fp,
             ..
-        } => match pin {
-            Pin::Fingerprint(previous) => ViewerError::HostKeyChanged {
+        } => match (pin, key) {
+            // Dialed by ID and the key belongs to another ID: another device answers at
+            // that address (a reused DHCP lease), not a changed key for this one.
+            (Pin::Fingerprint(_), HostKey::Id(expected)) if *expected != actual_id => {
+                ViewerError::IdentityMismatch {
+                    expected: *expected,
+                    presented: actual_id,
+                }
+            }
+            (Pin::Fingerprint(previous), _) => ViewerError::HostKeyChanged {
                 key: key.clone(),
                 previous,
                 presented: actual_fp,
                 presented_id: actual_id,
             },
-            Pin::DeviceId(expected) => ViewerError::IdentityMismatch {
+            (Pin::DeviceId(expected), _) => ViewerError::IdentityMismatch {
                 expected,
                 presented: actual_id,
             },
-            Pin::Tofu => ViewerError::Net(NetError::PinMismatch {
+            (Pin::Tofu, _) => ViewerError::Net(NetError::PinMismatch {
                 expected: "any key".into(),
                 actual_id,
                 actual_fp,
             }),
         },
         NetError::Rejected(r) => ViewerError::Rejected(r),
+        NetError::SelfConnection => ViewerError::SelfConnection,
         NetError::HostAuthFailed => ViewerError::HostAuthFailed,
         NetError::VersionMismatch { ours, theirs } => ViewerError::VersionMismatch { ours, theirs },
         NetError::Connect(e) => ViewerError::Unreachable(e.to_string()),

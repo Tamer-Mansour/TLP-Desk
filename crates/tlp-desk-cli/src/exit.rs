@@ -113,6 +113,7 @@ fn of_viewer(e: &ViewerError) -> Exit {
             Exit::KeyMismatch
         }
         ViewerError::VersionMismatch { .. } => Exit::VersionMismatch,
+        ViewerError::SelfConnection => Exit::Usage,
         ViewerError::Net(n) => of_net(n).unwrap_or(Exit::Failure),
         // --- tunnels (TLP-tunnel) ---
         ViewerError::TunnelNotAllowed => Exit::PermissionDenied,
