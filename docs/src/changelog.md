@@ -8,6 +8,10 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+## [1.0.0-rc.6] - 2026-10-21
+
+A new look with the TLP brand, and instant exit.
+
 ### Changed
 
 - **A new look.** TLP-Desk is redesigned from the ground up: a slim icon rail on the side
