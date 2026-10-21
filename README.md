@@ -7,8 +7,8 @@ server, no account and no telemetry, and it keeps working with the internet cabl
 A single app is both the **host** (the PC being controlled) and the **viewer** (the PC in control).
 The interface is available in **Arabic (right-to-left)** and **English**.
 
-> Status: early development (`0.1.x`). The core remote-control experience works and the features
-> below are being built in the open. See [ROADMAP.md](ROADMAP.md).
+> Status: **release candidate** (`1.0.0-rc.6`). Everything in the feature list below ships today;
+> what is left before 1.0 is in [ROADMAP.md](ROADMAP.md).
 
 <p align="center">
   <picture>
@@ -25,7 +25,8 @@ The interface is available in **Arabic (right-to-left)** and **English**.
     <img src="docs/media/demo-en.gif" width="800"
          alt="Demo: connect with a device ID and one-time code, control the remote screen, switch monitors, disconnect">
   </a>
-  <br><sub>Connect by ID and one-time code, control the remote PC, switch screens, disconnect.
+  <br><sub>Connect by ID and one-time code, control the remote PC, switch screens, disconnect
+  (video from an earlier build; the screenshots show the current design).
   <a href="docs/media/demo-en.mp4">Full-quality MP4</a> ·
   <a href="docs/media/demo-ar.mp4">Arabic version</a></sub>
 </p>
@@ -54,12 +55,12 @@ The interface is available in **Arabic (right-to-left)** and **English**.
 
 | | |
 |---|---|
-| ![Incoming request with Accept and Decline](docs/media/incoming-en-dark.png) | ![Banner on the host showing who is connected](docs/media/host-banner-en-dark.png) |
-| **Accept prompt** on the host | **Always-visible banner**: who is connected |
-| ![Monitor picker on a two-screen host](docs/media/monitors-en-dark.png) | ![Warning that the host's key changed](docs/media/key-changed-en-dark.png) |
-| **Switch between the host's screens** | **Loud warning** if a host's identity changes |
-| ![Connect with a device ID and one-time code](docs/media/connect-code-en-dark.png) | ![Settings in Arabic with Arabic-Indic digits](docs/media/settings-ar-dark.png) |
-| **Connect** by ID, name or IP, with an optional code | **Settings**: language and digit style |
+| ![Incoming request with Accept and Decline](docs/media/accept-popup-en-dark.png) | ![Devices page: the LAN list and the address book](docs/media/devices-page-en-dark.png) |
+| **Accept prompt** on the host, with per-session permissions | **Devices**: found on the network, and the address book |
+| ![Sessions page: who is connected now and the connection log](docs/media/sessions-page-en-dark.png) | ![Settings in Arabic with Arabic-Indic digits](docs/media/settings-ar-dark.png) |
+| **Sessions**: who is connected now, and every connection so far | **Settings** in Arabic: language, digits, theme |
+| ![Connect with a device ID and one-time code](docs/media/connect-code-en-dark.png) | ![Warning that the host's key changed](docs/media/key-changed-en-dark.png) |
+| **Connect** by ID, name or IP, with an optional code | **Loud warning** if a host's identity changes |
 
 All images and videos are generated from the real UI by
 [`scripts/update-readme-media.ps1`](scripts/update-readme-media.ps1); see
@@ -71,38 +72,46 @@ All images and videos are generated from the real UI by
 
 ## Features
 
-**Working today**
-
 - **Find devices automatically** on the LAN (mDNS, with a UDP broadcast fallback), or connect by
-  9-digit device ID, name or IP address.
+  9-digit device ID, name or IP address. Saved devices live in an **address book** with aliases,
+  groups, online status and **Wake-on-LAN**.
 - **Secure by default.** Every connection uses QUIC with TLS 1.3. Each install has its own key, and
   the 9-digit ID is derived from that key, so dialing an ID pins the host's identity.
   Trust-on-first-use with a loud warning applies when you connect by IP.
-- **Two ways to allow a session:** the host user clicks *Accept*, or the viewer enters a one-time
-  6-digit code (SPAKE2, so the code never crosses the network and it rotates after use).
-  A permanent password for unattended access is coming with the Windows service.
+- **Three ways to allow a session:** the host user clicks *Accept* (choosing what the viewer may
+  do), the viewer enters a one-time 6-digit code (SPAKE2, so the code never crosses the network
+  and it rotates after use), or a permanent **unattended-access password** (Argon2 at rest).
 - **LAN only.** By default only private (RFC 1918) and link-local addresses may connect. Login
-  attempts are rate-limited, with a lockout after repeated failures.
-- **Smooth video:** about 60 fps of H.264 video, captured with Windows.Graphics.Capture (DXGI
-  fallback) and downscaled on the GPU. If the network falls behind, frames are dropped rather than
-  queued, so lag doesn't build up.
+  attempts are rate-limited, with a lockout after repeated failures. The host always shows a
+  banner naming who is connected, and can revoke any permission live.
+- **Smooth, sharp video:** about 60 fps of H.264 (hardware encoding through Media Foundation where
+  available), captured with Windows.Graphics.Capture (DXGI fallback), scaled on the host's GPU to
+  exactly your window so a 4K PC looks crisp on a laptop. Adaptive quality, a quality floor so text
+  never smears, a near-lossless refresh when the screen settles, **zoom** 25–300 %, and frames
+  dropped rather than queued so lag doesn't build up.
 - **Full control:** mouse, wheel and keyboard sent as hardware scancodes, so Arabic and English
-  keyboard layouts both work. Win, Alt+Tab and Ctrl+Esc go to the remote PC while the session
-  window has focus.
+  keyboard layouts both work; Win, Alt+Tab and Ctrl+Esc go to the remote PC; Ctrl+Alt+Del, the
+  lock screen and UAC through the **Windows service**; **privacy mode** blanks the host's screens.
 - **The person at the host always wins.** Touching the local mouse or keyboard pauses remote input,
-  and a green marker shows where the remote pointer is.
-- **Multi-monitor hosts:** switch between the host's screens live.
+  and a marker shows where the remote pointer is. Several viewers can share one PC, each with its
+  own permissions.
+- **Files and clipboard:** a two-pane **remote file browser**, drag and drop with Explorer, copy in
+  Explorer on one PC and paste on the other, fast parallel transfers with resume and BLAKE3
+  verification; clipboard sync for text, formatted text and images.
+- **Chat, sound and drawing:** in-session chat, **system audio** from the remote PC (Opus),
+  a **whiteboard** to draw on the remote screen, and **session recording** to MP4 with playback.
+- **Multi-monitor hosts:** switch between the host's screens live, or view them all at once.
+- **Automatic reconnect** after a network drop, **port forwarding** through a session, remote
+  device info, and a **connection log** with search and CSV export.
 - **Arabic first-class:** properly joined letters, mixed Arabic/English in the right order, mirrored
   layouts, and a choice of Arabic-Indic or Western digits.
+- **A design of its own:** the TLP brand (burgundy, rose, ivory and ink), an icon rail, glass
+  panels, light and dark themes, and menus drawn in the window's own title bar.
+- **Opt-in updates** checked against GitHub Releases and verified with the release signing key;
+  a notice when a device on the LAN runs a newer version. Nothing else ever leaves the LAN.
 - **Single `setup.exe` installer** (Arabic + English) that adds Windows Firewall rules for private
-  networks only, plus a portable zip.
-
-**In progress** (tracked in the [roadmap](ROADMAP.md))
-
-Very fast file transfer and a remote file browser, clipboard sync (text, images, files), chat,
-system audio, unattended access as a Windows service (lock screen, UAC, Ctrl+Alt+Del), privacy mode,
-address book, adaptive quality and hardware encoding, Wake-on-LAN, port
-forwarding, connection log, device info, and a full CLI.
+  networks only, a portable zip, a winget manifest, and a **CLI** (`TLP-Desk-cli.exe`) for scripts.
+- **Linux (X11) and macOS** host and viewer, and an **Android viewer**, are experimental.
 
 ---
 
@@ -120,7 +129,7 @@ Windows Firewall prompt the first time.
 
 **Requirements:** Windows 10 (2004 or newer) or Windows 11, x64.
 
-**Current release:** `v1.0.0-rc.1` (release candidate). See the
+**Current release:** `v1.0.0-rc.6` (release candidate). See the
 [changelog](docs/src/changelog.md), the [system test report](docs/src/dev/system-test-report.md)
 and the [two-PC manual test checklist](docs/src/user-guide/en/manual-test.md)
 ([بالعربية](docs/src/user-guide/ar/manual-test.md)).
@@ -140,8 +149,8 @@ and the [two-PC manual test checklist](docs/src/user-guide/en/manual-test.md)
 1. On the PC you want to control, open TLP-Desk and note its **device ID** and **one-time code**.
 2. On your PC, pick it from **Devices on this network**, or type its ID or IP address.
 3. Either enter the one-time code, or leave the code empty and click **Accept** on the other PC.
-4. Control it. Use the toolbar for fit / actual size, full screen, view-only, screen switching,
-   the stats overlay, and disconnect.
+4. Control it. Use the toolbar for fit / actual size and zoom, full screen, view-only, screen
+   switching, files, chat, the stats overlay, and disconnect.
 
 ---
 
@@ -264,12 +273,18 @@ GitHub Security Advisories rather than public issues; see [SECURITY.md](SECURITY
   <br><sub><a href="docs/media/demo-ar.mp4">الفيديو بجودة كاملة (MP4)</a></sub>
 </p>
 
-- اكتشاف الأجهزة على الشبكة تلقائيًا، أو الاتصال برقم الجهاز المكوّن من 9 خانات أو بعنوان IP.
-- كل اتصال مشفّر، والسماح بالجلسة يتم بالضغط على «قبول» أو برمز لمرة واحدة.
-- صورة سلسة بحدود 60 إطارًا في الثانية، وتحكم كامل بالفأرة ولوحة المفاتيح (العربية والإنجليزية).
-- صاحب الجهاز له الأولوية دائمًا: لمس الفأرة المحلي يوقف التحكم عن بُعد مؤقتًا.
-- التنقل بين الشاشات إذا كان للجهاز الآخر أكثر من شاشة.
-- مثبّت واحد `setup.exe` بالعربية والإنجليزية.
+- اكتشاف الأجهزة على الشبكة تلقائيًا، أو الاتصال برقم الجهاز المكوّن من 9 خانات أو بعنوان IP،
+  ودفتر عناوين للأجهزة المحفوظة مع إيقاظها عبر الشبكة (Wake-on-LAN).
+- كل اتصال مشفّر، والسماح بالجلسة يتم بالضغط على «قبول» أو برمز لمرة واحدة أو بكلمة مرور دائمة
+  للوصول غير المراقَب، مع خدمة ويندوز لشاشة القفل وCtrl+Alt+Del ووضع الخصوصية.
+- صورة سلسة وحادة بحدود 60 إطارًا في الثانية مع تكبير 25–300٪، وتحكم كامل بالفأرة ولوحة المفاتيح
+  (العربية والإنجليزية).
+- نقل ملفات سريع ومتصفح ملفات بعيد، مزامنة الحافظة، دردشة، صوت النظام، رسم على الشاشة، وتسجيل الجلسة.
+- صاحب الجهاز له الأولوية دائمًا: لمس الفأرة المحلي يوقف التحكم عن بُعد مؤقتًا، وشريط ظاهر يبيّن من
+  متصل.
+- التنقل بين الشاشات إذا كان للجهاز الآخر أكثر من شاشة، وإعادة اتصال تلقائية عند انقطاع الشبكة.
+- تصميم بهوية TLP (الخمري والوردي والعاجي)، بوضعين فاتح وداكن.
+- مثبّت واحد `setup.exe` بالعربية والإنجليزية، ونسخة محمولة، وأداة سطر أوامر.
 
 للتثبيت: نزّل ملف `TLP-Desk-<version>-setup.exe` من صفحة
 [الإصدارات](https://github.com/Tamer-Mansour/TLP-Desk/releases) وشغّله على الجهازين.
