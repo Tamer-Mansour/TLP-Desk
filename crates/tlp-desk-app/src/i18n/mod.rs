@@ -448,7 +448,7 @@ strings! {
     SettingsAllowList => "Allowed networks", "الشبكات المسموح بها";
     // Relay server (TLP-relay)
     SettingsRelay => "Relay server", "الخادم الوسيط";
-    RelayHint => "Your own relay (tlp-desk-relay on a server both sides can reach) lets you connect to a device that is not on this network by its ID. The relay only passes encrypted data; it cannot see or join a session.", "خادم وسيط خاص بك (\u{2066}tlp-desk-relay\u{2069} على خادم يصل إليه الطرفان) يتيح لك الاتصال بجهاز خارج هذه الشبكة عبر معرّفه. الوسيط يمرّر بيانات مشفّرة فقط ولا يستطيع رؤية الجلسة أو الدخول إليها.";
+    RelayHint => "Your own relay (tlp-desk-relay on a server both sides can reach) lets you connect to a device that is not on this network by its ID.\nThe relay only passes encrypted data; it cannot see or join a session.", "خادم وسيط خاص بك يتيح لك الاتصال بجهاز خارج هذه الشبكة عبر معرّفه\n(برنامج tlp-desk-relay على خادم يصل إليه الطرفان).\nالوسيط يمرّر بيانات مشفّرة فقط ولا يستطيع رؤية الجلسة أو الدخول إليها.";
     RelayAddress => "Relay address", "عنوان الوسيط";
     RelayAddressHint => "e.g. relay.example.com or 203.0.113.5:47402", "مثال: \u{2066}relay.example.com\u{2069} أو \u{2066}203.0.113.5:47402\u{2069}";
     RelayToken => "Relay token", "رمز الوسيط";

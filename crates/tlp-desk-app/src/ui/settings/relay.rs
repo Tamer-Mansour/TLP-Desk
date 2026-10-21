@@ -3,7 +3,7 @@
 //! applied with one button (a half-typed address must not be dialed); the switch applies
 //! at once.
 
-use eframe::egui::{self, Align, RichText};
+use eframe::egui::{self, Align};
 
 use crate::app::App;
 use crate::i18n::S;
@@ -13,7 +13,6 @@ use crate::ui::{theme, widgets};
 impl App {
     pub(super) fn relay_card(&mut self, ui: &mut egui::Ui) {
         let tx = self.tx;
-        let dark = ui.visuals().dark_mode;
         if !self.settings_ui.relay_loaded {
             self.settings_ui.relay_address = self.settings.relay.address.clone();
             self.settings_ui.relay_token = self.settings.relay.token.clone();
@@ -100,13 +99,6 @@ impl App {
                     toggled = true;
                 }
                 ui.label(theme::caption(ui, tx.t(S::RelayReachableHint)));
-                if configured && self.settings.relay.reachable {
-                    ui.label(
-                        RichText::new(tx.t(S::RelayReachable))
-                            .small()
-                            .color(theme::success(dark)),
-                    );
-                }
             });
         });
         if apply {
