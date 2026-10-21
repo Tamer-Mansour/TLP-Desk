@@ -65,7 +65,7 @@ room, the words **Keyboard goes to the remote PC**.
 - Click outside the TLP-Desk window (or switch away with the mouse) and the keys work on your own
   PC again.
 - **Ctrl+Alt+Del** and **Win+L** always act on your own PC — Windows does not let any program
-  intercept them. A Ctrl+Alt+Del button for the remote PC is [coming soon](coming-soon/ctrl-alt-del.md).
+  intercept them. A Ctrl+Alt+Del button for the remote PC is [coming soon](ctrl-alt-del.md).
 - When you leave the window, TLP-Desk releases every key and mouse button on the remote PC, so
   nothing stays stuck.
 

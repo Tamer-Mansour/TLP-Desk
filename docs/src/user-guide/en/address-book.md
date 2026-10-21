@@ -1,6 +1,6 @@
 # Address book
 
-![The address book](../../../media/address-book-en-light.png)
+![The address book](../../media/address-book-en-light.png)
 
 The address book keeps the PCs you use often. Open it with the **Address book** tab next to
 **Devices on this network** on the home screen. It is stored only on this PC, in
@@ -24,7 +24,7 @@ the name, and a line with the device ID, its last IP address, its group and eith
   Arabic search ignores harakat and the different forms of alef, ya and ta marbuta, so
   `محمد` also finds `مُحَمَّد`.
 - Filter by group or favorites, and sort by name or by last seen.
-- **Connect** connects by device ID (the safe way, see [Connecting](../connecting.md)).
+- **Connect** connects by device ID (the safe way, see [Connecting](connecting.md)).
 - **Wake up** appears for devices that are offline (see [Wake-on-LAN](wake-on-lan.md)).
 
 ## Editing

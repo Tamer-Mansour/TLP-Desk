@@ -86,7 +86,7 @@ changed.
   keep seeing and controlling it. The viewer shows a blue banner: "The remote computer is locked"
   or "shows a secure screen".
 - The **Send Ctrl+Alt+Del** entry in the System menu works (see
-  [Ctrl+Alt+Del and lock](coming-soon/ctrl-alt-del.md)). Without the service it is still shown, with
+  [Ctrl+Alt+Del and lock](ctrl-alt-del.md)). Without the service it is still shown, with
   a note that the service is needed.
 - The **reconnect after a restart** works at the sign-in screen too: the service is up before
   anyone signs in, so your viewer gets back in on its own.
