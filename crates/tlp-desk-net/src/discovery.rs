@@ -610,7 +610,7 @@ fn start_mdns(
                         let ips: Vec<IpAddr> = info
                             .get_addresses()
                             .iter()
-                            .map(|ip| normalize(*ip))
+                            .map(|ip| normalize(ip.to_ip_addr()))
                             .collect();
                         note_own_id(&conflict, &ips);
                         continue;
@@ -633,7 +633,7 @@ fn start_mdns(
                     let addrs: Vec<SocketAddr> = info
                         .get_addresses()
                         .iter()
-                        .map(|ip| normalize(*ip))
+                        .map(|ip| normalize(ip.to_ip_addr()))
                         .filter(|ip| allow.is_allowed(*ip))
                         .map(|ip| SocketAddr::new(ip, port))
                         .collect();
