@@ -31,7 +31,7 @@ windows = { version = "0.62", features = [
 # Linux/X11: XTest injection and the viewer keyboard grab. RustConnection is pure Rust, so
 # there is no libxcb build or run-time dependency.
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = { version = "0.13", default-features = false, features = ["xtest", "xkb"] }
+x11rb = { version = "0.14", default-features = false, features = ["xtest", "xkb"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Quartz Event Services (CGEvent injection) and CoreFoundation types; pure-Rust bindings.
