@@ -4799,7 +4799,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "sys-locale",
  "tempfile",
  "thiserror 2.0.21",
