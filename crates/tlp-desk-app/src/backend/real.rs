@@ -66,7 +66,7 @@ use super::{
 // TLP-settings-tray: host settings + connection log.
 use super::settings_tray;
 use crate::connection_log::{log_auth, Direction, LogAuth, LogEnd, LogPeer, LogStore, Recorder};
-use crate::settings::HostSettings;
+use crate::settings::{HostSettings, RelaySettings};
 
 /// How often host sessions are reconciled with [`Host::sessions`] and LAN addresses re-read.
 const RECONCILE_EVERY: Duration = Duration::from_secs(2);
@@ -98,6 +98,8 @@ pub struct RealConfig {
     pub audio: AudioDevices,
     /// User settings for incoming connections (`None` = the `host` template as is).
     pub host_settings: Option<HostSettings>,
+    /// The user's relay server (TLP-relay); default: none.
+    pub relay: RelaySettings,
     /// Folder of the connection log (`None` = do not log; tests never write the real one).
     pub connection_log: Option<PathBuf>,
     /// Clipboard to sync in sessions (the app passes the system clipboard). `None` = a private
@@ -134,6 +136,7 @@ impl Default for RealConfig {
             system_permissions: true,
             audio: AudioDevices::default(),
             host_settings: None,
+            relay: RelaySettings::default(),
             connection_log: None,
             clipboard: None,
             transfer: TransferConfig {
@@ -165,6 +168,9 @@ struct Bridge {
 type Bridges = Arc<Mutex<Vec<Bridge>>>;
 
 struct Inner {
+    /// The task that keeps this device registered with the relay (TLP-relay), while
+    /// "reachable through the relay" is on.
+    relay_task: Mutex<Option<AbortHandle>>,
     rt: Handle,
     tx: EventSender,
     repaint: RepaintFn,
@@ -314,6 +320,8 @@ pub fn lan_addresses() -> Vec<IpAddr> {
 fn map_viewer_error(e: &ViewerError) -> ConnectError {
     match e {
         ViewerError::NotFound(_) => ConnectError::NotFound,
+        ViewerError::NotFoundAnywhere(_) => ConnectError::NotFoundAnywhere,
+        ViewerError::Relay(m) => ConnectError::Relay(m.clone()),
         ViewerError::NotAllowed(_) => ConnectError::NotLocalNetwork,
         ViewerError::Unreachable(_) => ConnectError::Unreachable,
         ViewerError::Rejected(r) => ConnectError::Rejected(*r),
@@ -596,6 +604,7 @@ impl RealBackend {
             .as_ref()
             .map_or(DeviceId(0), |i| app_id(i.device_id()));
         let inner = Arc::new(Inner {
+            relay_task: Mutex::new(None),
             rt: rt.clone(),
             tx,
             repaint,
@@ -664,11 +673,36 @@ impl RealBackend {
         tasks.push(rt.spawn(inner.clone().reconcile_loop()).abort_handle());
         tasks.push(rt.spawn(inner.clone().probe_elevation()).abort_handle());
         tasks.push(rt.spawn(inner.clone().pump_files()).abort_handle());
+        inner.apply_relay(&cfg.relay);
         (Arc::new(RealBackend { inner, tasks }), rx)
     }
 }
 
 impl Inner {
+    /// Applies the relay settings: the viewer uses the relay for IDs that are not on this
+    /// network, and the host registers with it while `reachable` is on.
+    fn apply_relay(&self, settings: &RelaySettings) {
+        let cfg = settings.config();
+        if let Some(v) = &self.viewer {
+            v.set_relay(cfg.clone());
+        }
+        let mut task = self.relay_task.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(t) = task.take() {
+            t.abort();
+        }
+        if let Some(ep) = &self.endpoint {
+            ep.set_relay_peer(None);
+            if let (Some(cfg), true, true) = (cfg, settings.reachable, self.host.is_some()) {
+                tracing::info!(relay = %cfg.addr, "relay: registering this device");
+                *task = Some(
+                    self.rt
+                        .spawn(tlp_desk_net::relay::run_host(ep.clone(), cfg))
+                        .abort_handle(),
+                );
+            }
+        }
+    }
+
     fn emit(&self, event: BackendEvent) {
         if self.tx.send(event).is_ok() {
             (self.repaint)();
@@ -1860,6 +1894,10 @@ impl Backend for RealBackend {
     }
 
     // --- settings / ux (TLP-settings-tray) ---
+    fn apply_relay_settings(&self, settings: &RelaySettings) {
+        self.inner.apply_relay(settings);
+    }
+
     fn apply_host_settings(&self, settings: &HostSettings) {
         // TLP-service: the service hosts this PC; it applies and saves them machine-wide.
         #[cfg(windows)]

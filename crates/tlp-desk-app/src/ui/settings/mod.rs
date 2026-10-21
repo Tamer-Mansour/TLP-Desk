@@ -7,6 +7,7 @@
 
 mod allow_list;
 pub(crate) mod incoming;
+mod relay;
 mod startup;
 
 pub(crate) use incoming::PERMISSION_LABELS;
@@ -38,6 +39,12 @@ pub struct SettingsUi {
     pub about_open: bool,
     /// Which section is shown in the two-pane settings page.
     pub section: SettingsSection,
+    /// Relay card: the fields as being edited (applied with the button).
+    pub relay_address: String,
+    pub relay_token: String,
+    pub relay_reveal: bool,
+    /// The relay card copied the saved settings into its fields.
+    pub relay_loaded: bool,
 }
 
 /// Sections of the settings page, in nav order.
@@ -181,6 +188,8 @@ impl App {
                 self.unattended.settings_card(ui, tx, self.backend.as_ref());
                 gap(ui);
                 self.allow_list_card(ui);
+                gap(ui);
+                self.relay_card(ui);
             }
             SettingsSection::Session => {
                 self.quality_card(ui);

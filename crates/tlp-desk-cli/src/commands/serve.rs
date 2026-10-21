@@ -49,6 +49,8 @@ pub struct ServeArgs {
     /// Do not announce this host on the LAN.
     #[arg(long)]
     pub no_discovery: bool,
+    #[command(flatten)]
+    pub relay: super::common::RelayArgs,
     /// Name shown to viewers (default: computer name).
     #[arg(long)]
     pub name: Option<String>,
@@ -257,6 +259,13 @@ pub async fn run(ctx: &Ctx, args: &ServeArgs) -> Result<()> {
         },
     )?);
     let local = endpoint.local_addr()?;
+    // TLP-relay: stay registered with the relay so devices on other networks reach us.
+    let _relay_task = args.relay.config()?.map(|r| {
+        AbortOnDrop(tokio::spawn(tlp_desk_net::relay::run_host(
+            endpoint.clone(),
+            r,
+        )))
+    });
     let (host, mut events) = Host::start(endpoint.clone(), cfg).await?;
     let host = Arc::new(host);
     let out = ctx.out;
@@ -435,4 +444,13 @@ fn ask_accept(out: Output, host: Arc<Host>, id: RequestId) {
             host.reject(id);
         }
     });
+}
+
+/// Aborts a background task when dropped (the relay registrar ends with `serve`).
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }

@@ -107,6 +107,11 @@ pub const SCENES: &[Scene] = &[
         setup: settings_unattended,
     },
     Scene {
+        name: "settings-relay",
+        about: "settings: the user's own relay server for devices on other networks",
+        setup: settings_relay,
+    },
+    Scene {
         name: "settings-network",
         about: "settings: allowed networks (CIDR list), picture quality, start-up and tray",
         setup: settings_network,
@@ -360,6 +365,15 @@ fn settings_unattended(app: &mut App, lang: Lang) {
     settings(app, lang);
     app.settings_ui.section = SettingsSection::Security;
     app.settings_ui.scroll_offset = Some(260.0);
+}
+
+fn settings_relay(app: &mut App, lang: Lang) {
+    settings(app, lang);
+    app.settings.relay.address = "relay.example.com".into();
+    app.settings.relay.token = "correct horse battery staple".into();
+    app.settings.relay.reachable = true;
+    app.settings_ui.section = SettingsSection::Security;
+    app.settings_ui.scroll_offset = Some(1840.0);
 }
 
 fn settings_network(app: &mut App, lang: Lang) {

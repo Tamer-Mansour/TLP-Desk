@@ -71,6 +71,36 @@ pub fn peer_json(peer: &PeerInfo) -> Value {
     })
 }
 
+/// The user's relay server (TLP-relay), shared by `serve` and every dialing command.
+#[derive(Debug, Clone, Default, Args)]
+pub struct RelayArgs {
+    /// Relay server (`host` or `host:port`) for devices that are not on this network.
+    #[arg(long, value_name = "HOST[:PORT]")]
+    pub relay: Option<String>,
+    /// The relay's token (or the TLP_RELAY_TOKEN environment variable).
+    #[arg(
+        long,
+        env = "TLP_RELAY_TOKEN",
+        hide_env_values = true,
+        value_name = "SECRET"
+    )]
+    pub relay_token: Option<String>,
+}
+
+impl RelayArgs {
+    /// The relay config, if `--relay` was given (then the token is required).
+    pub fn config(&self) -> Result<Option<tlp_desk_net::relay::RelayConfig>> {
+        let Some(addr) = &self.relay else {
+            return Ok(None);
+        };
+        let token = self
+            .relay_token
+            .as_deref()
+            .context("--relay needs --relay-token (or TLP_RELAY_TOKEN)")?;
+        Ok(Some(tlp_desk_net::relay::RelayConfig::new(addr, token)?))
+    }
+}
+
 /// How the viewer authenticates (shared by every command that dials a host).
 #[derive(Debug, Clone, Default, Args)]
 pub struct AuthArgs {
@@ -112,6 +142,8 @@ pub struct DialArgs {
     /// Forget a changed host key and trust the new one (only after verifying it!).
     #[arg(long)]
     pub forget_key: bool,
+    #[command(flatten)]
+    pub relay: RelayArgs,
 }
 
 /// Loads (or creates on first use) this install's identity.
@@ -174,6 +206,7 @@ pub async fn dial(ctx: &Ctx, args: &DialArgs, features: FeatureSet) -> Result<Di
             pixel_format: PixelFormat::Rgba,
             discovery,
             features,
+            relay: args.relay.config()?,
             ..ViewerConfig::default()
         },
     )?;

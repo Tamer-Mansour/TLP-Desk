@@ -37,6 +37,15 @@ regenerating `docs/media/` with `scripts/update-readme-media.ps1` on Windows (th
 renders used for review are not committed), and timing the exit on Windows (the shutdown is
 bounded to 200 ms + the window close; the harness here could not create a GPU surface).
 
+## Relay (TLP-relay)
+
+Shipped on loopback only. Left: a real two-home test through a VPS (NAT types, CGNAT on a
+mobile line, IPv6-only relay), an aarch64 Linux build of `tlp-desk-relay` for cheap ARM VPSs
+(the install script already expects `tlp-desk-relay-linux-aarch64`), signed registrations
+instead of the shared token (ADR 0013 "alternatives"), a relay status line on the Home screen
+("reachable through relay.example"), and a CI job that builds and attaches the relay binary and
+`install-relay.sh` to releases.
+
 ## P3: release
 
 The signed updater and release pipeline exist (rc.4). Left: channel naming (Stable/Beta) in

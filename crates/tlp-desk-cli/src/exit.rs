@@ -105,7 +105,8 @@ impl Exit {
 
 fn of_viewer(e: &ViewerError) -> Exit {
     match e {
-        ViewerError::NotFound(_) => Exit::NotFound,
+        ViewerError::NotFound(_) | ViewerError::NotFoundAnywhere(_) => Exit::NotFound,
+        ViewerError::Relay(_) => Exit::Unreachable,
         ViewerError::NotAllowed(_) | ViewerError::Unreachable(_) => Exit::Unreachable,
         ViewerError::Rejected(r) => of_reject(*r),
         ViewerError::HostAuthFailed => Exit::AuthRejected,

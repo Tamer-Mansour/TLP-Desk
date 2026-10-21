@@ -234,6 +234,9 @@ Each lane ticks its own items below, with evidence, when its PR merges.
       _(evidence: PR #37; system test row 11)_
 - [x] `tlp-desk-cli`: `list`, `connect`, `send-file`, `exec-wol` for scripts and AI agents
       _(evidence: PR #37; system test rows 1-13 drive the release CLI)_
+- [x] Self-hosted relay for devices on other networks (`tlp-desk-relay`, ADR 0013): register,
+      allocate, punch, forward; opt-in on both sides; wire protocol unchanged
+      _(evidence: `tlp-desk-net/tests/relay.rs` host+viewer+relay on loopback; `relay::tests`; needs a two-home manual check with a real VPS)_
 
 ---
 

@@ -10,11 +10,19 @@ in the [decision records](adr/index.md).
 
 ## What TLP-Desk promises
 
-1. **LAN only.** It never contacts the internet on its own: no cloud, relay, account, analytics
-   or crash upload. It works with the internet unplugged. The one exception is the opt-in update
-   check (Settings, Updates): only when you press "Check for updates now" or turn on "Check daily"
-   (off by default) does it ask GitHub Releases for a newer version, and a downloaded installer
-   runs only after its SHA-256 and the release signature (ed25519, minisign format) both verify.
+1. **LAN only.** It never contacts the internet on its own: no cloud, no vendor relay, no
+   account, analytics or crash upload. It works with the internet unplugged. Two things are
+   opt-in exceptions. The update check (Settings, Updates): only when you press "Check for
+   updates now" or turn on "Check daily" (off by default) does it ask GitHub Releases for a
+   newer version, and a downloaded installer runs only after its SHA-256 and the release
+   signature (ed25519, minisign format) both verify. And **your own relay** (Settings,
+   Security, Relay server): a `tlp-desk-relay` you run and name explicitly; the viewer asks it
+   only for an ID that is not on your network, the host registers with it only while you turn
+   "reachable through the relay" on, and it only copies the encrypted packets of a session it
+   cannot read or join (the connecting side pins the device's key, so the relay cannot
+   impersonate anyone). Its control messages are authenticated with the relay token; a
+   captured registration replayed within two minutes can misdirect a connection notice, never
+   a session.
 2. **Everything is encrypted.** Every connection is QUIC with TLS 1.3. There is no unencrypted
    mode and no "debug mode" that skips authentication in release builds.
 3. **Nobody connects without permission.** Each session is authorized by the person at the host

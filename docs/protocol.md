@@ -468,6 +468,18 @@ viewer                                   host
   10-minute lockout (`Rejected(RateLimited)`); success clears the counter. Every attempt is
   logged.
 
+## Relay (optional, not part of the wire protocol)
+
+A device on another network can be reached through the user's own `tlp-desk-relay` (ADR
+0013). The relay never takes part in the session: viewer and host run the protocol above
+unchanged over UDP packets the relay copies between them, so `PROTOCOL_VERSION` is not
+affected. The relay's control messages are a separate datagram format on separate ports
+(control 47402, sessions 47410–47509): `b"TLPR" | 0x01 | postcard(Frame { ts: u64, payload })
+| HMAC-SHA256`, keyed by the relay token, timestamp window ±120 s, ≤ 256 bytes. Payloads:
+`Register { device_id: u32 }`, `Registered`, `Connect { device_id: u32 }`, `Allocated {
+session: u64, port: u16 }`, `Offline`, `Incoming { session, port }`, `Punch { session, role:
+Host | Viewer }`, `Ready { session }`. Full exchange and limits: `docs/src/dev/crates/relay.md`.
+
 ## Discovery
 
 - **mDNS** (`mdns-sd`): service type `_tlpdesk._udp.local.`, instance name = device ID, host name

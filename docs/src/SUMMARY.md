@@ -23,6 +23,7 @@
   - [Sound from the remote PC](user-guide/en/audio.md)
   - [Whiteboard: draw on the remote screen](user-guide/en/whiteboard.md)
   - [Port forwarding](user-guide/en/port-forwarding.md)
+  - [Relay server (another network)](user-guide/en/relay.md)
   - [Remote device information](user-guide/en/device-info.md)
   - [View options](user-guide/en/view-options.md)
   - [The statistics overlay](user-guide/en/stats.md)
@@ -64,6 +65,7 @@
   - [الصوت من الحاسوب البعيد](user-guide/ar/audio.md)
   - [اللوح الأبيض: الرسم على الشاشة](user-guide/ar/whiteboard.md)
   - [تمرير المنافذ (الأنفاق)](user-guide/ar/port-forwarding.md)
+  - [الخادم الوسيط (شبكة أخرى)](user-guide/ar/relay.md)
   - [معلومات الحاسوب البعيد](user-guide/ar/device-info.md)
   - [خيارات العرض](user-guide/ar/view-options.md)
   - [لوحة الإحصاءات](user-guide/ar/stats.md)
@@ -110,6 +112,7 @@
   - [tlp-desk-viewer](dev/crates/viewer.md)
   - [tlp-desk-app](dev/crates/app.md)
   - [tlp-desk-cli](dev/crates/cli.md)
+  - [tlp-desk-relay](dev/crates/relay.md)
   - [tlp-desk-testkit](dev/crates/testkit.md)
 - [Building on Windows](dev/building.md)
 - [Linux](dev/linux.md)
@@ -137,6 +140,7 @@
   - [0010 Local input priority](adr/0010-local-input-priority.md)
   - [0011 Pointer marker excluded from capture](adr/0011-capture-exclusion-for-pointer-marker.md)
   - [0012 Capture size cap](adr/0012-capture-size-cap.md)
+  - [0013 A self-hosted relay](adr/0013-self-hosted-relay.md)
 - [Coding conventions](dev/conventions.md)
 
 # Reference

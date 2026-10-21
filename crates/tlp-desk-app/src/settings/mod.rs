@@ -12,6 +12,7 @@
 pub mod allow_list;
 pub mod autostart;
 pub mod host;
+pub mod relay;
 
 use std::path::{Path, PathBuf};
 
@@ -22,6 +23,7 @@ use tlp_desk_proto::{QualityPreset, QualitySettings};
 use crate::i18n::{DigitStyle, Lang};
 
 pub use host::{HostSettings, PermissionSet};
+pub use relay::RelaySettings;
 
 /// Current schema version written to `settings.json`.
 pub const SETTINGS_VERSION: u32 = 1;
@@ -69,6 +71,9 @@ pub struct Settings {
     /// TLP-Desk draws its own title bar with the menus and window buttons (like VS Code)
     /// instead of the system one with the app's header under it. Default on, on Windows.
     pub integrated_title_bar: bool,
+    /// The relay server the user runs for devices on other networks (TLP-relay). Empty =
+    /// LAN only.
+    pub relay: RelaySettings,
 }
 
 /// Color theme choice (View → Theme, Settings → Language and display).
@@ -131,6 +136,7 @@ impl Default for Settings {
             accept_popup: AcceptPopupSettings::default(),
             updates: UpdateSettings::default(),
             theme: ThemeChoice::default(),
+            relay: RelaySettings::default(),
             // The integrated bar uses Windows' own move/resize loops; elsewhere the window
             // manager's frame is the better default.
             integrated_title_bar: cfg!(windows),
@@ -380,6 +386,7 @@ impl Settings {
             self.device_name = None;
         }
         self.host.sanitize();
+        self.relay.sanitize();
     }
 
     /// Best-effort save to `%APPDATA%\TLP-Desk\settings.json`; failures are logged, never

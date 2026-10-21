@@ -125,6 +125,7 @@ fn main() -> anyhow::Result<()> {
                     // Default permissions, timeouts and the allow-list come from settings.json
                     // (Settings screen), not from constants here.
                     host_settings: Some(settings.host.clone()),
+                    relay: settings.relay.clone(),
                     connection_log: tlp_desk_app::settings::app_data_dir(),
                     history: tlp_desk_app::settings::app_data_dir(),
                     transfer: tlp_desk_files::TransferConfig {

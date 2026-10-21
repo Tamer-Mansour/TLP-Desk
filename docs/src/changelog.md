@@ -8,6 +8,23 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+## [1.0.0-rc.7] - 2026-10-21
+
+Your own relay server: connect to a device at another home by its ID.
+
+### Added
+
+- **Reach a device on another network through your own relay** (TLP-relay, ADR 0013). A new
+  small server, `tlp-desk-relay` (Linux; `installer/linux/install-relay.sh` installs it as a
+  service), that you run on a VPS or a PC at home. Settings → Security → **Relay server** on
+  both devices (address + token); turn on **Let devices reach this PC through the relay** on
+  the device to be reached. Then connect by **ID** as on the LAN: when the ID is not on your
+  network TLP-Desk asks the relay, and the session goes through it, still end to end encrypted
+  and pinned to the device's key (the relay only copies packets; it cannot read or join a
+  session). No port needs to be opened at the remote home and it works behind CGNAT. CLI:
+  `serve --relay HOST --relay-token SECRET`, `connect ID --relay HOST --relay-token SECRET`
+  (`TLP_RELAY_TOKEN`). No wire-protocol change.
+
 ## [1.0.0-rc.6] - 2026-10-21
 
 A new look with the TLP brand, and instant exit.
