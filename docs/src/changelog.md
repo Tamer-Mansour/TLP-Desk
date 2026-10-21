@@ -8,6 +8,10 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+## [1.0.0-rc.5] - 2026-10-21
+
+Connection fixes (no more "connecting to my own device", no more "works only after restarting Wi-Fi"), sharper 4K-to-smaller-window streaming, zoom, and menus in the title bar.
+
 ### Fixed
 
 - **"It says I am connecting to my own device."** A device's address list could contain an
