@@ -446,6 +446,20 @@ strings! {
     // Settings sections (TLP-settings-tray)
     SettingsIncoming => "Incoming connections", "الاتصالات الواردة";
     SettingsAllowList => "Allowed networks", "الشبكات المسموح بها";
+    // Relay server (TLP-relay)
+    SettingsRelay => "Relay server", "الخادم الوسيط";
+    RelayHint => "Your own relay (tlp-desk-relay on a server both sides can reach) lets you connect to a device that is not on this network by its ID. The relay only passes encrypted data; it cannot see or join a session.", "خادم وسيط خاص بك (\u{2066}tlp-desk-relay\u{2069} على خادم يصل إليه الطرفان) يتيح لك الاتصال بجهاز خارج هذه الشبكة عبر معرّفه. الوسيط يمرّر بيانات مشفّرة فقط ولا يستطيع رؤية الجلسة أو الدخول إليها.";
+    RelayAddress => "Relay address", "عنوان الوسيط";
+    RelayAddressHint => "e.g. relay.example.com or 203.0.113.5:47402", "مثال: \u{2066}relay.example.com\u{2069} أو \u{2066}203.0.113.5:47402\u{2069}";
+    RelayToken => "Relay token", "رمز الوسيط";
+    RelayTokenHint => "The same secret given to tlp-desk-relay with --token.", "نفس الرمز السري المعطى لـ \u{2066}tlp-desk-relay\u{2069} عبر \u{2066}--token\u{2069}.";
+    RelayReachable => "Let devices reach this PC through the relay", "السماح للأجهزة بالوصول إلى هذا الجهاز عبر الوسيط";
+    RelayReachableHint => "This PC registers with the relay every 15 seconds. Who may connect is still decided here: Accept, the one-time code or the password.", "يسجّل هذا الجهاز نفسه عند الوسيط كل 15 ثانية. من يُسمح له بالاتصال يبقى قرار هذا الجهاز: قبول، أو رمز لمرة واحدة، أو كلمة المرور.";
+    RelayNotConfigured => "No relay: only devices on this network can be reached.", "لا يوجد وسيط: يمكن الوصول إلى أجهزة هذه الشبكة فقط.";
+    RelayConfigured => "Devices that are not on this network are looked up through {addr}.", "يتم البحث عن الأجهزة خارج هذه الشبكة عبر \u{2066}{addr}\u{2069}.";
+    RelaySave => "Apply", "تطبيق";
+    ErrNotFoundAnywhere => "Not found on this network or through the relay. Is the other device on, and is \"reachable through the relay\" turned on there?", "لم يُعثر عليه في هذه الشبكة ولا عبر الوسيط. هل الجهاز الآخر يعمل، وهل خيار «الوصول عبر الوسيط» مفعّل عنده؟";
+    ErrRelay => "The relay could not be used: {reason}", "تعذّر استخدام الوسيط: {reason}";
     SettingsQuality => "Picture quality", "جودة الصورة";
     SettingsStartup => "Start-up and notification area", "بدء التشغيل ومنطقة الإشعارات";
     IncomingEnabled => "Accept incoming connections", "استقبال الاتصالات الواردة";

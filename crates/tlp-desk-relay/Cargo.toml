@@ -1,0 +1,22 @@
+[package]
+name = "tlp-desk-relay"
+description = "TLP-Desk relay server: lets two TLP-Desk devices on different networks reach each other through a server you run"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tlp-desk-relay"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tlp-desk-net.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

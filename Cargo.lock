@@ -4765,7 +4765,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tlp-desk-android"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -4785,7 +4785,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-app"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4832,7 +4832,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-audio"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "cpal",
  "opus",
@@ -4847,7 +4847,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-capture"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -4859,7 +4859,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-cli"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -4878,7 +4878,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-codec"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "openh264",
  "openh264-sys2",
@@ -4890,7 +4890,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-crypto"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "argon2",
  "hmac 0.13.0",
@@ -4906,7 +4906,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-files"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "arboard",
  "blake3",
@@ -4927,7 +4927,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-host"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "postcard",
  "serde",
@@ -4951,7 +4951,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-input"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -4964,14 +4964,16 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-net"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
+ "hmac 0.13.0",
  "if-addrs",
  "mdns-sd",
  "postcard",
  "quinn",
  "rustls",
  "serde",
+ "sha2 0.11.1",
  "socket2 0.5.10",
  "thiserror 2.0.21",
  "tlp-desk-crypto",
@@ -4984,7 +4986,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-proto"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "postcard",
  "proptest",
@@ -4993,8 +4995,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tlp-desk-relay"
+version = "1.0.0-rc.7"
+dependencies = [
+ "anyhow",
+ "clap",
+ "tlp-desk-net",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tlp-desk-testkit"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "memory-stats",
  "tlp-desk-capture",
@@ -5012,7 +5026,7 @@ dependencies = [
 
 [[package]]
 name = "tlp-desk-viewer"
-version = "1.0.0-rc.6"
+version = "1.0.0-rc.7"
 dependencies = [
  "fs4",
  "tempfile",

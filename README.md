@@ -2,8 +2,9 @@
 
 **Free, open-source remote desktop for your local network: offline, encrypted, and written in pure Rust.**
 
-TLP-Desk lets one Windows PC see and control another PC on the same LAN. It has no cloud, no relay
-server, no account and no telemetry, and it keeps working with the internet cable unplugged.
+TLP-Desk lets one Windows PC see and control another PC on the same LAN. It has no cloud, no vendor
+relay, no account and no telemetry, and it keeps working with the internet cable unplugged. To reach
+a PC at another home you run your own tiny relay server; nothing else ever leaves your network.
 A single app is both the **host** (the PC being controlled) and the **viewer** (the PC in control).
 The interface is available in **Arabic (right-to-left)** and **English**.
 
@@ -107,8 +108,13 @@ All images and videos are generated from the real UI by
   layouts, and a choice of Arabic-Indic or Western digits.
 - **A design of its own:** the TLP brand (burgundy, rose, ivory and ink), an icon rail, glass
   panels, light and dark themes, and menus drawn in the window's own title bar.
+- **Another network? Your own relay.** Run the small `tlp-desk-relay` on a VPS or a PC at home,
+  give both devices its address and token, and connect by ID across the internet — still end
+  to end encrypted and pinned, the relay only copies packets. No port to open at the other
+  home, works behind CGNAT. ([guide](docs/src/user-guide/en/relay.md))
 - **Opt-in updates** checked against GitHub Releases and verified with the release signing key;
-  a notice when a device on the LAN runs a newer version. Nothing else ever leaves the LAN.
+  a notice when a device on the LAN runs a newer version. Nothing else ever leaves the LAN
+  unless you configure a relay.
 - **Single `setup.exe` installer** (Arabic + English) that adds Windows Firewall rules for private
   networks only, a portable zip, a winget manifest, and a **CLI** (`TLP-Desk-cli.exe`) for scripts.
 - **Linux (X11) and macOS** host and viewer, and an **Android viewer**, are experimental.
@@ -141,6 +147,7 @@ and the [two-PC manual test checklist](docs/src/user-guide/en/manual-test.md)
 | 47400 | UDP | Sessions (QUIC / TLS 1.3) |
 | 47401 | UDP | Discovery broadcast fallback |
 | 5353 | UDP | mDNS discovery (`_tlpdesk._udp.local.`) |
+| 47402, 47410–47509 | UDP | Only on a relay server you run (`tlp-desk-relay`) |
 
 ---
 
@@ -284,6 +291,8 @@ GitHub Security Advisories rather than public issues; see [SECURITY.md](SECURITY
   متصل.
 - التنقل بين الشاشات إذا كان للجهاز الآخر أكثر من شاشة، وإعادة اتصال تلقائية عند انقطاع الشبكة.
 - تصميم بهوية TLP (الخمري والوردي والعاجي)، بوضعين فاتح وداكن.
+- الاتصال بجهاز في شبكة أخرى عبر خادم وسيط صغير **خاص بك** (`tlp-desk-relay`) بالمعرّف نفسه، والتشفير يبقى
+  من طرف إلى طرف.
 - مثبّت واحد `setup.exe` بالعربية والإنجليزية، ونسخة محمولة، وأداة سطر أوامر.
 
 للتثبيت: نزّل ملف `TLP-Desk-<version>-setup.exe` من صفحة

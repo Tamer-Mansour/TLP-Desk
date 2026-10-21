@@ -37,6 +37,13 @@ pub enum NetError {
     SelfConnection,
     #[error("peer {0} is not in the allow-list")]
     NotAllowed(SocketAddr),
+    /// The relay exchange failed (address, token, no answer); the message says what.
+    #[error("relay: {0}")]
+    Relay(String),
+    /// The relay does not know that device (it is not running TLP-Desk with this relay, or
+    /// its registration expired).
+    #[error("that device is not reachable through the relay right now")]
+    RelayOffline,
     #[error("protocol version mismatch: ours {ours}, theirs {theirs}")]
     VersionMismatch { ours: u32, theirs: u32 },
     /// The host rejected the session.

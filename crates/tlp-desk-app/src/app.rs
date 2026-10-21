@@ -374,6 +374,8 @@ impl App {
             // Normally shown as its own warning dialog (see `KeyWarning`).
             ConnectError::HostKeyChanged { .. } => tx.t(S::KeyChangedTitle).into(),
             ConnectError::NotLocalNetwork => tx.t(S::ErrNotLan).into(),
+            ConnectError::NotFoundAnywhere => tx.t(S::ErrNotFoundAnywhere).into(),
+            ConnectError::Relay(m) => tx.f(S::ErrRelay, &[("reason", m)]),
             ConnectError::Timeout => tx.t(S::ErrTimeout).into(),
             ConnectError::Other(detail) => tx.f(S::ErrOther, &[("detail", detail)]),
         }

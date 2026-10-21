@@ -17,7 +17,12 @@
 //! * Port forwarding helpers: [`pipe_tcp`] (TCP <-> tunnel stream) and [`resolve_target`]
 //!   (LAN-only target check).
 //!
-//! No function in this crate contacts anything outside the local network.
+//! * [`relay`]: reaching a device on another network through a relay the user runs
+//!   (TLP-relay): the host registers, the viewer asks, both punch a session port, the relay
+//!   copies the still end-to-end-encrypted QUIC packets.
+//!
+//! No function in this crate contacts anything outside the local network on its own; the
+//! relay is used only when the application was given one.
 //!
 //! `unsafe` is denied crate-wide; only the Windows neighbour-cache wrapper
 //! (`neighbor::windows`) opts back in, with a `// SAFETY:` note on every block.
@@ -40,6 +45,7 @@ mod endpoint;
 mod error;
 mod feature;
 mod neighbor;
+pub mod relay;
 mod session;
 mod tls;
 mod tunnel;

@@ -18,6 +18,7 @@ revisit the reasoning instead of rediscovering it.
 | [0010](0010-local-input-priority.md) | The person at the host always has input priority | Accepted |
 | [0011](0011-capture-exclusion-for-pointer-marker.md) | Remote-pointer marker excluded from capture | Accepted |
 | [0012](0012-capture-size-cap.md) | Cap capture at 1920×1200, scaled on the GPU | Accepted |
+| [0013](0013-self-hosted-relay.md) | A self-hosted relay for devices on other networks | Accepted |
 
 ## Writing a new ADR
 

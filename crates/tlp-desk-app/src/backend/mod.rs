@@ -209,6 +209,11 @@ pub enum ConnectError {
     SelfConnection,
     /// The address is outside the local network (refused before any packet was sent).
     NotLocalNetwork,
+    /// The ID is not on this network and the relay does not know it (the other device is
+    /// off, or has not turned on "reachable through the relay").
+    NotFoundAnywhere,
+    /// The relay could not be used; the text says why (unreachable, token, timeout).
+    Relay(String),
     Timeout,
     Other(String),
 }
@@ -751,6 +756,16 @@ pub trait Backend: Send + Sync {
     /// connections are paused) and the live host options (default permissions, accept
     /// timeout, one-time code on/off, local-input grace, pointer marker). They apply to the
     /// next connection; running sessions keep their permissions.
+    /// Applies the relay settings (TLP-relay): which relay to ask for IDs that are not on
+    /// this network, and whether this device registers with it.
+    fn apply_relay_settings(&self, settings: &crate::settings::RelaySettings) {
+        tracing::debug!(
+            configured = settings.is_configured(),
+            reachable = settings.reachable,
+            "apply_relay_settings not supported by this backend"
+        );
+    }
+
     fn apply_host_settings(&self, settings: &crate::settings::HostSettings) {
         tracing::debug!(
             ?settings,

@@ -100,6 +100,9 @@ struct Shared {
     identity: Arc<Identity>,
     device_name: String,
     allow: RwLock<AllowList>,
+    /// The relay this endpoint registered with (TLP-relay): its connections are let in
+    /// next to the allow-list, because relayed viewers all arrive from the relay's address.
+    relay_ip: RwLock<Option<IpAddr>>,
     limiter: Mutex<RateLimiter>,
     handshake_timeout: Duration,
 }
@@ -122,6 +125,10 @@ pub struct Endpoint {
     ep: quinn::Endpoint,
     shared: Arc<Shared>,
     incoming: tokio::sync::Mutex<mpsc::Receiver<PendingSession>>,
+    /// A second handle on the QUIC socket, used only to *send* the relay's punch datagrams
+    /// from the same address the QUIC packets will come from (never read: reading would
+    /// steal packets from quinn).
+    raw: std::net::UdpSocket,
 }
 
 impl std::fmt::Debug for Endpoint {
@@ -169,6 +176,7 @@ impl Endpoint {
     /// Binds the UDP socket and, if `cfg.listen`, starts accepting sessions in the background.
     pub fn bind(identity: Arc<Identity>, cfg: EndpointConfig) -> Result<Self, NetError> {
         let socket = bind_socket(cfg.bind)?;
+        let raw = socket.try_clone()?;
         let server = if cfg.listen {
             Some(tls::server_config(&identity)?)
         } else {
@@ -184,6 +192,7 @@ impl Endpoint {
             identity,
             device_name: cfg.device_name,
             allow: RwLock::new(cfg.allow_list),
+            relay_ip: RwLock::new(None),
             limiter: Mutex::new(RateLimiter::new(cfg.rate_limit)),
             handshake_timeout: cfg.handshake_timeout,
         });
@@ -201,7 +210,39 @@ impl Endpoint {
             ep,
             shared,
             incoming: tokio::sync::Mutex::new(rx),
+            raw,
         })
+    }
+
+    /// Sends one datagram from the QUIC socket (relay punches, see [`crate::relay`]). An
+    /// IPv4 target is mapped when the socket is dual-stack.
+    pub fn send_raw(&self, to: SocketAddr, bytes: &[u8]) -> std::io::Result<()> {
+        let to = match (self.raw.local_addr()?.ip(), to.ip()) {
+            (IpAddr::V6(_), IpAddr::V4(v4)) => {
+                SocketAddr::new(IpAddr::V6(v4.to_ipv6_mapped()), to.port())
+            }
+            _ => to,
+        };
+        self.raw.send_to(bytes, to).map(|_| ())
+    }
+
+    /// Lets connections from `ip` in regardless of the allow-list (the relay this endpoint
+    /// registered with); `None` clears it.
+    pub fn set_relay_peer(&self, ip: Option<IpAddr>) {
+        *self
+            .shared
+            .relay_ip
+            .write()
+            .unwrap_or_else(|p| p.into_inner()) = ip.map(normalize);
+    }
+
+    /// The relay address currently let in, if any.
+    pub fn relay_peer(&self) -> Option<IpAddr> {
+        *self
+            .shared
+            .relay_ip
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, NetError> {
@@ -578,7 +619,12 @@ async fn accept_loop(ep: quinn::Endpoint, shared: Arc<Shared>, tx: mpsc::Sender<
             .allow
             .read()
             .unwrap_or_else(|p| p.into_inner())
-            .is_allowed(addr.ip());
+            .is_allowed(addr.ip())
+            || shared
+                .relay_ip
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_some_and(|ip| ip == normalize(addr.ip()));
         if !allowed {
             tracing::warn!(peer = %addr, "connection refused: peer not in allow-list");
             incoming.refuse();
