@@ -9,6 +9,7 @@ portable zip.
 | [tlp-icons](https://github.com/Tamer-Mansour/tlp-icons) (static SVG icons, see `crates/tlp-desk-app/assets/icons/README.md` for the list and the source commit) | GUI icons | MIT | `licenses\tlp-icons-LICENSE.txt` |
 | [Lucide](https://lucide.dev) icon geometry, included in tlp-icons | GUI icons | ISC | `licenses\lucide-LICENSE.txt` |
 | [Noto Sans Arabic](https://github.com/notofonts) | Arabic text | SIL Open Font License 1.1 | `licenses\NotoSansArabic-OFL.txt` |
+| [Inter](https://rsms.me/inter/) 4.1 | Latin UI text | SIL Open Font License 1.1 | `licenses\Inter-OFL.txt` |
 | egui default fonts (`epaint_default_fonts`) | Latin text, emoji | see each file | `licenses\egui-*.txt` |
 
 Copyright notices:

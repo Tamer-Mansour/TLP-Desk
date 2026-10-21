@@ -105,91 +105,77 @@ impl App {
     }
 
     /// The whole connection-log screen.
+    /// The whole connection-log screen (kept for callers that still switch to it; the
+    /// Sessions page embeds [`App::connection_log_body`] instead).
     pub fn connection_log_ui(&mut self, ui: &mut egui::Ui) {
+        self.sessions_ui(ui);
+    }
+
+    /// Search, filters, refresh / export and the list, without a panel of its own.
+    pub(crate) fn connection_log_body(&mut self, ui: &mut egui::Ui) {
         let tx = self.tx;
-        let mut back = false;
         let mut refresh = false;
         let mut export_now = false;
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(ui.visuals().panel_fill)
-                    .inner_margin(20),
-            )
-            .show(ui, |ui| {
-                theme::row(ui, tx.rtl(), |ui| {
-                    if ui
-                        .add(icons::icon_text_button(tx, Icon::Back, tx.t(S::Back)))
-                        .clicked()
-                    {
-                        back = true;
-                    }
-                    ui.label(RichText::new(tx.t(S::ConnectionLog)).heading().strong());
-                });
-                ui.add_space(10.0);
-                let log = &mut self.conn_log;
-                theme::row(ui, tx.rtl(), |ui| {
-                    let w = (ui.available_width() * 0.45).clamp(160.0, 360.0);
-                    let hint = tx.t(S::LogSearchHint);
-                    widgets::text_field(ui, tx, "log-search", &mut log.query, hint, w);
-                    for f in LogFilter::ALL {
-                        if ui
-                            .selectable_label(log.filter == f, tx.t(filter_key(f)))
-                            .clicked()
-                        {
-                            log.filter = f;
-                        }
-                    }
-                });
-                ui.add_space(6.0);
-                theme::row(ui, tx.rtl(), |ui| {
-                    let refresh_button =
-                        icons::icon_text_button(tx, Icon::Refresh, tx.t(S::LogRefresh));
-                    if ui.add(refresh_button).clicked() {
-                        refresh = true;
-                    }
-                    let export_button = icons::icon_text_button(tx, Icon::Save, tx.t(S::LogExport));
-                    if ui
-                        .add_enabled(!log.entries.is_empty(), export_button)
-                        .clicked()
-                    {
-                        export_now = true;
-                    }
-                    let n = tx.digits(&log.visible().len().to_string());
-                    ui.label(theme::caption(ui, &tx.f(S::LogCount, &[("n", &n)])));
-                });
-                if let Some(status) = &log.status {
-                    ui.label(theme::caption(ui, status));
+        let log = &mut self.conn_log;
+        theme::row(ui, tx.rtl(), |ui| {
+            let w = (ui.available_width() * 0.45).clamp(160.0, 360.0);
+            let hint = tx.t(S::LogSearchHint);
+            widgets::text_field(ui, tx, "log-search", &mut log.query, hint, w);
+            for f in LogFilter::ALL {
+                if ui
+                    .selectable_label(log.filter == f, tx.t(filter_key(f)))
+                    .clicked()
+                {
+                    log.filter = f;
                 }
-                ui.add_space(8.0);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        theme::column(ui, tx.rtl(), |ui| {
-                            let rows = log.visible();
-                            if rows.is_empty() {
-                                let key = if log.entries.is_empty() {
-                                    S::LogEmpty
-                                } else {
-                                    S::LogNoMatch
-                                };
-                                ui.label(theme::caption(ui, tx.t(key)));
-                            }
-                            for e in rows.into_iter().take(MAX_ROWS) {
-                                entry_card(ui, tx, e, log.offset);
-                                ui.add_space(6.0);
-                            }
-                        });
-                    });
+            }
+        });
+        ui.add_space(6.0);
+        theme::row(ui, tx.rtl(), |ui| {
+            let refresh_button = icons::icon_text_button(tx, Icon::Refresh, tx.t(S::LogRefresh));
+            if ui.add(refresh_button).clicked() {
+                refresh = true;
+            }
+            let export_button = icons::icon_text_button(tx, Icon::Save, tx.t(S::LogExport));
+            if ui
+                .add_enabled(!log.entries.is_empty(), export_button)
+                .clicked()
+            {
+                export_now = true;
+            }
+            let n = tx.digits(&log.visible().len().to_string());
+            ui.label(theme::caption(ui, &tx.f(S::LogCount, &[("n", &n)])));
+        });
+        if let Some(status) = &log.status {
+            ui.label(theme::caption(ui, status));
+        }
+        ui.add_space(8.0);
+        let max_h = (ui.available_height() - 8.0).max(160.0);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
+            .max_height(max_h)
+            .show(ui, |ui| {
+                theme::column(ui, tx.rtl(), |ui| {
+                    let rows = log.visible();
+                    if rows.is_empty() {
+                        let key = if log.entries.is_empty() {
+                            S::LogEmpty
+                        } else {
+                            S::LogNoMatch
+                        };
+                        ui.label(theme::caption(ui, tx.t(key)));
+                    }
+                    for e in rows.into_iter().take(MAX_ROWS) {
+                        entry_card(ui, tx, e, log.offset);
+                        ui.add_space(6.0);
+                    }
+                });
             });
         if refresh {
             self.conn_log.reload();
         }
         if export_now {
             self.export_connection_log();
-        }
-        if back {
-            self.screen = Screen::Home;
         }
     }
 
@@ -215,7 +201,7 @@ fn write_csv(path: &Path, csv: &str) -> std::io::Result<()> {
 }
 
 fn entry_card(ui: &mut egui::Ui, tx: Tx, e: &LogEntry, offset: UtcOffset) {
-    theme::card(ui, |ui| {
+    widgets::list_row(ui, |ui| {
         theme::column(ui, tx.rtl(), |ui| {
             theme::row(ui, tx.rtl(), |ui| {
                 let icon = match e.direction {

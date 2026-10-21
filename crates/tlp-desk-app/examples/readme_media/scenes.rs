@@ -19,6 +19,7 @@ use tlp_desk_app::i18n::{DigitStyle, Lang, Tx, S};
 use tlp_desk_app::ui::address_book::{Dialog, EditForm, HomeTab};
 use tlp_desk_app::ui::chat::ChatState;
 use tlp_desk_app::ui::session::ViewerSession;
+use tlp_desk_app::ui::settings::SettingsSection;
 use tlp_desk_proto::Permissions;
 
 use crate::backend::{devices, incoming_peer, pick, saved_devices, session_peer, FIXED_NOW};
@@ -44,6 +45,16 @@ pub const SCENES: &[Scene] = &[
         name: "devices",
         about: "devices found on the LAN, online and offline",
         setup: device_list,
+    },
+    Scene {
+        name: "devices-page",
+        about: "the Devices page: LAN devices and the address book in one list",
+        setup: devices_page,
+    },
+    Scene {
+        name: "sessions-page",
+        about: "the Sessions page: who is connected now and the connection log",
+        setup: sessions_page,
     },
     Scene {
         name: "connect-code",
@@ -199,6 +210,17 @@ fn device_list(app: &mut App, lang: Lang) {
     }
 }
 
+fn devices_page(app: &mut App, lang: Lang) {
+    home(app, lang);
+    app.screen = Screen::Devices;
+}
+
+fn sessions_page(app: &mut App, lang: Lang) {
+    connection_log(app, lang);
+    app.host_sessions.push((SessionId(7), incoming_peer(lang)));
+    app.screen = Screen::Sessions;
+}
+
 fn connect_with_code(app: &mut App, lang: Lang) {
     home(app, lang);
     app.address = "715 204 386".into();
@@ -331,18 +353,20 @@ fn wake_on_lan(app: &mut App, lang: Lang) {
 
 fn settings_incoming(app: &mut App, lang: Lang) {
     settings(app, lang);
-    app.settings_ui.scroll_offset = Some(430.0);
+    app.settings_ui.section = SettingsSection::Security;
 }
 
 fn settings_unattended(app: &mut App, lang: Lang) {
     settings(app, lang);
-    app.settings_ui.scroll_offset = Some(800.0);
+    app.settings_ui.section = SettingsSection::Security;
+    app.settings_ui.scroll_offset = Some(260.0);
 }
 
 fn settings_network(app: &mut App, lang: Lang) {
     settings(app, lang);
     app.settings.host.allow_list = vec!["192.168.1.0/24".into(), "10.8.0.0/16".into()];
-    app.settings_ui.scroll_offset = Some(1390.0);
+    app.settings_ui.section = SettingsSection::Security;
+    app.settings_ui.scroll_offset = Some(520.0);
 }
 
 fn connection_log(app: &mut App, lang: Lang) {

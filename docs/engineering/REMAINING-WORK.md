@@ -30,9 +30,12 @@ whenever an item is finished or a new one is found.
 
 ## P2: desktop experience
 
-Title bar done (P2.1). Left: home screen restructure (My device / Remote connection / Devices /
-Sessions / Settings), session toolbar (latency, bandwidth, security info). Uses the existing
-design tokens in `crates/tlp-desk-app/src/ui/theme.rs` and `docs/src/dev/design.md`.
+Title bar (P2.1) and the redesign (P2.2: rail + canvas shell, glass panels, Inter, Home /
+Devices / Sessions / Settings) are done; see `docs/src/dev/design.md`. Left: a Windows look
+at 125 % / 150 % DPI, the session toolbar's info popover (latency, bandwidth, security),
+regenerating `docs/media/` with `scripts/update-readme-media.ps1` on Windows (the Linux
+renders used for review are not committed), and timing the exit on Windows (the shutdown is
+bounded to 200 ms + the window close; the harness here could not create a GPU surface).
 
 ## P3: release
 

@@ -203,13 +203,70 @@ pub fn icon_heading(ui: &mut Ui, tx: Tx, icon: Icon, text: &str) {
     });
 }
 
-/// Section header: icon badge, title and an optional caption below it.
-pub fn section_header(ui: &mut Ui, tx: Tx, icon: Icon, title: &str, subtitle: Option<&str>) {
-    icon_heading(ui, tx, icon, title);
+/// Section header of a panel: a small tracked eyebrow label, an optional caption under it.
+/// The icon is kept in the signature for call sites but no longer drawn: eyebrows label the
+/// group; icons went to the rows and buttons where they mean something.
+pub fn section_header(ui: &mut Ui, tx: Tx, _icon: Icon, title: &str, subtitle: Option<&str>) {
+    theme::row(ui, tx.rtl(), |ui| {
+        ui.label(theme::eyebrow(ui, title));
+    });
     if let Some(sub) = subtitle {
         ui.label(theme::caption(ui, sub));
     }
-    ui.add_space(space::XS);
+    ui.add_space(space::S);
+}
+
+/// A round avatar with the device's initial (see [`theme::paint_avatar`]).
+pub fn avatar(ui: &mut Ui, name: &str, size: f32) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        theme::paint_avatar(ui.painter(), rect, name, ui.visuals().dark_mode);
+    }
+    resp
+}
+
+/// Icon-only button meant for the hero tile: white glyph, frameless until hovered, hover
+/// shows as a translucent white pill so it works on the teal fill.
+pub fn hero_icon_button(ui: &mut Ui, tx: Tx, icon: Icon, tooltip: &str) -> Response {
+    let image = icon.image_dir(tx.rtl(), icons::TOOL_ICON, Color32::WHITE);
+    let resp = ui
+        .scope(|ui| {
+            let w = &mut ui.visuals_mut().widgets;
+            w.inactive.weak_bg_fill = Color32::TRANSPARENT;
+            w.inactive.bg_stroke = Stroke::NONE;
+            w.hovered.weak_bg_fill = Color32::from_white_alpha(0x30);
+            w.hovered.bg_fill = Color32::from_white_alpha(0x30);
+            w.hovered.bg_stroke = Stroke::NONE;
+            w.active.weak_bg_fill = Color32::from_white_alpha(0x48);
+            w.active.bg_fill = Color32::from_white_alpha(0x48);
+            w.active.bg_stroke = Stroke::NONE;
+            ui.add(egui::Button::image(image).corner_radius(CornerRadius::same(radius::PILL)))
+        })
+        .inner;
+    let enabled = resp.enabled();
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tooltip));
+    resp.on_hover_text(tooltip)
+}
+
+/// Copy button for the hero tile ([`copy_button`] in white, with the same "Copied" feedback).
+pub fn hero_copy_button(ui: &mut Ui, tx: Tx, id: Id, value_for_clipboard: &str) {
+    let now = ui.input(|i| i.time);
+    let copied_at: Option<f64> = ui.data(|d| d.get_temp(id));
+    let recently = copied_at.is_some_and(|t| now - t < 1.5);
+    let (icon, label) = if recently {
+        (Icon::Copied, tx.t(S::Copied))
+    } else {
+        (Icon::Copy, tx.t(S::Copy))
+    };
+    let resp = hero_icon_button(ui, tx, icon, label);
+    if resp.clicked() {
+        ui.ctx().copy_text(value_for_clipboard.to_owned());
+        ui.data_mut(|d| d.insert_temp(id, now));
+    }
+    if recently {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(300));
+    }
 }
 
 /// An icon on a small tinted rounded square (used before headings and in empty states).
@@ -349,8 +406,7 @@ pub fn segmented<T: PartialEq + Copy>(
     let mut changed = false;
     egui::Frame::new()
         .fill(p.surface_alt)
-        .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(CornerRadius::same(radius::MD + 2))
+        .corner_radius(CornerRadius::same(radius::MD + 4))
         .inner_margin(Margin::same(3))
         .show(ui, |ui| {
             theme::row(ui, tx.rtl(), |ui| {
@@ -370,9 +426,10 @@ pub fn segmented<T: PartialEq + Copy>(
                         None => egui::Button::selectable(selected, *label),
                     };
                     let b = if selected {
-                        b.stroke(Stroke::new(1.0, p.border))
+                        b.stroke(Stroke::NONE)
+                            .corner_radius(CornerRadius::same(radius::MD + 1))
                     } else {
-                        b
+                        b.corner_radius(CornerRadius::same(radius::MD + 1))
                     };
                     let resp = ui.add(b);
                     if resp.clicked() && !selected {
@@ -385,28 +442,35 @@ pub fn segmented<T: PartialEq + Copy>(
     changed
 }
 
-/// A list row: rounded, tinted on hover, full width. `add` lays out the row content.
+/// A list row: a quiet raised strip that lifts on hover (lighter fill, a hairline), full
+/// width. `add` lays out the row content.
 pub fn list_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> (R, Response) {
     let p = theme::tokens(ui);
     let bg = ui.painter().add(egui::Shape::Noop);
     let inner = egui::Frame::new()
-        .inner_margin(Margin::symmetric(12, 6))
-        .outer_margin(Margin::symmetric(0, 2))
+        .inner_margin(Margin::symmetric(14, 9))
+        .outer_margin(Margin::symmetric(0, 3))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add(ui)
         });
     let rect = inner.response.rect;
     let hovered = ui.rect_contains_pointer(rect);
-    let fill = if hovered {
-        p.surface_hover
+    let r = CornerRadius::same(radius::LG);
+    let shape = if hovered {
+        egui::Shape::rect_filled(rect, r, p.surface_hover)
     } else {
-        p.surface_alt
+        egui::Shape::rect_filled(rect, r, p.surface_alt)
     };
-    ui.painter().set(
-        bg,
-        egui::Shape::rect_filled(rect, CornerRadius::same(radius::MD + 2), fill),
-    );
+    ui.painter().set(bg, shape);
+    if hovered {
+        ui.painter().rect_stroke(
+            rect,
+            r,
+            Stroke::new(1.0, p.border_strong),
+            egui::StrokeKind::Inside,
+        );
+    }
     let resp = ui.interact(rect, inner.response.id.with("row"), Sense::hover());
     (inner.inner, resp)
 }

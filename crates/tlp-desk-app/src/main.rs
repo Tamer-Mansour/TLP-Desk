@@ -150,6 +150,12 @@ fn main() -> anyhow::Result<()> {
         }),
     )
     .map_err(|e| anyhow::anyhow!("GUI failed: {e}"))?;
-    drop(runtime);
-    Ok(())
+    // The window is gone and the backend was dropped with it (bounded, see
+    // `RealBackend::drop`). Do not wait for the runtime's remaining blocking tasks (capture,
+    // encode, file I/O helpers): give them a short grace period, then end the process so that
+    // Quit, the close button and the tray's Quit all finish at once.
+    let closing = std::time::Instant::now();
+    runtime.shutdown_timeout(std::time::Duration::from_millis(200));
+    tracing::info!(took = ?closing.elapsed(), "runtime stopped; exiting");
+    std::process::exit(0);
 }

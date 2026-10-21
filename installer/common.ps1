@@ -71,6 +71,7 @@ function New-PayloadStage([string]$Stage, [string]$ReadmeSource) {
     $readme = Get-Content $ReadmeSource -Raw -Encoding UTF8
     [System.IO.File]::WriteAllText((Join-Path $Stage 'README.txt'), $readme, $script:Utf8Bom)
     Copy-Item (Join-Path $script:Root 'crates\tlp-desk-app\assets\fonts\NotoSansArabic-OFL.txt') (Join-Path $Stage 'licenses')
+    Copy-Item (Join-Path $script:Root 'crates\tlp-desk-app\assets\fonts\Inter-OFL.txt') (Join-Path $Stage 'licenses')
     # GUI icons (tlp-icons, MIT; Lucide geometry, ISC) are embedded in the exe.
     Get-ChildItem (Join-Path $script:Root 'crates\tlp-desk-app\assets\icons\licenses') -Filter '*.txt' | ForEach-Object {
         Copy-Item $_.FullName (Join-Path $Stage 'licenses')

@@ -2,14 +2,14 @@
 
 use eframe::egui::{self, Align, Id, Layout, RichText};
 
-use super::address_book::{BookCommand, HomeTab};
+use super::address_book::HomeTab;
 use super::icons::{self, Icon};
-use super::{theme, widgets};
-use crate::app::App;
+use super::{shell, theme, widgets};
+use crate::app::{App, Screen};
 use crate::backend::{ConnectTarget, DiscoveredDevice};
 use crate::i18n::{Tx, S};
 
-enum Action {
+pub(crate) enum Action {
     Connect(ConnectTarget),
     ConnectAddress,
     NewCode,
@@ -17,6 +17,8 @@ enum Action {
     SaveDevice(DiscoveredDevice),
     /// Switch to the address book tab.
     ShowAddressBook,
+    /// Open the Devices page.
+    ShowDevices,
 }
 
 impl App {
@@ -24,26 +26,40 @@ impl App {
         let tx = self.tx;
         let mut actions = Vec::new();
 
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(ui.visuals().panel_fill)
-                    .inner_margin(20),
-            )
-            .show(ui, |ui| {
-                self.permissions.card(ui, tx);
-                self.lan_update_notice(ui);
-                self.address_book.offer_ui(ui, tx, self.backend.as_ref());
-                ui.spacing_mut().item_spacing.x = theme::space::L;
-                ui.columns(2, |cols| {
-                    let (first, second) = if tx.rtl() { (1, 0) } else { (0, 1) };
-                    for col in cols.iter_mut() {
-                        col.spacing_mut().item_spacing.x = theme::space::S + 2.0;
-                    }
-                    self.device_card(&mut cols[first], &mut actions);
-                    self.connect_card(&mut cols[second], &mut actions);
-                });
+        shell::canvas(ui, |ui| {
+            shell::page_title(ui, tx, tx.t(S::AppTitle), Some(tx.t(S::HomeLede)));
+            self.permissions.card(ui, tx);
+            self.lan_update_notice(ui);
+            self.address_book.offer_ui(ui, tx, self.backend.as_ref());
+            ui.spacing_mut().item_spacing.x = theme::space::XL;
+            // Identity on the start side (narrower), connect + devices on the end side.
+            let total = ui.available_width();
+            let left_w = (total * 0.42).clamp(340.0, 460.0);
+            let right_w = total - left_w - theme::space::XL;
+            // Taken before the row: a row starts one widget tall, so inside it the
+            // available height would be that, not the canvas's.
+            let col_h = ui.available_height();
+            theme::row(ui, tx.rtl(), |ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_w, col_h),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(left_w);
+                        self.identity_card(ui, &mut actions);
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    egui::vec2(right_w, col_h),
+                    Layout::top_down(Align::Min),
+                    |ui| {
+                        ui.set_width(right_w);
+                        self.connect_bar(ui, &mut actions);
+                        ui.add_space(theme::space::L);
+                        self.nearby_preview(ui, &mut actions);
+                    },
+                );
             });
+        });
         self.address_book.dialogs_ui(ui.ctx(), tx);
         self.address_book.toast_ui(ui.ctx(), tx);
 
@@ -56,112 +72,146 @@ impl App {
                     self.address_book
                         .save_discovered(&d, self.backend.as_ref(), tx);
                 }
-                Action::ShowAddressBook => self.address_book.tab = HomeTab::AddressBook,
+                Action::ShowAddressBook => {
+                    self.address_book.tab = HomeTab::AddressBook;
+                    self.screen = Screen::Devices;
+                }
+                Action::ShowDevices => self.screen = Screen::Devices,
             }
         }
     }
 
-    fn device_card(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    /// The identity card: a glass panel with a teal light behind it, the device ID as the
+    /// largest thing on the screen, the one-time code under it, and a status pill. It is
+    /// the one object people recognise the app by.
+    fn identity_card(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let tx = self.tx;
-        theme::card(ui, |ui| {
-            theme::column(ui, tx.rtl(), |ui| {
-                widgets::section_header(ui, tx, Icon::Laptop, tx.t(S::ThisDevice), None);
-                ui.add_space(theme::space::S);
-
-                // Hero tile: the ID people read out loud, then the one-time code.
-                let p = theme::tokens(ui);
-                egui::Frame::new()
-                    .fill(p.surface_alt)
-                    .stroke(egui::Stroke::new(1.0, p.border))
-                    .corner_radius(theme::radius::LG)
-                    .inner_margin(egui::Margin::same(16))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        theme::column(ui, tx.rtl(), |ui| {
-                            ui.label(theme::caption(ui, tx.t(S::DeviceId)));
-                            let id = self.local.device_id.to_string();
-                            theme::row(ui, tx.rtl(), |ui| {
-                                ui.label(
-                                    theme::mono(&tx.n(&id), theme::font::DISPLAY)
-                                        .strong()
-                                        .color(p.text),
-                                );
-                                // Clipboard always gets Western digits.
-                                widgets::copy_button(ui, tx, Id::new("copy-id"), &id);
-                            });
-                            widgets::divider(ui);
-                            ui.label(theme::caption(ui, tx.t(S::OneTimeCode)));
-                            let code = &self.local.one_time_code;
-                            let grouped = if code.len() == 6 {
-                                format!("{} {}", &code[..3], &code[3..])
-                            } else {
-                                code.clone()
-                            };
-                            theme::row(ui, tx.rtl(), |ui| {
-                                ui.label(
-                                    theme::mono(&tx.n(&grouped), theme::font::CODE).color(p.accent),
-                                );
-                                widgets::copy_button(ui, tx, Id::new("copy-code"), code);
-                                let ghost = widgets::ButtonKind::Ghost;
-                                if widgets::button(ui, tx, ghost, Icon::Refresh, tx.t(S::NewCode))
-                                    .clicked()
-                                {
-                                    actions.push(Action::NewCode);
-                                }
-                            });
-                            ui.label(theme::caption(ui, tx.t(S::OneTimeCodeHint)));
-                        });
-                    });
-                ui.add_space(theme::space::L);
-
-                theme::row(ui, tx.rtl(), |ui| {
-                    ui.label(theme::caption(ui, tx.t(S::DeviceName)));
-                    ui.add_space(theme::space::XS);
-                    ui.label(RichText::new(tx.d(&self.local.device_name)).strong());
-                });
-                if let Some(ip) = self.local.identity_conflict {
-                    ui.add_space(theme::space::S);
-                    let (fg, bg) = theme::Tone::Warning.colors(ui.visuals().dark_mode);
-                    egui::Frame::new()
-                        .fill(bg)
-                        .corner_radius(theme::radius::SM)
-                        .inner_margin(egui::Margin::symmetric(10, 6))
-                        .show(ui, |ui| {
-                            // Isolated so the address keeps its order inside Arabic text.
-                            let addr = format!("\u{2066}{ip}\u{2069}");
-                            let text = tx.f(S::IdentityConflict, &[("addr", &addr)]);
-                            ui.add(egui::Label::new(RichText::new(text).color(fg)).wrap());
-                        });
-                }
-                ui.add_space(theme::space::XS);
-                ui.label(theme::caption(ui, tx.t(S::LocalAddress)));
-                for addr in &self.local.addresses {
-                    let a = addr.to_string();
+        let dark = ui.visuals().dark_mode;
+        let p = theme::tokens(ui);
+        // The glow is painted first (under the panel) at the panel's top-start corner.
+        let glow_slot = ui.painter().add(egui::Shape::Noop);
+        let inner = theme::glass_frame(ui)
+            .inner_margin(egui::Margin::same(26))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                theme::column(ui, tx.rtl(), |ui| {
+                    // Header row: eyebrow + status pill at the reading end.
                     theme::row(ui, tx.rtl(), |ui| {
-                        egui::Frame::new()
-                            .fill(p.surface_alt)
-                            .corner_radius(theme::radius::SM)
-                            .inner_margin(egui::Margin::symmetric(8, 3))
-                            .show(ui, |ui| {
-                                ui.label(theme::mono(&tx.n(&a), theme::font::MONO).color(p.text));
-                            });
-                        widgets::copy_button(ui, tx, Id::new(("copy-ip", &a)), &a);
+                        ui.label(theme::eyebrow(ui, tx.t(S::ThisDevice)));
+                        theme::row_end(ui, tx.rtl(), |ui| {
+                            let hosting = self.host_sessions.len();
+                            let (text, tone) = if self.host_problem.is_some() {
+                                (tx.t(S::StatusOffline).to_owned(), theme::Tone::Danger)
+                            } else if hosting > 0 {
+                                (
+                                    tx.f(
+                                        S::StatusHosting,
+                                        &[("n", &tx.digits(&hosting.to_string()))],
+                                    ),
+                                    theme::Tone::Accent,
+                                )
+                            } else {
+                                (tx.t(S::StatusReady).to_owned(), theme::Tone::Success)
+                            };
+                            status_pill(ui, tx, &text, tone);
+                        });
                     });
-                }
+                    ui.add_space(theme::space::XL);
+
+                    ui.label(theme::caption(ui, tx.t(S::DeviceId)));
+                    let id = self.local.device_id.to_string();
+                    theme::row(ui, tx.rtl(), |ui| {
+                        ui.label(
+                            RichText::new(tx.n(&id))
+                                .font(theme::semibold(theme::font::DISPLAY))
+                                .color(p.text),
+                        );
+                        ui.add_space(theme::space::S);
+                        // Clipboard always gets Western digits.
+                        widgets::copy_button(ui, tx, Id::new("copy-id"), &id);
+                    });
+                    ui.add_space(theme::space::L);
+
+                    ui.label(theme::caption(ui, tx.t(S::OneTimeCode)));
+                    let code = &self.local.one_time_code;
+                    let grouped = if code.len() == 6 {
+                        format!("{} {}", &code[..3], &code[3..])
+                    } else {
+                        code.clone()
+                    };
+                    theme::row(ui, tx.rtl(), |ui| {
+                        ui.label(
+                            RichText::new(tx.n(&grouped))
+                                .font(theme::semibold(theme::font::CODE))
+                                .color(p.accent),
+                        );
+                        ui.add_space(theme::space::S);
+                        widgets::copy_button(ui, tx, Id::new("copy-code"), code);
+                        if widgets::ghost_scope(ui, |ui| {
+                            icons::icon_button(ui, tx, Icon::Refresh, tx.t(S::NewCode))
+                        })
+                        .clicked()
+                        {
+                            actions.push(Action::NewCode);
+                        }
+                    });
+                    ui.label(theme::caption(ui, tx.t(S::OneTimeCodeHint)));
+                    ui.add_space(theme::space::XL);
+                    widgets::divider(ui);
+
+                    // Name and addresses as a compact key/value list.
+                    kv_row(
+                        ui,
+                        tx,
+                        tx.t(S::DeviceName),
+                        &tx.d(&self.local.device_name),
+                        None,
+                    );
+                    for addr in &self.local.addresses {
+                        let a = addr.to_string();
+                        kv_row(ui, tx, tx.t(S::LocalAddress), &tx.n(&a), Some(&a));
+                    }
+                    if let Some(ip) = self.local.identity_conflict {
+                        ui.add_space(theme::space::S);
+                        let (fg, bg) = theme::Tone::Warning.colors(dark);
+                        egui::Frame::new()
+                            .fill(bg)
+                            .corner_radius(theme::radius::MD)
+                            .inner_margin(egui::Margin::symmetric(12, 8))
+                            .show(ui, |ui| {
+                                // Isolated so the address keeps its order inside Arabic text.
+                                let addr = format!("\u{2066}{ip}\u{2069}");
+                                let text = tx.f(S::IdentityConflict, &[("addr", &addr)]);
+                                ui.add(egui::Label::new(RichText::new(text).color(fg)).wrap());
+                            });
+                    }
+                });
             });
-        });
+        let rect = inner.response.rect;
+        theme::paint_glass_edge(ui.painter(), rect, dark);
+        let corner = if tx.rtl() {
+            rect.right_top() + egui::vec2(-40.0, 30.0)
+        } else {
+            rect.left_top() + egui::vec2(40.0, 30.0)
+        };
+        let strength = if dark { 0.55 } else { 0.22 };
+        ui.painter().set(
+            glow_slot,
+            theme::glow_shape(corner, 260.0, p.accent, strength),
+        );
     }
 
-    fn connect_card(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    /// The connect bar: one wide glass strip with the address field, the sign-in choice and
+    /// the primary Connect pill.
+    fn connect_bar(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let tx = self.tx;
-        theme::card(ui, |ui| {
+        theme::glass(ui, |ui| {
             theme::column(ui, tx.rtl(), |ui| {
-                widgets::section_header(ui, tx, Icon::Monitor, tx.t(S::ConnectTitle), None);
-                ui.add_space(theme::space::S);
+                ui.label(theme::eyebrow(ui, tx.t(S::ConnectTitle)));
+                ui.add_space(theme::space::M);
                 theme::row(ui, tx.rtl(), |ui| {
-                    let button_w = 130.0;
-                    let field_w = (ui.available_width() - button_w - 12.0).max(120.0);
-                    // In RTL the row flows right-to-left: field first (rightmost), then button.
+                    let button_w = 140.0;
+                    let field_w = (ui.available_width() - button_w - 12.0).max(140.0);
                     let resp = widgets::text_field(
                         ui,
                         tx,
@@ -183,7 +233,7 @@ impl App {
                     }
                     resp
                 });
-                ui.add_space(theme::space::S);
+                ui.add_space(theme::space::M);
                 // One-time code or permanent password (TLP-unattended).
                 let enter = self.unattended.connect_fields(ui, tx, &mut self.code);
                 if enter && !self.address.trim().is_empty() {
@@ -191,33 +241,30 @@ impl App {
                 }
             });
         });
-        ui.add_space(theme::space::L);
-        theme::card(ui, |ui| {
+    }
+
+    /// A short list of nearby devices (the first few) with a link to the Devices page.
+    fn nearby_preview(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let tx = self.tx;
+        theme::glass(ui, |ui| {
             theme::column(ui, tx.rtl(), |ui| {
-                // Tabs: devices on this network | address book.
-                widgets::segmented(
-                    ui,
-                    tx,
-                    &mut self.address_book.tab,
-                    &[
-                        (HomeTab::Nearby, Some(Icon::Network), tx.t(S::NearbyDevices)),
-                        (
-                            HomeTab::AddressBook,
-                            Some(Icon::AddressBook),
-                            tx.t(S::AbTitle),
-                        ),
-                    ],
-                );
-                ui.add_space(theme::space::S);
-                if self.address_book.tab == HomeTab::AddressBook {
-                    let backend = self.backend.clone();
-                    if let Some(BookCommand::Connect(t)) =
-                        self.address_book.list_ui(ui, tx, backend.as_ref())
-                    {
-                        actions.push(Action::Connect(t));
-                    }
-                    return;
-                }
+                theme::row(ui, tx.rtl(), |ui| {
+                    ui.label(theme::eyebrow(ui, tx.t(S::NearbyDevices)));
+                    theme::row_end(ui, tx.rtl(), |ui| {
+                        if widgets::ghost_scope(ui, |ui| {
+                            ui.add(icons::icon_text_button(
+                                tx,
+                                Icon::Users,
+                                tx.t(S::MoreDevices),
+                            ))
+                        })
+                        .clicked()
+                        {
+                            actions.push(Action::ShowDevices);
+                        }
+                    });
+                });
+                ui.add_space(theme::space::M);
                 match &self.devices {
                     None => {
                         theme::row(ui, tx.rtl(), |ui| {
@@ -225,20 +272,88 @@ impl App {
                             ui.label(theme::caption(ui, tx.t(S::Searching)));
                         });
                     }
+                    Some(list) if list.is_empty() => {
+                        widgets::empty_state(
+                            ui,
+                            tx,
+                            Icon::Radar,
+                            tx.t(S::NoDevicesTitle),
+                            tx.t(S::NoDevicesHint),
+                        );
+                    }
                     Some(list) => {
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| {
-                                for dev in list {
-                                    let saved = self.address_book.book.contains(dev.device_id);
-                                    device_row(ui, tx, dev, saved, actions);
+                        // Whole rows only, as many as fit under the header (the first row
+                        // always shows; the rest are on the Devices page).
+                        let mut row_h = None;
+                        for dev in list.iter().take(PREVIEW_ROWS) {
+                            if let Some(h) = row_h {
+                                if ui.available_height() < h {
+                                    break;
                                 }
-                            });
+                            }
+                            let saved = self.address_book.book.contains(dev.device_id);
+                            let top = ui.cursor().min.y;
+                            device_row(ui, tx, dev, saved, actions);
+                            row_h.get_or_insert(ui.cursor().min.y - top);
+                        }
                     }
                 }
             });
         });
     }
+}
+
+/// How many devices the home preview shows before "See all".
+const PREVIEW_ROWS: usize = 4;
+
+/// A small pill with a dot: session / availability status. Painted by hand so it is sized
+/// to its text (a frame inside a trailing row would stretch to the row's end).
+pub fn status_pill(ui: &mut egui::Ui, tx: Tx, text: &str, tone: theme::Tone) {
+    let dark = ui.visuals().dark_mode;
+    let (fg, bg) = tone.colors(dark);
+    let galley =
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), theme::medium(theme::font::CAPTION), fg);
+    let (pad_x, pad_y, dot, gap) = (10.0, 4.0, 7.0, 6.0);
+    let size = egui::vec2(
+        galley.size().x + dot + gap + pad_x * 2.0,
+        (galley.size().y + pad_y * 2.0).max(26.0),
+    );
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        painter.rect_filled(rect, theme::radius::PILL, bg);
+        let (dot_x, text_x) = if tx.rtl() {
+            (rect.max.x - pad_x - dot / 2.0, rect.min.x + pad_x)
+        } else {
+            (
+                rect.min.x + pad_x + dot / 2.0,
+                rect.min.x + pad_x + dot + gap,
+            )
+        };
+        painter.circle_filled(egui::pos2(dot_x, rect.center().y), 3.5, fg);
+        let text_pos = egui::pos2(text_x, rect.center().y - galley.size().y / 2.0);
+        painter.galley(text_pos, galley, fg);
+    }
+}
+
+/// One "label: value" row with an optional copy button (the clipboard gets `copy`).
+fn kv_row(ui: &mut egui::Ui, tx: Tx, label: &str, value: &str, copy: Option<&str>) {
+    let p = theme::tokens(ui);
+    theme::row(ui, tx.rtl(), |ui| {
+        ui.add_sized(
+            egui::vec2(110.0, ui.spacing().interact_size.y - 6.0),
+            egui::Label::new(theme::caption(ui, label)),
+        );
+        ui.label(
+            RichText::new(value)
+                .font(theme::medium(theme::font::BODY))
+                .color(p.text),
+        );
+        if let Some(c) = copy {
+            widgets::copy_button(ui, tx, Id::new(("copy-kv", c)), c);
+        }
+    });
 }
 
 /// Longest address shown in a device row before it is elided (the full one is in the tooltip).
@@ -249,14 +364,14 @@ const MAX_NAME_CHARS: usize = 28;
 /// Where the two halves of a device row ended up (for layout tests).
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RowRects {
+pub(crate) struct RowRects {
     /// Status dot, name and meta line.
     lead: egui::Rect,
     /// Status chip, save star and Connect button.
     trailing: egui::Rect,
 }
 
-fn device_row(
+pub(crate) fn device_row(
     ui: &mut egui::Ui,
     tx: Tx,
     dev: &DiscoveredDevice,
@@ -266,7 +381,7 @@ fn device_row(
     let dark = ui.visuals().dark_mode;
     let rtl = tx.rtl();
     let (rects, _) = widgets::list_row(ui, |ui| {
-        let height = 36.0;
+        let height = 40.0;
         let (row, _) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), height),
             egui::Sense::hover(),
@@ -295,12 +410,22 @@ fn device_row(
         };
         let mut lead = ui.new_child(egui::UiBuilder::new().max_rect(lead_rect).layout(start));
         lead.set_clip_rect(lead_rect.intersect(ui.clip_rect()));
-        let color = if dev.online {
+        let avatar = widgets::avatar(&mut lead, &dev.name, 34.0);
+        // Presence dot on the avatar's reading-end corner.
+        let dot_color = if dev.online {
             theme::success(dark)
         } else {
-            ui.visuals().weak_text_color()
+            lead.visuals().weak_text_color()
         };
-        theme::status_dot(&mut lead, color);
+        let corner = if rtl {
+            avatar.rect.left_bottom() + egui::vec2(4.0, -4.0)
+        } else {
+            avatar.rect.right_bottom() + egui::vec2(-4.0, -4.0)
+        };
+        lead.painter()
+            .circle_filled(corner, 5.5, theme::tokens(&lead).surface_alt);
+        lead.painter().circle_filled(corner, 3.5, dot_color);
+        lead.add_space(theme::space::XS);
         theme::column(&mut lead, rtl, |ui| {
             let max_w = ui.available_width();
             let name = widgets::fit(ui, &widgets::elide(&dev.name, MAX_NAME_CHARS), max_w, |s| {
@@ -313,10 +438,14 @@ fn device_row(
             let id = tx.digits(&dev.device_id.to_string());
             let full = dev.address.to_string();
             let ip = tx.digits(&widgets::elide(&full, MAX_ADDRESS_CHARS));
+            let status = if dev.online { S::Online } else { S::Offline };
             // Build the meta line in logical order, then shape once.
-            let meta = widgets::fit(ui, &format!("{id} · {ip}"), max_w, |s| {
-                theme::caption(ui, &tx.p(s))
-            });
+            let meta = widgets::fit(
+                ui,
+                &format!("{id} · {ip} · {}", tx.raw(status)),
+                max_w,
+                |s| theme::caption(ui, &tx.p(s)),
+            );
             ui.label(theme::caption(ui, &tx.p(&meta)))
                 .on_hover_text(tx.digits(&full));
         });
@@ -328,7 +457,7 @@ fn device_row(
     rects
 }
 
-/// Connect button, save star and the availability chip, from the reading end.
+/// Connect button and the save star, from the reading end.
 fn trail_actions(
     ui: &mut egui::Ui,
     tx: Tx,
@@ -336,13 +465,8 @@ fn trail_actions(
     saved: bool,
     actions: &mut Vec<Action>,
 ) {
-    if ui
-        .add_enabled(
-            dev.online,
-            icons::icon_text_button(tx, Icon::Connect, tx.t(S::Connect)),
-        )
-        .clicked()
-    {
+    let connect = icons::icon_text_button(tx, Icon::Connect, tx.t(S::Connect));
+    if ui.add_enabled(dev.online, connect).clicked() {
         actions.push(Action::Connect(ConnectTarget::Id(dev.device_id)));
     }
     // Address book: a selected star means saved (click opens the book).
@@ -362,12 +486,6 @@ fn trail_actions(
             Action::SaveDevice(dev.clone())
         });
     }
-    let (status, tone) = if dev.online {
-        (S::Online, theme::Tone::Success)
-    } else {
-        (S::Offline, theme::Tone::Neutral)
-    };
-    widgets::chip(ui, tx.t(status), tone);
 }
 
 #[cfg(test)]

@@ -484,7 +484,7 @@ mod tests {
     fn harness(lang: Lang, dark: bool, name: &str, width: f32) -> Harness<'static, AcceptCard> {
         let tx = Tx::new(lang, DigitStyle::Western);
         let mut h = Harness::builder()
-            .with_size(egui::vec2(width, 520.0))
+            .with_size(egui::vec2(width, 640.0))
             .with_theme(if dark {
                 egui::Theme::Dark
             } else {
@@ -543,7 +543,7 @@ mod tests {
     fn buttons_ignore_clicks_until_armed_then_answer() {
         let tx = Tx::new(Lang::En, DigitStyle::Western);
         let mut h = Harness::builder()
-            .with_size(egui::vec2(420.0, 520.0))
+            .with_size(egui::vec2(420.0, 640.0))
             .with_step_dt(0.02)
             .build_ui_state(
                 move |ui, s: &mut (AcceptCard, Option<Outcome>)| {

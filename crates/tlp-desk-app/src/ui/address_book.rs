@@ -668,7 +668,7 @@ fn entry_row(
     ui.push_id(("ab-row", id.0), |ui| {
         widgets::list_row(ui, |ui| {
             let (row, _) = ui
-                .allocate_exact_size(egui::vec2(ui.available_width(), 36.0), egui::Sense::hover());
+                .allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::hover());
             let (start, end) = if rtl {
                 (
                     Layout::right_to_left(Align::Center),
@@ -693,12 +693,22 @@ fn entry_row(
             };
             let mut lead = ui.new_child(egui::UiBuilder::new().max_rect(lead_rect).layout(start));
             lead.set_clip_rect(lead_rect.intersect(ui.clip_rect()));
+            let avatar = widgets::avatar(&mut lead, &e.display_name(), 34.0);
+            // Presence dot on the avatar's reading-end corner (same as the LAN list).
             let color = if online {
                 theme::success(dark)
             } else {
                 lead.visuals().weak_text_color()
             };
-            theme::status_dot(&mut lead, color);
+            let corner = if rtl {
+                avatar.rect.left_bottom() + egui::vec2(4.0, -4.0)
+            } else {
+                avatar.rect.right_bottom() + egui::vec2(-4.0, -4.0)
+            };
+            lead.painter()
+                .circle_filled(corner, 5.5, theme::tokens(&lead).surface_alt);
+            lead.painter().circle_filled(corner, 3.5, color);
+            lead.add_space(theme::space::XS);
             let fav_tip = if e.favorite {
                 S::AbFavoriteRemove
             } else {

@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Align, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Layout,
-    Margin, RichText, Shadow, Stroke, TextStyle, TextWrapMode, Theme, Ui,
+    self, Align, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId,
+    Layout, Margin, RichText, Shadow, Stroke, TextStyle, TextWrapMode, Theme, Ui,
 };
 
 use crate::i18n::Lang;
@@ -19,6 +19,31 @@ use crate::i18n::Lang;
 /// `assets/fonts/NotoSansArabic-OFL.txt`). Downloaded from the official Noto project
 /// distribution (github.com/notofonts).
 const ARABIC_FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSansArabic-Regular.ttf");
+/// Inter 4.1 (SIL Open Font License 1.1, `assets/fonts/Inter-OFL.txt`), the Latin UI face:
+/// Regular for text, Medium for buttons and labels, SemiBold for the device ID and titles.
+/// Downloaded from the official release (github.com/rsms/inter).
+const INTER_REGULAR: &[u8] = include_bytes!("../../assets/fonts/Inter-Regular.ttf");
+const INTER_MEDIUM: &[u8] = include_bytes!("../../assets/fonts/Inter-Medium.ttf");
+const INTER_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiBold.ttf");
+
+/// Font family names registered by [`font_definitions`]: use with `FontId::new(size,
+/// FontFamily::Name(..))` for the weights egui has no text style for.
+pub mod family {
+    /// Inter Medium: buttons, eyebrows, navigation labels.
+    pub const MEDIUM: &str = "inter-medium";
+    /// Inter SemiBold: the device ID, screen titles, the hero numbers.
+    pub const SEMIBOLD: &str = "inter-semibold";
+}
+
+/// `FontId` for Inter Medium at `size` (Arabic falls back to Noto Sans Arabic).
+pub fn medium(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(family::MEDIUM.into()))
+}
+
+/// `FontId` for Inter SemiBold at `size` (Arabic falls back to Noto Sans Arabic).
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(family::SEMIBOLD.into()))
+}
 
 /// Spacing scale in points. Use these instead of ad-hoc numbers so screens line up.
 pub mod space {
@@ -51,19 +76,21 @@ pub mod radius {
 /// Type scale (points). Body text follows egui's text styles set in [`install`].
 pub mod font {
     /// Screen and dialog titles.
-    pub const TITLE: f32 = 20.0;
+    pub const TITLE: f32 = 22.0;
     /// Card headers.
     pub const HEADING: f32 = 17.0;
     /// Regular text and buttons.
-    pub const BODY: f32 = 14.5;
+    pub const BODY: f32 = 14.0;
     /// Captions, hints, meta lines.
-    pub const CAPTION: f32 = 12.5;
+    pub const CAPTION: f32 = 12.0;
     /// The big device ID on the home screen.
-    pub const DISPLAY: f32 = 32.0;
+    pub const DISPLAY: f32 = 44.0;
+    /// Eyebrow section labels (small, tracked, muted).
+    pub const EYEBROW: f32 = 11.0;
     /// The one-time code next to it.
-    pub const CODE: f32 = 24.0;
+    pub const CODE: f32 = 26.0;
     /// IDs and IP addresses inside text.
-    pub const MONO: f32 = 14.0;
+    pub const MONO: f32 = 13.5;
 }
 
 /// Every color token, for one theme. Text tokens are guaranteed (by a unit test) to keep a
@@ -130,66 +157,69 @@ const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
-/// Light theme tokens.
+/// Light theme tokens: the same structure as the dark theme, lifted. A cool off-white canvas,
+/// paper-white panels, and the teal kept deep enough to carry white text.
 pub const LIGHT: Palette = Palette {
-    bg: rgb(0xF2F4F7),
-    surface: rgb(0xFFFFFF),
-    surface_alt: rgb(0xF5F7FA),
-    surface_hover: rgb(0xEBEFF3),
-    surface_pressed: rgb(0xE1E6EC),
+    bg: rgb(0xEDF0F4),
+    surface: rgb(0xFAFBFC),
+    surface_alt: rgb(0xF0F3F6),
+    surface_hover: rgb(0xEAEEF2),
+    surface_pressed: rgb(0xDBE1E8),
     input: rgb(0xFFFFFF),
-    border: rgb(0xE1E5EA),
-    border_strong: rgb(0xC6CED7),
-    text: rgb(0x17202A),
-    text_muted: rgb(0x586374),
-    accent: rgb(0x0B7A6E),
-    accent_fill: rgb(0x0B7A6E),
-    accent_hover: rgb(0x096A60),
-    accent_pressed: rgb(0x075A51),
-    accent_soft: rgb(0xE0F2EF),
+    border: rgb(0xE1E6EB),
+    border_strong: rgb(0xC1C9D2),
+    text: rgb(0x121820),
+    text_muted: rgb(0x5A6574),
+    accent: rgb(0x0A7266),
+    accent_fill: rgb(0x0D8275),
+    accent_hover: rgb(0x0B7467),
+    accent_pressed: rgb(0x09655A),
+    accent_soft: rgb(0xDAF1EC),
     on_fill: rgb(0xFFFFFF),
-    success: rgb(0x16794A),
-    success_soft: rgb(0xE2F4EA),
-    warning: rgb(0x8F5300),
-    warning_soft: rgb(0xFCF0DC),
+    success: rgb(0x167A4B),
+    success_soft: rgb(0xDFF5E8),
+    warning: rgb(0x8C5200),
+    warning_soft: rgb(0xFCEFD9),
     danger: rgb(0xB42318),
-    danger_fill: rgb(0xC0291D),
-    danger_hover: rgb(0xA52216),
-    danger_soft: rgb(0xFDE9E7),
-    info: rgb(0x1D5BAA),
-    info_soft: rgb(0xE4EDFA),
+    danger_fill: rgb(0xC2291E),
+    danger_hover: rgb(0xA62217),
+    danger_soft: rgb(0xFDE8E6),
+    info: rgb(0x1F5CAA),
+    info_soft: rgb(0xE3ECFA),
     shadow: Color32::from_rgba_premultiplied(0x10, 0x18, 0x28, 0x1C),
 };
 
-/// Dark theme tokens.
+/// Dark theme tokens, the hero theme: graphite with a faint blue cast (never pure grey, never
+/// pure black), four steps from canvas to pressed, and a teal light accent bright enough to
+/// carry text on all of them.
 pub const DARK: Palette = Palette {
-    bg: rgb(0x111418),
-    surface: rgb(0x1A1E24),
-    surface_alt: rgb(0x22272F),
-    surface_hover: rgb(0x2A3039),
-    surface_pressed: rgb(0x323944),
-    input: rgb(0x14171C),
-    border: rgb(0x2B3139),
-    border_strong: rgb(0x3D4551),
-    text: rgb(0xE7EAEE),
-    text_muted: rgb(0x9EA7B4),
-    accent: rgb(0x4CC2B1),
-    accent_fill: rgb(0x147A6E),
-    accent_hover: rgb(0x117166),
-    accent_pressed: rgb(0x0D5F56),
-    accent_soft: rgb(0x163B37),
+    bg: rgb(0x0C0F13),
+    surface: rgb(0x14181E),
+    surface_alt: rgb(0x1C2129),
+    surface_hover: rgb(0x242A33),
+    surface_pressed: rgb(0x2D343E),
+    input: rgb(0x0F1318),
+    border: rgb(0x232931),
+    border_strong: rgb(0x364049),
+    text: rgb(0xECEFF3),
+    text_muted: rgb(0x98A3B0),
+    accent: rgb(0x52D6C3),
+    accent_fill: rgb(0x128072),
+    accent_hover: rgb(0x0F7267),
+    accent_pressed: rgb(0x0D6157),
+    accent_soft: rgb(0x133D38),
     on_fill: rgb(0xFFFFFF),
-    success: rgb(0x5BCB8F),
-    success_soft: rgb(0x173628),
-    warning: rgb(0xEBB650),
-    warning_soft: rgb(0x3A3018),
-    danger: rgb(0xF28B82),
-    danger_fill: rgb(0xB3362C),
+    success: rgb(0x5DD093),
+    success_soft: rgb(0x16382A),
+    warning: rgb(0xEEB950),
+    warning_soft: rgb(0x3B3016),
+    danger: rgb(0xF58D84),
+    danger_fill: rgb(0xB5362C),
     danger_hover: rgb(0xA03027),
-    danger_soft: rgb(0x3E1F1D),
-    info: rgb(0x7DB3F5),
-    info_soft: rgb(0x1A2C44),
-    shadow: Color32::from_rgba_premultiplied(0, 0, 0, 0x70),
+    danger_soft: rgb(0x3F1F1C),
+    info: rgb(0x82B8F7),
+    info_soft: rgb(0x1A2D46),
+    shadow: Color32::from_rgba_premultiplied(0, 0, 0, 0x88),
 };
 
 /// The tokens of the light (`dark == false`) or dark theme.
@@ -268,16 +298,16 @@ impl Tone {
     }
 }
 
-/// Soft shadow under cards (level 1).
+/// Soft shadow under panels (level 1): one point down, a wide faint blur.
 pub fn card_shadow(dark: bool) -> Shadow {
     Shadow {
-        offset: [0, 1],
-        blur: 6,
+        offset: [0, 2],
+        blur: 10,
         spread: 0,
         color: if dark {
             Color32::from_black_alpha(0x40)
         } else {
-            Color32::from_rgba_premultiplied(0x08, 0x0C, 0x14, 0x0E)
+            Color32::from_rgba_premultiplied(0x0A, 0x10, 0x1A, 0x12)
         },
     }
 }
@@ -302,25 +332,64 @@ pub fn window_shadow(dark: bool) -> Shadow {
     }
 }
 
-/// egui's default fonts plus the Arabic font as a fallback in every family. egui (epaint 0.36)
-/// shapes each run with harfrust, so Arabic gets real OpenType shaping from this font.
+/// Inter as the proportional face (Regular, with Medium and SemiBold as named families), the
+/// Arabic font as a fallback in every family, and egui's own fonts after that for emoji and
+/// the monospace face. egui (epaint 0.36) shapes each run with harfrust, so Arabic gets real
+/// OpenType shaping from Noto Sans Arabic.
 pub fn font_definitions() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
-    fonts.font_data.insert(
-        "noto-sans-arabic".to_owned(),
+    let arabic = Arc::new(FontData::from_static(ARABIC_FONT).tweak(
+        egui::epaint::text::FontTweak {
+            scale: 1.08,
+            ..Default::default()
+        },
+    ));
+    fonts
+        .font_data
+        .insert("noto-sans-arabic".to_owned(), arabic);
+    // Inter sits slightly low on the line in egui's layout; nudge it up a hair so Latin and
+    // Arabic share a baseline in mixed rows.
+    let inter = |bytes: &'static [u8]| {
         Arc::new(
-            FontData::from_static(ARABIC_FONT).tweak(egui::epaint::text::FontTweak {
-                scale: 1.08,
+            FontData::from_static(bytes).tweak(egui::epaint::text::FontTweak {
+                y_offset_factor: -0.04,
                 ..Default::default()
             }),
-        ),
-    );
-    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        fonts
-            .families
-            .entry(family)
-            .or_default()
-            .push("noto-sans-arabic".to_owned());
+        )
+    };
+    fonts
+        .font_data
+        .insert("inter-regular".to_owned(), inter(INTER_REGULAR));
+    fonts
+        .font_data
+        .insert(family::MEDIUM.to_owned(), inter(INTER_MEDIUM));
+    fonts
+        .font_data
+        .insert(family::SEMIBOLD.to_owned(), inter(INTER_SEMIBOLD));
+
+    // Proportional: Inter first, Arabic next, then egui's defaults (emoji) stay behind.
+    let prop = fonts.families.entry(FontFamily::Proportional).or_default();
+    prop.insert(0, "inter-regular".to_owned());
+    prop.insert(1, "noto-sans-arabic".to_owned());
+    // Monospace keeps egui's face (IDs and addresses), with Arabic as a fallback.
+    fonts
+        .families
+        .entry(FontFamily::Monospace)
+        .or_default()
+        .push("noto-sans-arabic".to_owned());
+    // The named weights: that weight, then the Arabic fallback, then the emoji fallback.
+    for name in [family::MEDIUM, family::SEMIBOLD] {
+        let mut chain = vec![name.to_owned(), "noto-sans-arabic".to_owned()];
+        chain.extend(
+            fonts
+                .families
+                .get(&FontFamily::Proportional)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| f != "inter-regular" && f != "noto-sans-arabic"),
+        );
+        fonts.families.insert(FontFamily::Name(name.into()), chain);
     }
     fonts
 }
@@ -332,17 +401,17 @@ pub fn install(ctx: &egui::Context) {
 
     ctx.all_styles_mut(|style| {
         style.text_styles = [
-            (TextStyle::Heading, FontId::proportional(font::TITLE)),
+            (TextStyle::Heading, semibold(font::TITLE)),
             (TextStyle::Body, FontId::proportional(font::BODY)),
-            (TextStyle::Button, FontId::proportional(font::BODY)),
+            (TextStyle::Button, medium(font::BODY)),
             (TextStyle::Small, FontId::proportional(font::CAPTION)),
             (TextStyle::Monospace, FontId::monospace(font::MONO)),
         ]
         .into();
         let s = &mut style.spacing;
         s.item_spacing = egui::vec2(space::S + 2.0, space::S);
-        s.button_padding = egui::vec2(space::M + 2.0, 7.0);
-        s.interact_size.y = 32.0;
+        s.button_padding = egui::vec2(space::L, 9.0);
+        s.interact_size.y = 36.0;
         s.menu_margin = Margin::same(6);
         s.window_margin = Margin::same(20);
         s.icon_width = 18.0;
@@ -380,7 +449,7 @@ fn apply_palette(style: &mut egui::Style, dark: bool) {
     v.text_cursor.stroke = Stroke::new(2.0, p.accent);
     v.striped = false;
 
-    let r = CornerRadius::same(radius::MD);
+    let r = CornerRadius::same(radius::MD + 4);
     let w = &mut v.widgets;
     // Labels, separators, card hairlines.
     w.noninteractive.bg_fill = p.surface;
@@ -388,17 +457,18 @@ fn apply_palette(style: &mut egui::Style, dark: bool) {
     w.noninteractive.bg_stroke = Stroke::new(1.0, p.border);
     w.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
     w.noninteractive.corner_radius = r;
-    // Resting buttons and inputs.
+    // Resting buttons and inputs: a tinted fill, no outline (outlines are for inputs, drawn
+    // by the text field itself).
     w.inactive.bg_fill = p.surface_alt;
     w.inactive.weak_bg_fill = p.surface_alt;
-    w.inactive.bg_stroke = Stroke::new(1.0, p.border);
+    w.inactive.bg_stroke = Stroke::NONE;
     w.inactive.fg_stroke = Stroke::new(1.0, p.text);
     w.inactive.corner_radius = r;
     w.inactive.expansion = 0.0;
     // Hovered.
     w.hovered.bg_fill = p.surface_hover;
     w.hovered.weak_bg_fill = p.surface_hover;
-    w.hovered.bg_stroke = Stroke::new(1.0, p.border_strong);
+    w.hovered.bg_stroke = Stroke::NONE;
     w.hovered.fg_stroke = Stroke::new(1.5, p.text);
     w.hovered.corner_radius = r;
     w.hovered.expansion = 0.0;
@@ -453,19 +523,23 @@ pub fn column<R>(ui: &mut Ui, rtl: bool, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.with_layout(Layout::top_down(align), add).inner
 }
 
-/// The card frame (surface, hairline border, soft shadow) without showing it.
+/// The panel frame without showing it: a flat surface one step above the canvas, rounded,
+/// with no hairline. In the light theme a faint shadow separates it from the canvas; in the
+/// dark theme the grey step is enough and a shadow would only muddy the edge.
 pub fn card_frame(ui: &Ui) -> egui::Frame {
     let dark = ui.visuals().dark_mode;
     let p = palette(dark);
-    egui::Frame::new()
+    let mut f = egui::Frame::new()
         .fill(p.surface)
-        .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(CornerRadius::same(radius::LG))
-        .inner_margin(Margin::same(20))
-        .shadow(card_shadow(dark))
+        .corner_radius(CornerRadius::same(radius::XL))
+        .inner_margin(Margin::same(22));
+    if !dark {
+        f = f.shadow(card_shadow(dark));
+    }
+    f
 }
 
-/// Rounded card container (level-1 elevation).
+/// Panel container (level-1 elevation): see [`card_frame`].
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     card_frame(ui)
         .show(ui, |ui| {
@@ -473,6 +547,103 @@ pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
             add(ui)
         })
         .inner
+}
+
+/// The glass panel: a translucent surface with a one-pixel inner highlight along its top
+/// edge and a soft shadow under it, so it reads as a sheet of frosted glass lifted off the
+/// canvas. Used for the workspace panels, the floating session toolbar and the HUD.
+///
+/// Draw order: shadow, fill, content, then the highlight stroke on top of the fill's edge
+/// (the stroke is drawn by [`glass`] after the content, inside the same frame rect).
+pub fn glass_frame(ui: &Ui) -> egui::Frame {
+    let dark = ui.visuals().dark_mode;
+    let p = palette(dark);
+    let fill = if dark {
+        // Lighter than the canvas and a little translucent: whatever is behind (another
+        // panel, the video) shows through faintly.
+        Color32::from_rgba_unmultiplied(p.surface.r(), p.surface.g(), p.surface.b(), 0xEC)
+    } else {
+        Color32::from_rgba_unmultiplied(0xFF, 0xFF, 0xFF, 0xF2)
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(CornerRadius::same(radius::XL))
+        .inner_margin(Margin::same(22))
+        .shadow(if dark {
+            glass_shadow_dark()
+        } else {
+            card_shadow(false)
+        })
+}
+
+/// Glass panel container: [`glass_frame`] plus the edge highlight. See [`glass_frame`].
+pub fn glass<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let dark = ui.visuals().dark_mode;
+    let inner = glass_frame(ui).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        add(ui)
+    });
+    paint_glass_edge(ui.painter(), inner.response.rect, dark);
+    inner.inner
+}
+
+/// The highlight that makes a glass panel: a hairline that is brightest along the top edge
+/// and fades down the sides (light catching the rim), drawn inside the rounded rect.
+pub fn paint_glass_edge(painter: &egui::Painter, rect: egui::Rect, dark: bool) {
+    let r = CornerRadius::same(radius::XL);
+    let rim = if dark {
+        Color32::from_white_alpha(0x16)
+    } else {
+        Color32::from_white_alpha(0xC0)
+    };
+    painter.rect_stroke(rect, r, Stroke::new(1.0, rim), egui::StrokeKind::Inside);
+    // A second, brighter pass along the top only.
+    let top = if dark {
+        Color32::from_white_alpha(0x2A)
+    } else {
+        Color32::from_white_alpha(0xFF)
+    };
+    let inset = f32::from(radius::XL);
+    painter.hline(
+        (rect.min.x + inset)..=(rect.max.x - inset),
+        rect.min.y + 0.5,
+        Stroke::new(1.0, top),
+    );
+    if !dark {
+        // In the light theme the bottom edge gets a faint hairline so the panel does not
+        // melt into the canvas.
+        painter.rect_stroke(
+            rect,
+            r,
+            Stroke::new(1.0, Color32::from_black_alpha(0x0E)),
+            egui::StrokeKind::Outside,
+        );
+    }
+}
+
+/// Dark-theme glass shadow: deep and wide, the panel floats over the canvas.
+fn glass_shadow_dark() -> Shadow {
+    Shadow {
+        offset: [0, 10],
+        blur: 28,
+        spread: 0,
+        color: Color32::from_black_alpha(0x66),
+    }
+}
+
+/// Small uppercase-feeling section label ("eyebrow") above a group: tracked out a little and
+/// muted, so it labels without competing with the content. Latin text is upper-cased; Arabic
+/// has no case and is left as is.
+pub fn eyebrow(ui: &Ui, text: &str) -> RichText {
+    let shown: String = if text.chars().any(|c| c.is_ascii_lowercase()) {
+        text.to_uppercase()
+    } else {
+        text.to_owned()
+    };
+    RichText::new(shown)
+        .size(font::EYEBROW)
+        .strong()
+        .color(tokens(ui).text_muted)
 }
 
 /// Small, muted caption text.
@@ -572,6 +743,178 @@ pub fn paint_brand_mark(painter: &egui::Painter, rect: egui::Rect, dark: bool) {
         1.0,
         p.on_fill,
     );
+}
+
+/// The hero tile fill (the device-ID tile on the home screen): the one place the brand teal
+/// is used as a large surface. Two stops of the same hue, top-left lighter, so the tile reads
+/// as lit rather than flat; `on_fill` text keeps its contrast on both stops (unit-tested).
+pub fn hero_fill(dark: bool) -> (Color32, Color32) {
+    if dark {
+        (rgb(0x118074), rgb(0x0C5A51))
+    } else {
+        (rgb(0x0E8276), rgb(0x0A6C60))
+    }
+}
+
+/// A soft radial glow (the "light" of the design) centered at `center`, fading to nothing
+/// at `radius`. A mesh with the alpha set per vertex: the GPU interpolates it, so the glow
+/// is smooth at any size (concentric discs would show rings on a dark canvas). Used behind
+/// the identity card and under the active rail item.
+pub fn glow_shape(center: egui::Pos2, radius: f32, color: Color32, strength: f32) -> egui::Shape {
+    // (fraction of `radius`, fraction of `strength`): a quadratic-looking falloff, dense at
+    // the center with a long soft tail.
+    const RINGS: [(f32, f32); 4] = [(0.0, 1.0), (0.3, 0.45), (0.65, 0.12), (1.0, 0.0)];
+    const SEGS: u32 = 48;
+    let col = |a: f32| {
+        let alpha = (strength * a * 255.0).round().clamp(0.0, 255.0) as u8;
+        Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, col(RINGS[0].1));
+    for (f, a) in RINGS.iter().skip(1) {
+        for k in 0..SEGS {
+            let t = std::f32::consts::TAU * k as f32 / SEGS as f32;
+            let p = center + egui::vec2(t.cos(), t.sin()) * (radius * f);
+            mesh.colored_vertex(p, col(*a));
+        }
+    }
+    // Vertex index of point `k` on ring `ring` (1-based; ring 0 is the center).
+    let idx = |ring: usize, k: u32| 1 + (ring as u32 - 1) * SEGS + (k % SEGS);
+    for k in 0..SEGS {
+        mesh.add_triangle(0, idx(1, k), idx(1, k + 1));
+    }
+    for ring in 1..RINGS.len() - 1 {
+        for k in 0..SEGS {
+            let (a, b) = (idx(ring, k), idx(ring, k + 1));
+            let (c, d) = (idx(ring + 1, k), idx(ring + 1, k + 1));
+            mesh.add_triangle(a, b, c);
+            mesh.add_triangle(b, d, c);
+        }
+    }
+    egui::Shape::mesh(mesh)
+}
+
+/// The hero tile background for `rect` as one shape (so a caller can reserve a paint slot
+/// before laying out the content and set the background underneath it afterwards): a
+/// vertical two-stop gradient of [`hero_fill`] with the panel radius.
+pub fn hero_shape(rect: egui::Rect, dark: bool) -> egui::Shape {
+    let (top, bottom) = hero_fill(dark);
+    let r = CornerRadius::same(radius::XL);
+    // egui has no gradient fill for rounded rects, so this is a mesh: the rounded outline
+    // triangulated as a fan from the center, each vertex colored by its y position. The GPU
+    // interpolates the colors, which gives an exact, band-free gradient at any size.
+    let _ = r;
+    let mut mesh = egui::Mesh::default();
+    let pts = rounded_outline(rect, f32::from(radius::XL));
+    let color_at = |y: f32| {
+        let t = ((y - rect.min.y) / rect.height().max(1.0)).clamp(0.0, 1.0);
+        lerp_rgb(top, bottom, t)
+    };
+    let center = rect.center();
+    mesh.colored_vertex(center, color_at(center.y));
+    for p in &pts {
+        mesh.colored_vertex(*p, color_at(p.y));
+    }
+    let n = pts.len() as u32;
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    egui::Shape::mesh(mesh)
+}
+
+/// Points of a rounded rectangle outline (clockwise), 8 segments per corner.
+fn rounded_outline(rect: egui::Rect, r: f32) -> Vec<egui::Pos2> {
+    let r = r.min(rect.width() / 2.0).min(rect.height() / 2.0);
+    let segs = 8;
+    let mut out = Vec::with_capacity(4 * (segs + 1));
+    let corners = [
+        (egui::pos2(rect.max.x - r, rect.min.y + r), -90.0f32),
+        (egui::pos2(rect.max.x - r, rect.max.y - r), 0.0),
+        (egui::pos2(rect.min.x + r, rect.max.y - r), 90.0),
+        (egui::pos2(rect.min.x + r, rect.min.y + r), 180.0),
+    ];
+    for (c, start_deg) in corners {
+        for k in 0..=segs {
+            let a = (start_deg + 90.0 * k as f32 / segs as f32).to_radians();
+            out.push(egui::pos2(c.x + r * a.cos(), c.y + r * a.sin()));
+        }
+    }
+    out
+}
+
+/// Linear mix of two colors (alpha included), `t` in `0..=1`.
+pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| {
+        let v = f32::from(x) + (f32::from(y) - f32::from(x)) * t;
+        v.round().clamp(0.0, 255.0) as u8
+    };
+    Color32::from_rgba_unmultiplied(
+        mix(a.r(), b.r()),
+        mix(a.g(), b.g()),
+        mix(a.b(), b.b()),
+        mix(a.a(), b.a()),
+    )
+}
+
+fn lerp_rgb(a: Color32, b: Color32, t: f32) -> Color32 {
+    let mix = |x: u8, y: u8| {
+        let v = f32::from(x) + (f32::from(y) - f32::from(x)) * t;
+        v.round().clamp(0.0, 255.0) as u8
+    };
+    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
+}
+
+/// A round "avatar" with the first letter of `name` (device lists, the session title): the
+/// disc color is picked from the name so the same device always gets the same color.
+pub fn paint_avatar(painter: &egui::Painter, rect: egui::Rect, name: &str, dark: bool) {
+    let initial: String = name
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_else(|| "?".to_owned());
+    let hash = name
+        .bytes()
+        .fold(5381u32, |h, b| h.wrapping_mul(33) ^ u32::from(b));
+    let (fg, bg) = avatar_colors(hash, dark);
+    let r = rect.width().min(rect.height()) / 2.0;
+    painter.circle_filled(rect.center(), r, bg);
+    // Arabic letters have no ascender line: scale them up so the initial fills the disc
+    // like a Latin capital does.
+    let arabic = initial
+        .chars()
+        .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c));
+    let size = if arabic { r * 1.35 } else { r * 1.05 };
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        initial,
+        FontId::proportional(size),
+        fg,
+    );
+}
+
+/// Six muted disc tints with text that keeps AA contrast on them (unit-tested).
+fn avatar_colors(hash: u32, dark: bool) -> (Color32, Color32) {
+    const LIGHT_DISCS: [(u32, u32); 6] = [
+        (0x0A6B60, 0xD7F0EB),
+        (0x1F4FA3, 0xDDE8FA),
+        (0x7A3E9E, 0xEEE1F8),
+        (0x8A4A00, 0xFBE9D3),
+        (0x1D6F3E, 0xDDF3E4),
+        (0x8A2E3B, 0xFAE1E5),
+    ];
+    const DARK_DISCS: [(u32, u32); 6] = [
+        (0x9FE6DA, 0x14443E),
+        (0xA9C9FA, 0x1B3358),
+        (0xD9BFF2, 0x3B2650),
+        (0xF2CD9A, 0x4B3414),
+        (0xA6E6BD, 0x173C27),
+        (0xF5B7C1, 0x4A2229),
+    ];
+    let i = (hash % 6) as usize;
+    let (fg, bg) = if dark { DARK_DISCS[i] } else { LIGHT_DISCS[i] };
+    (rgb(fg), rgb(bg))
 }
 
 /// WCAG relative luminance of an opaque color.
@@ -703,6 +1046,32 @@ mod tests {
                 assert!(c >= 4.5, "on_fill on {name} (dark={dark}): {c:.2}");
             }
         }
+    }
+
+    #[test]
+    fn hero_and_avatar_colors_keep_aa_contrast() {
+        for dark in [false, true] {
+            let p = palette(dark);
+            let (top, bottom) = hero_fill(dark);
+            for (name, c) in [("hero top", top), ("hero bottom", bottom)] {
+                let ratio = contrast(p.on_fill, c);
+                assert!(ratio >= 4.5, "on_fill on {name} (dark={dark}): {ratio:.2}");
+            }
+            for h in 0..6u32 {
+                let (fg, bg) = avatar_colors(h, dark);
+                let ratio = contrast(fg, bg);
+                assert!(ratio >= 4.5, "avatar {h} (dark={dark}): {ratio:.2}");
+            }
+        }
+        // The initial is the first letter, upper-cased, Arabic kept as is.
+        let first = |n: &str| {
+            n.chars()
+                .find(|c| c.is_alphanumeric())
+                .map(|c| c.to_uppercase().collect::<String>())
+        };
+        assert_eq!(first("office-pc").as_deref(), Some("O"));
+        assert_eq!(first("حاسوب المكتبة").as_deref(), Some("ح"));
+        assert_eq!(first("  -- ").as_deref(), None);
     }
 
     #[test]

@@ -31,8 +31,13 @@ use crate::ui::{theme, widgets};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Home,
+    /// Devices on the LAN and the address book, as one list.
+    Devices,
+    /// Active host sessions and the connection log.
+    Sessions,
     Settings,
-    /// Connection log (TLP-settings-tray).
+    /// Connection log (TLP-settings-tray). Kept as its own screen for the tray menu and the
+    /// title-bar menu; it draws inside the Sessions page.
     ConnectionLog,
 }
 
@@ -1124,10 +1129,31 @@ impl App {
             }
             return;
         }
+        // The rail: on every screen but a session.
+        let live = self.host_sessions.len();
+        let active = match self.screen {
+            Screen::ConnectionLog => Screen::Sessions,
+            s => s,
+        };
+        let tx = self.tx;
+        if let Some(a) = crate::ui::shell::rail(ui, tx, active, self.settings.theme, live) {
+            match a {
+                crate::ui::shell::RailAction::Go(s) => self.screen = s,
+                crate::ui::shell::RailAction::ToggleTheme => {
+                    let next = match self.settings.theme {
+                        crate::settings::ThemeChoice::System => crate::settings::ThemeChoice::Light,
+                        crate::settings::ThemeChoice::Light => crate::settings::ThemeChoice::Dark,
+                        crate::settings::ThemeChoice::Dark => crate::settings::ThemeChoice::System,
+                    };
+                    self.set_theme(&ctx, next);
+                }
+            }
+        }
         match self.screen {
             Screen::Home => self.home_ui(ui),
+            Screen::Devices => self.devices_ui(ui),
+            Screen::Sessions | Screen::ConnectionLog => self.sessions_ui(ui),
             Screen::Settings => self.settings_ui(ui),
-            Screen::ConnectionLog => self.connection_log_ui(ui),
         }
     }
 }

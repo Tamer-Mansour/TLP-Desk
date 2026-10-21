@@ -839,6 +839,22 @@ strings! {
     IntegratedTitleBar => "Menus in the title bar (TLP-Desk draws the window frame)", "القوائم في شريط العنوان (يرسم TLP-Desk إطار النافذة)";
     Zoom => "Zoom", "التكبير";
     ZoomFit => "Fit", "ملاءمة";
+    SectionGeneral => "General", "عام";
+    SectionSecurity => "Security", "الأمان";
+    SectionSession => "Sessions and picture", "الجلسات والصورة";
+    RailSessions => "Sessions", "الجلسات";
+    SessionsLede => "Who is connected now, and every connection so far.", "من متصل الآن، وكل الاتصالات حتى الآن.";
+    DevicesLede => "Devices on this network and the ones you saved.", "الأجهزة على هذه الشبكة والأجهزة التي حفظتها.";
+    HomeLede => "Share your ID with someone you trust, or connect to another device.", "شارك معرّفك مع شخص تثق به، أو اتصل بجهاز آخر.";
+    ActiveSessions => "Active now", "النشطة الآن";
+    NoActiveSessions => "Nobody is connected to this device right now.", "لا أحد متصل بهذا الجهاز الآن.";
+    StatusReady => "Ready for connections", "جاهز للاتصالات";
+    StatusHosting => "{n} connected", "{n} متصل";
+    StatusOffline => "Not accepting connections", "لا يستقبل اتصالات";
+    AllDevices => "All", "الكل";
+    MoreDevices => "See all devices", "عرض كل الأجهزة";
+    NoDevicesTitle => "No devices found yet", "لم يُعثر على أجهزة بعد";
+    NoDevicesHint => "Open TLP-Desk on the other PC, or type its ID or address above.", "افتح TLP-Desk على الحاسوب الآخر، أو اكتب معرّفه أو عنوانه في الأعلى.";
     IntegratedTitleBarHint => "Off: the standard system title bar, with the menus under it.", "عند الإيقاف: شريط عنوان النظام العادي، والقوائم تحته.";
 }
 

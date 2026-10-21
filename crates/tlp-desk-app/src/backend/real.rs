@@ -21,7 +21,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tlp_desk_crypto::{
     Fingerprint, HostKey, Identity, PasswordStore, TicketStore, DEFAULT_TICKET_TTL, TICKETS_FILE,
@@ -1987,10 +1987,20 @@ impl RealBackend {
 }
 
 impl Drop for RealBackend {
-    /// App exit: say goodbye to every peer, then close the endpoint so they notice at once.
+    /// App exit. Everything here is bounded so quitting is immediate: recording files are
+    /// closed (they must be flushed to be playable), then the endpoint is closed at once.
+    /// Peers see the QUIC close right away; no goodbye round trip is waited for, and no
+    /// capture, encode or network thread is joined (the process ends anyway).
     fn drop(&mut self) {
+        let started = Instant::now();
         // Close recording files properly before the sessions go away.
         self.inner.recorders.stop_all_blocking();
+        for t in &self.tasks {
+            t.abort();
+        }
+        for h in self.inner.state().reconnects.values() {
+            h.abort();
+        }
         if let Some(h) = &self.inner.host {
             h.shutdown();
         }
@@ -2005,18 +2015,13 @@ impl Drop for RealBackend {
             s.disconnect();
         }
         if let Some(ep) = &self.inner.endpoint {
-            // Let the Bye messages leave (they are sent on the runtime's worker threads).
-            std::thread::sleep(Duration::from_millis(150));
+            // Closing the endpoint sends CONNECTION_CLOSE to every peer (they notice at
+            // once); the Bye messages queued above leave on the same packets if ready.
             ep.close();
-        }
-        for h in self.inner.state().reconnects.values() {
-            h.abort();
-        }
-        for t in &self.tasks {
-            t.abort();
         }
         // Sessions whose end events did not arrive in time are logged as "app closed".
         self.inner.log.close_all();
+        tracing::info!(took = ?started.elapsed(), "backend shut down");
     }
 }
 

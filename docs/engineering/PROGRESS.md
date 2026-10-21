@@ -34,7 +34,8 @@ second worktree's target dir filled it and the linker died with SIGBUS. Use one 
 | P1.2 zoom (25–300 %, scroll to pan) + exact integer scaling (2x fit / 200 % / 300 % are pixel-exact) | Done, tested (view_scale unit tests, toolbar layout test in en/ar at every width) | `TLP-app: zoom levels…` |
 | P1.3 maximum clarity mode | Not started (design notes in REMAINING-WORK.md) | |
 | P2.1 integrated title bar (menus, caption buttons, drag/snap, edge resize, RTL, theme choice, About) | Done, tested (kittest UI tests + lavapipe renders); needs a Windows check of drag/snap/resize/DPI | `TLP-app: integrated title bar…` |
-| P2.2 home / session / settings redesign beyond the title bar | Not started | |
+| P2.2 redesign: icon rail + canvas shell, glass panels, Inter, avatars, Home / Devices / Sessions / two-pane Settings, session toolbar chrome | Done, tested (theme contrast tests, kittest UI tests, lavapipe renders in en/ar × light/dark); needs a Windows look at DPI 125/150 % | `TLP-app: redesign…` |
+| Instant exit (close button and tray Quit) | Done by inspection: bounded shutdown + `process::exit`; could not be timed here (no GPU surface under Xvfb), check the log lines `backend shut down took=` and `runtime stopped; exiting` on Windows | `TLP-app: exit at once…` |
 | Test races found under load (`static_screen_is_not_reencoded`, `live_options_apply_to_the_next_session`) | Fixed | `TLP-host: fix two load-dependent test races` |
 | P3 updates | Mostly pre-existing (rc.4); small items left | |
 

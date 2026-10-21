@@ -8,6 +8,22 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+### Changed
+
+- **A new look.** TLP-Desk is redesigned from the ground up: a slim icon rail on the side
+  (Home, Devices, Sessions, Settings, theme toggle) replaces the old header and tabs, every
+  card is a translucent glass panel on a deep graphite canvas (dark first; the light theme is
+  the same design lifted), a teal light sits behind the identity card, the device ID is the
+  largest thing on the screen, devices and people get avatars with a presence dot, and the
+  whole app is set in Inter. Home shows this device, the connect box and the first devices on
+  the network; **Devices** holds the full LAN list and the address book; **Sessions** shows who
+  is connected now (with End) above the connection log; Settings is split into General,
+  Security, Sessions and picture, Start-up and notification area, and Updates. The session
+  toolbar shows the remote device's avatar. Arabic mirrors everything.
+- **Closing is instant.** Quitting from the window's close button or the tray's Quit no longer
+  waits on a fixed delay, per-session goodbyes or thread joins: the host, every session and the
+  network endpoint are shut down at once with a 200 ms bound, then the process exits.
+
 ## [1.0.0-rc.5] - 2026-10-21
 
 Connection fixes (no more "connecting to my own device", no more "works only after restarting Wi-Fi"), sharper 4K-to-smaller-window streaming, zoom, and menus in the title bar.

@@ -12,11 +12,11 @@ mod startup;
 pub(crate) use incoming::PERMISSION_LABELS;
 pub(crate) use startup::quality_key;
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 
-use super::icons::{self, Icon};
-use super::{theme, widgets};
-use crate::app::{App, Screen};
+use super::icons::Icon;
+use super::{shell, theme, widgets};
+use crate::app::App;
 use crate::i18n::{DigitStyle, Lang, Tx, S};
 use crate::settings::allow_list::CidrError;
 use crate::settings::ThemeChoice;
@@ -36,6 +36,54 @@ pub struct SettingsUi {
     pub scroll_offset: Option<f32>,
     /// Help → About is open.
     pub about_open: bool,
+    /// Which section is shown in the two-pane settings page.
+    pub section: SettingsSection,
+}
+
+/// Sections of the settings page, in nav order.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SettingsSection {
+    /// Language, digits, theme, title bar, device name.
+    #[default]
+    General,
+    /// Incoming connections, the unattended password, allowed networks.
+    Security,
+    /// Picture quality, clipboard, typing, sound.
+    Session,
+    /// Start-up and the notification area.
+    Startup,
+    /// Update check.
+    Updates,
+}
+
+impl SettingsSection {
+    pub const ALL: [SettingsSection; 5] = [
+        Self::General,
+        Self::Security,
+        Self::Session,
+        Self::Startup,
+        Self::Updates,
+    ];
+
+    fn label(self) -> S {
+        match self {
+            Self::General => S::SectionGeneral,
+            Self::Security => S::SectionSecurity,
+            Self::Session => S::SectionSession,
+            Self::Startup => S::SettingsStartup,
+            Self::Updates => S::UpdSection,
+        }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            Self::General => Icon::Settings,
+            Self::Security => Icon::ShieldCheck,
+            Self::Session => Icon::Monitor,
+            Self::Startup => Icon::Power,
+            Self::Updates => Icon::Download,
+        }
+    }
 }
 
 /// An on/off switch whose label sits on the reading side (RTL-aware); returns `true` if toggled.
@@ -47,78 +95,115 @@ pub(crate) fn check_row(ui: &mut egui::Ui, tx: Tx, value: &mut bool, text: &str)
 }
 
 impl App {
-    /// The whole settings screen.
+    /// The whole settings screen: a section list on the reading-start side, the chosen
+    /// section's cards on the other side (one column when the window is narrow).
     pub fn settings_ui(&mut self, ui: &mut egui::Ui) {
         let tx = self.tx;
-        let mut back = false;
-        egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(ui.visuals().panel_fill)
-                    .inner_margin(20),
-            )
-            .show(ui, |ui| {
-                theme::row(ui, tx.rtl(), |ui| {
-                    if ui
-                        .add(icons::icon_text_button(tx, Icon::Back, tx.t(S::Back)))
-                        .clicked()
-                    {
-                        back = true;
-                    }
-                    ui.label(RichText::new(tx.t(S::Settings)).heading().strong());
+        shell::canvas(ui, |ui| {
+            shell::page_title(ui, tx, tx.t(S::Settings), None);
+            let wide = ui.available_width() >= 760.0;
+            let nav_w = if wide { 244.0 } else { ui.available_width() };
+            let gap = theme::space::XL;
+            let content_w = if wide {
+                ui.available_width() - nav_w - gap
+            } else {
+                ui.available_width()
+            };
+            let draw_nav = |ui: &mut egui::Ui, this: &mut Self| {
+                theme::glass(ui, |ui| {
+                    theme::column(ui, tx.rtl(), |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        for sec in SettingsSection::ALL {
+                            let selected = this.settings_ui.section == sec;
+                            let resp = nav_item(ui, tx, sec.icon(), tx.t(sec.label()), selected);
+                            if resp.clicked() {
+                                this.settings_ui.section = sec;
+                            }
+                        }
+                    });
                 });
-                ui.add_space(10.0);
+            };
+            let draw_content = |ui: &mut egui::Ui, this: &mut Self| {
                 let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
-                if let Some(y) = self.settings_ui.scroll_offset.take() {
+                if let Some(y) = this.settings_ui.scroll_offset.take() {
                     area = area.vertical_scroll_offset(y);
                 }
                 area.show(ui, |ui| {
                     theme::column(ui, tx.rtl(), |ui| {
-                        ui.set_max_width(620.0_f32.min(ui.available_width()));
-                        self.appearance_card(ui);
-                        ui.add_space(theme::space::L);
-                        self.device_card_settings(ui);
-                        ui.add_space(theme::space::L);
-                        self.incoming_card(ui);
-                        ui.add_space(theme::space::L);
-                        // Permanent password for unattended access (TLP-unattended).
-                        self.unattended.settings_card(ui, tx, self.backend.as_ref());
-                        ui.add_space(theme::space::L);
-                        self.allow_list_card(ui);
-                        ui.add_space(theme::space::L);
-                        self.quality_card(ui);
-                        ui.add_space(theme::space::L);
-                        self.startup_card(ui);
-                        ui.add_space(theme::space::L);
-                        self.updates_card(ui);
-                        ui.add_space(theme::space::L);
-                        crate::ui::clipboard::settings_card(
-                            ui,
-                            tx,
-                            &mut self.settings,
-                            self.backend.as_ref(),
-                        );
-                        ui.add_space(theme::space::L);
-                        crate::ui::typing::settings_card(ui, tx, &mut self.settings);
-                        if let Some(view) = self.session.as_mut() {
-                            view.typing.set_route(
-                                crate::text_route::TextRoute::from_layout_setting(
-                                    self.settings.type_with_my_layout,
-                                ),
-                            );
-                        }
-                        ui.add_space(theme::space::L);
-                        crate::ui::audio::settings_card(
-                            ui,
-                            tx,
-                            &mut self.settings,
-                            self.backend.as_ref(),
-                        );
+                        ui.set_width(ui.available_width());
+                        this.settings_section(ui);
                     });
                 });
-            });
-        if back {
-            self.screen = Screen::Home;
+            };
+            if wide {
+                let col_h = ui.available_height();
+                theme::row(ui, tx.rtl(), |ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(nav_w, col_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(nav_w);
+                            draw_nav(ui, self);
+                        },
+                    );
+                    ui.add_space(gap - ui.spacing().item_spacing.x);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(content_w, col_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(content_w);
+                            draw_content(ui, self);
+                        },
+                    );
+                });
+            } else {
+                draw_nav(ui, self);
+                ui.add_space(theme::space::L);
+                draw_content(ui, self);
+            }
+        });
+    }
+
+    /// The cards of the current section.
+    fn settings_section(&mut self, ui: &mut egui::Ui) {
+        let tx = self.tx;
+        let gap = |ui: &mut egui::Ui| ui.add_space(theme::space::L);
+        match self.settings_ui.section {
+            SettingsSection::General => {
+                self.appearance_card(ui);
+                gap(ui);
+                self.device_card_settings(ui);
+            }
+            SettingsSection::Security => {
+                self.incoming_card(ui);
+                gap(ui);
+                // Permanent password for unattended access (TLP-unattended).
+                self.unattended.settings_card(ui, tx, self.backend.as_ref());
+                gap(ui);
+                self.allow_list_card(ui);
+            }
+            SettingsSection::Session => {
+                self.quality_card(ui);
+                gap(ui);
+                crate::ui::clipboard::settings_card(
+                    ui,
+                    tx,
+                    &mut self.settings,
+                    self.backend.as_ref(),
+                );
+                gap(ui);
+                crate::ui::typing::settings_card(ui, tx, &mut self.settings);
+                if let Some(view) = self.session.as_mut() {
+                    view.typing
+                        .set_route(crate::text_route::TextRoute::from_layout_setting(
+                            self.settings.type_with_my_layout,
+                        ));
+                }
+                gap(ui);
+                crate::ui::audio::settings_card(ui, tx, &mut self.settings, self.backend.as_ref());
+            }
+            SettingsSection::Startup => self.startup_card(ui),
+            SettingsSection::Updates => self.updates_card(ui),
         }
     }
 
@@ -237,4 +322,55 @@ impl App {
             self.backend.set_device_name(name);
         }
     }
+}
+
+/// One row of the settings navigation: icon, label, accent tint when selected.
+fn nav_item(ui: &mut egui::Ui, tx: Tx, icon: Icon, label: &str, selected: bool) -> egui::Response {
+    let p = theme::tokens(ui);
+    let h = 38.0;
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
+    });
+    if ui.is_rect_visible(rect) {
+        let r = egui::CornerRadius::same(theme::radius::MD + 2);
+        if selected {
+            ui.painter().rect_filled(rect, r, p.accent_soft);
+        } else if resp.hovered() {
+            ui.painter().rect_filled(rect, r, p.surface_hover);
+        }
+        let color = if selected { p.accent } else { p.text_muted };
+        let text_color = if selected { p.text } else { p.text_muted };
+        let pad = 12.0;
+        let icon_size = 18.0;
+        let icon_x = if tx.rtl() {
+            rect.max.x - pad - icon_size
+        } else {
+            rect.min.x + pad
+        };
+        let icon_rect = egui::Rect::from_min_size(
+            egui::pos2(icon_x, rect.center().y - icon_size / 2.0),
+            egui::vec2(icon_size, icon_size),
+        );
+        icon.image_dir(tx.rtl(), icon_size, color)
+            .paint_at(ui, icon_rect);
+        // The label gets the rest of the row and is cut with an ellipsis if it is longer.
+        let text_w = (rect.width() - pad * 2.0 - icon_size - 10.0).max(20.0);
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            label.to_owned(),
+            theme::medium(theme::font::BODY),
+            text_color,
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(text_w);
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        let x = if tx.rtl() {
+            icon_x - 10.0 - galley.size().x
+        } else {
+            icon_rect.max.x + 10.0
+        };
+        let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
+        ui.painter().galley(pos, galley, text_color);
+    }
+    resp
 }
