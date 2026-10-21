@@ -111,7 +111,11 @@ All images and videos are generated from the real UI by
 - **Another network? Your own relay.** Run the small `tlp-desk-relay` on a VPS or a PC at home,
   give both devices its address and token, and connect by ID across the internet — still end
   to end encrypted and pinned, the relay only copies packets. No port to open at the other
-  home, works behind CGNAT. ([guide](docs/src/user-guide/en/relay.md))
+  home, works behind CGNAT. Those devices get their own **Remote devices** page, each card
+  with a picture of its screen; the stream there is capped at 1080p.
+  ([guide](docs/src/user-guide/en/relay.md))
+
+  ![Remote devices](docs/media/remote-devices-en-dark.png)
 - **Opt-in updates** checked against GitHub Releases and verified with the release signing key;
   a notice when a device on the LAN runs a newer version. Nothing else ever leaves the LAN
   unless you configure a relay.

@@ -79,7 +79,8 @@ private in it.
   window appears.
 - **Pause remote control after I use my own mouse or keyboard for** — local priority, 0 to 5
   seconds (0 turns it off).
-- **Show where the remote pointer is on this screen** — the green marker with the viewer's name.
+- **Show where the remote pointer is on this screen** — the green marker with the viewer's name
+  (off by default: the marker is captured into the stream, so the viewer would see it too).
 
 ## Allowed networks
 
@@ -108,9 +109,9 @@ size** the preset's own size is used.
 - **Start TLP-Desk when I sign in to Windows** — adds or removes a per-user entry
   (`HKCU\...\Run`); no administrator rights are needed.
 - **Start hidden in the notification area** — the window starts minimised; hosting still works.
-- **Keep running in the notification area when I close the window** — closing the window
-  minimises it instead of quitting, so this PC stays reachable. Use **Quit** in the tray menu to
-  exit for real.
+- **Keep running in the notification area when I close the window** (off by default: the X
+  button quits) — when on, closing the window minimises it instead, so this PC stays reachable;
+  **Quit** in the tray menu exits for real.
 
 The tray icon's tooltip shows your ID, and its menu has **Open**, **Copy ID**, **New one-time
 code**, **Pause incoming**, **Settings**, **Connection log** and **Quit**. When someone asks to

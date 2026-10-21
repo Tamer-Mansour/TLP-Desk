@@ -133,7 +133,7 @@ impl Default for HostSettings {
             allow_one_time_code: true,
             allow_list: default_allow_list(),
             local_input_grace_ms: 1000,
-            remote_pointer_marker: true,
+            remote_pointer_marker: false,
             incoming_enabled: true,
             ask_on_upload_conflict: false,
         }

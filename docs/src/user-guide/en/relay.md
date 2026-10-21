@@ -54,10 +54,15 @@ and it still works on its own LAN as before.
 The same Settings → Security → **Relay server**: address and token, **Apply**. The switch is
 not needed unless others should reach *this* PC too.
 
-Then connect exactly as on the LAN: type the other device's **ID** (not its address) and the
-code, or leave the code empty and let them click Accept. TLP-Desk looks on your network
-first; when the ID is not there it asks the relay, and the session goes through it. Save the
-device in the address book like any other.
+Then open **Remote devices** (the globe in the rail, or Devices → Remote devices) and **Add a
+remote device** with the other device's **ID**; its card gets a Connect button. Typing the ID
+in the home connect box works too: TLP-Desk looks on your network first and asks the relay only
+when the ID is not there. Either way the device lands in Remote devices after the first
+session, with a small picture of its screen on its card (refreshed every session, kept in
+`remote_thumbs/` next to your settings and never sent anywhere). Devices on your own network
+stay in the Devices page and stream at full quality; through the relay the picture is capped at
+**1080p** (the frame rate stays as configured, 60 fps by default), because every packet crosses
+the internet twice.
 
 If you see *"Not found on this network or through the relay"*, the other device is off, has
 no internet, or has not turned on the switch in step 2. *"The relay could not be used"*

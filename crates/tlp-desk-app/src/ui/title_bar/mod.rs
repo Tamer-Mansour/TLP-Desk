@@ -45,6 +45,8 @@ pub enum TitleAction {
     Recordings,
     NearbyDevices,
     AddressBook,
+    /// The Remote devices page (TLP-relay).
+    RemoteDevices,
     Theme(ThemeChoice),
     Lang(Lang),
     Disconnect,
@@ -522,6 +524,15 @@ fn menu_items(
                 None,
                 !in_session,
                 TitleAction::AddressBook,
+            );
+            add(
+                ui,
+                tx,
+                actions,
+                S::MenuRemote,
+                None,
+                !in_session,
+                TitleAction::RemoteDevices,
             );
         }
         Menu::Tools => {

@@ -454,6 +454,7 @@ impl Viewer {
             self.cfg.pixel_format,
             self.cfg.on_frame.clone(),
             &self.cfg.features,
+            via_relay,
         ))
     }
 

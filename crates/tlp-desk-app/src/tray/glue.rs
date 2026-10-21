@@ -126,7 +126,7 @@ impl App {
             let cmds = self
                 .tray
                 .shell
-                .close_requested(self.settings.startup.close_to_tray);
+                .close_requested(self.settings.startup.keep_in_tray_on_close);
             apply_window_cmds(ctx, &cmds);
         }
         if self.incoming.is_empty() {

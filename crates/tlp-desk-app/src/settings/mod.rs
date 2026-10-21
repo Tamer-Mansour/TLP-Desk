@@ -221,7 +221,7 @@ impl QualityChoice {
 }
 
 /// How the app starts and closes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StartupSettings {
     /// Start TLP-Desk when the user signs in to Windows (HKCU `Run` key).
@@ -229,17 +229,9 @@ pub struct StartupSettings {
     /// Start hidden in the notification area (tray).
     pub start_minimized: bool,
     /// Closing the window hides it to the tray instead of quitting (hosting keeps running).
-    pub close_to_tray: bool,
-}
-
-impl Default for StartupSettings {
-    fn default() -> Self {
-        Self {
-            start_with_windows: false,
-            start_minimized: false,
-            close_to_tray: true,
-        }
-    }
+    /// Off by default: the X button quits, as people expect. (The field was `close_to_tray`,
+    /// default on, until rc.8; the new name leaves that saved value behind.)
+    pub keep_in_tray_on_close: bool,
 }
 
 /// Settings folder name under `%APPDATA%`. Windows paths are case-insensitive, so this is the

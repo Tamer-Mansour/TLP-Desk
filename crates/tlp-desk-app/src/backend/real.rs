@@ -1918,6 +1918,14 @@ impl Backend for RealBackend {
         );
     }
 
+    fn session_via_relay(&self, session: SessionId) -> bool {
+        self.inner
+            .state()
+            .viewer_sessions
+            .get(&session)
+            .is_some_and(|s| s.via_relay())
+    }
+
     fn request_quality(&self, session: SessionId, quality: tlp_desk_proto::QualitySettings) {
         let s = self.inner.state().viewer_sessions.get(&session).cloned();
         if let Some(s) = s {

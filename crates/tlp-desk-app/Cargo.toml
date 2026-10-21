@@ -48,6 +48,8 @@ semver = "1"
 sha2 = "0.11"
 # Verifies the release manifest signature (minisign format, ed25519); no dependencies.
 minisign-verify = "0.3"
+# Thumbnails of remote screens on the Remote devices page (remote::store), written as PNG.
+png = "0.18"
 
 [target.'cfg(windows)'.dependencies]
 # HKCU Run key for "start with Windows" (settings::autostart). Safe API: this crate stays

@@ -9,6 +9,9 @@ use crate::app::{App, Screen};
 use crate::backend::{ConnectTarget, DiscoveredDevice};
 use crate::i18n::{Tx, S};
 
+/// Below this canvas width the two home columns stack into one.
+const STACK_BELOW: f32 = 720.0;
+
 pub(crate) enum Action {
     Connect(ConnectTarget),
     ConnectAddress,
@@ -33,7 +36,23 @@ impl App {
             self.address_book.offer_ui(ui, tx, self.backend.as_ref());
             ui.spacing_mut().item_spacing.x = theme::space::XL;
             // Identity on the start side (narrower), connect + devices on the end side.
+            // Narrow windows (small laptops, 150 % scaling): one column, identity first.
             let total = ui.available_width();
+            if total < STACK_BELOW {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        theme::column(ui, tx.rtl(), |ui| {
+                            ui.set_width(total);
+                            self.identity_card(ui, &mut actions);
+                            ui.add_space(theme::space::L);
+                            self.connect_bar(ui, &mut actions);
+                            ui.add_space(theme::space::L);
+                            self.nearby_preview(ui, &mut actions);
+                        });
+                    });
+                return;
+            }
             let left_w = (total * 0.42).clamp(340.0, 460.0);
             let right_w = total - left_w - theme::space::XL;
             // Taken before the row: a row starts one widget tall, so inside it the

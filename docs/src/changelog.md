@@ -8,6 +8,34 @@ protocol bump is called out below.
 
 ## [Unreleased]
 
+## [1.0.0-rc.8] - 2026-10-21
+
+### Added
+
+- **Remote devices page** (globe in the rail, Devices → Remote devices): the devices reached
+  through your relay, as cards with a picture of their screen from the last session (kept in
+  `remote_thumbs/` next to the settings), name, ID, last connection, Connect / edit / remove, and
+  an add-by-ID dialog. A device reached through the relay lands there automatically; LAN devices
+  stay in the Devices page. Sessions through the relay are capped at 1080p.
+
+### Changed
+
+- **The X button quits.** "Keep running in the notification area when I close the window" is
+  off by default (it is a new setting key, so an old saved value does not carry over).
+- The green remote-pointer marker on the host screen is off by default (the viewer saw it in
+  the stream as a second, big pointer); the viewer's own arrow is hidden over the picture while
+  it controls the device, so only the remote pointer shows.
+- The window never opens larger than the screen (small laptops at 150 % scaling) and the home
+  screen stacks into one column on narrow windows.
+- "The device cannot be reached" now says what to check (the other PC's firewall on a network
+  marked Public).
+
+### Fixed
+
+- Accepting from the stand-alone Accept window while the main window was minimized did not
+  start the session until the window was opened: the answer now goes to the backend from the
+  popup's reader thread.
+
 ## [1.0.0-rc.7] - 2026-10-21
 
 Your own relay server: connect to a device at another home by its ID.

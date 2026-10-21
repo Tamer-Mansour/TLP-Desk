@@ -106,7 +106,16 @@ pub struct ViewerSession {
     wheel: input_map::WheelAccumulator,
     /// Where the toolbar put its items in the last frame (responsive layout, tests).
     pub toolbar_layout: toolbar::ToolbarLayout,
+    /// Largest picture to ask the host for (sessions through the relay: 1080p), applied on
+    /// top of the viewport hint.
+    pub pixel_cap: Option<(u32, u32)>,
+    /// The newest small copy of the remote screen (Remote devices card) and when it was taken.
+    thumb: Option<crate::remote::Thumb>,
+    thumb_at: Option<Instant>,
 }
+
+/// How often the thumbnail is refreshed from the stream.
+const THUMB_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Fit an image of `size` into `avail`, centered, preserving aspect ratio.
 pub fn fit_rect(avail: Rect, size: egui::Vec2) -> Rect {
@@ -167,6 +176,9 @@ impl ViewerSession {
             typing: TextRouter::default(),
             wheel: Default::default(),
             toolbar_layout: Default::default(),
+            pixel_cap: None,
+            thumb: None,
+            thumb_at: None,
         }
     }
 
@@ -177,12 +189,18 @@ impl ViewerSession {
     }
 
     /// Asks the host for `self.quality`, with the picture area's size when fitting to the
-    /// window (see `viewport_hint`).
+    /// window (see `viewport_hint`) and the session's pixel cap.
     pub fn send_quality(&self, backend: &dyn Backend) {
         backend.request_quality(
             self.id,
-            viewport_hint::request(self.quality, self.viewport.current()),
+            viewport_hint::request(self.quality, self.viewport.current(), self.pixel_cap),
         );
+    }
+
+    /// The last small copy of the remote screen, if a frame arrived (taken once; the Remote
+    /// devices page keeps it when the session ends).
+    pub fn take_thumb(&mut self) -> Option<crate::remote::Thumb> {
+        self.thumb.take()
     }
 
     /// Feeds this frame's wanted viewport hint; sends it once it has settled.
@@ -301,6 +319,12 @@ impl ViewerSession {
             );
             return;
         }
+        if self.thumb_at.is_none_or(|t| t.elapsed() >= THUMB_EVERY) {
+            if let Some(t) = crate::remote::thumb::downscale(&frame.rgba, w, h) {
+                self.thumb = Some(t);
+                self.thumb_at = Some(Instant::now());
+            }
+        }
         // Frames are opaque, so premultiplied == unmultiplied: no per-pixel math.
         let image = ColorImage::from_rgba_premultiplied([w, h], &frame.rgba);
         // The pixels were copied into the texture image: give the buffer back to the decoder.
@@ -412,6 +436,11 @@ impl ViewerSession {
                             .inner
                     }
                 };
+                // The host draws its pointer into the picture; over it, the local arrow would
+                // be a second cursor, so it is hidden while this viewer controls the device.
+                if resp.hovered() && self.can_mouse() && !self.whiteboard.is_active() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+                }
                 self.whiteboard
                     .paint(ui, image_rect, visible, self.frame_size);
                 if self.show_stats {

@@ -52,6 +52,11 @@ pub const SCENES: &[Scene] = &[
         setup: devices_page,
     },
     Scene {
+        name: "remote-devices",
+        about: "the Remote devices page: devices reached through the relay, with screen pictures",
+        setup: remote_devices,
+    },
+    Scene {
         name: "sessions-page",
         about: "the Sessions page: who is connected now and the connection log",
         setup: sessions_page,
@@ -218,6 +223,65 @@ fn device_list(app: &mut App, lang: Lang) {
 fn devices_page(app: &mut App, lang: Lang) {
     home(app, lang);
     app.screen = Screen::Devices;
+}
+
+fn remote_devices(app: &mut App, lang: Lang) {
+    use tlp_desk_app::remote::{RemoteEntry, Thumb};
+    home(app, lang);
+    app.settings.relay.address = "relay.example.com".into();
+    app.settings.relay.token = "correct horse battery staple".into();
+    app.remote.fixed_now = Some(FIXED_NOW);
+    // A deterministic "desktop" picture: a sky-to-ground gradient with a few window blocks.
+    let picture = |hue: [u8; 3], windows: &[(usize, usize, usize, usize)]| {
+        let (w, h) = (384, 216);
+        let mut rgba = Vec::with_capacity(w * h * 4);
+        for y in 0..h {
+            let t = y as f32 / h as f32;
+            for _ in 0..w {
+                let mix = |c: u8, floor: u8| ((c as f32) * (1.0 - t) + (floor as f32) * t) as u8;
+                rgba.extend_from_slice(&[mix(hue[0], 24), mix(hue[1], 22), mix(hue[2], 30), 255]);
+            }
+        }
+        for &(x0, y0, ww, hh) in windows {
+            for y in y0..(y0 + hh).min(h) {
+                for x in x0..(x0 + ww).min(w) {
+                    let i = (y * w + x) * 4;
+                    let bar = y < y0 + 10;
+                    let c: [u8; 4] = if bar {
+                        [58, 60, 70, 255]
+                    } else {
+                        [240, 240, 244, 255]
+                    };
+                    rgba[i..i + 4].copy_from_slice(&c);
+                }
+            }
+        }
+        Thumb::from_rgba(w, h, rgba).expect("fixture thumbnail")
+    };
+    let mut lian = RemoteEntry::new(DeviceId(483_920_117), FIXED_NOW - 40 * 86_400);
+    lian.alias = pick(lang, "Lian's laptop", "لابتوب ليان");
+    lian.name = "LIAN-PC".into();
+    lian.last_connected = Some(FIXED_NOW - 35 * 60);
+    lian.thumb_taken = lian.last_connected;
+    app.remote.book.upsert(lian);
+    app.remote.preview_thumbs.insert(
+        DeviceId(483_920_117),
+        picture([96, 140, 210], &[(30, 30, 200, 120), (120, 70, 230, 130)]),
+    );
+    let mut shop = RemoteEntry::new(DeviceId(207_518_364), FIXED_NOW - 12 * 86_400);
+    shop.alias = pick(lang, "Shop PC", "حاسوب المحل");
+    shop.name = "SHOP-POS".into();
+    shop.last_connected = Some(FIXED_NOW - 3 * 86_400);
+    shop.thumb_taken = shop.last_connected;
+    app.remote.book.upsert(shop);
+    app.remote.preview_thumbs.insert(
+        DeviceId(207_518_364),
+        picture([190, 110, 120], &[(20, 24, 340, 170)]),
+    );
+    let mut parents = RemoteEntry::new(DeviceId(661_304_295), FIXED_NOW - 86_400);
+    parents.alias = pick(lang, "Parents' PC", "حاسوب الأهل");
+    app.remote.book.upsert(parents);
+    app.screen = Screen::Remote;
 }
 
 fn sessions_page(app: &mut App, lang: Lang) {

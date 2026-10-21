@@ -17,7 +17,15 @@ impl App {
     pub fn enable_accept_popup(&mut self, ctx: &egui::Context) {
         let ctx = ctx.clone();
         let repaint: crate::backend::RepaintFn = std::sync::Arc::new(move || ctx.request_repaint());
-        match ProcessSpawner::current(repaint) {
+        let backend = std::sync::Arc::clone(&self.backend);
+        let answer: super::launcher::AnswerFn = std::sync::Arc::new(move |request, d| {
+            if d.outcome != Outcome::Cancelled {
+                let accept = d.outcome == Outcome::Accept;
+                tracing::info!(outcome = ?d.outcome, "accept popup answered");
+                backend.respond_to_request_with(request, accept, accept.then_some(d.permissions.0));
+            }
+        });
+        match ProcessSpawner::current(repaint, answer) {
             Ok(s) => self.accept_popups = AcceptPopups::new(Box::new(s)),
             Err(e) => tracing::warn!(%e, "accept popup unavailable: cannot find this executable"),
         }
@@ -80,6 +88,11 @@ impl App {
                         self.answer_request(request, d.outcome, d.permissions, d.trust);
                     }
                 }
+                PopupResult::Answered(d) => {
+                    if d.outcome != Outcome::Cancelled {
+                        self.finish_request(request, d.outcome, d.trust);
+                    }
+                }
                 PopupResult::Failed => {
                     let name = self
                         .incoming
@@ -103,14 +116,24 @@ impl App {
         permissions: PermissionSet,
         trust: bool,
     ) {
+        if !self.incoming.iter().any(|(r, _)| *r == request) {
+            return;
+        }
+        let accept = outcome == Outcome::Accept;
+        tracing::info!(?outcome, "accept prompt answered");
+        self.backend
+            .respond_to_request_with(request, accept, accept.then_some(permissions.0));
+        self.finish_request(request, outcome, trust);
+    }
+
+    /// Forget an answered request (the backend already has the answer): the list, the
+    /// "trust this device" tick and the in-app card.
+    fn finish_request(&mut self, request: RequestId, outcome: Outcome, trust: bool) {
         let Some(pos) = self.incoming.iter().position(|(r, _)| *r == request) else {
             return;
         };
         let peer = self.incoming.remove(pos).map(|(_, p)| p);
         let accept = outcome == Outcome::Accept;
-        tracing::info!(?outcome, "accept prompt answered");
-        self.backend
-            .respond_to_request_with(request, accept, accept.then_some(permissions.0));
         if let (true, Some(peer)) = (trust && accept, peer) {
             self.settings.accept_popup.trust(peer.device_id.0);
             // Unit tests must never touch the user's real settings.json.

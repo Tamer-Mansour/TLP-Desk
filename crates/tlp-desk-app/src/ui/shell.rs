@@ -1,4 +1,4 @@
-//! The workspace shell: a slim icon rail on the reading-start side (brand mark, the four
+//! The workspace shell: a slim icon rail on the reading-start side (brand mark, the five
 //! destinations, the theme toggle) and the canvas the screens draw into.
 //!
 //! The rail is the app's spine: it is drawn under the title bar on every screen except a
@@ -27,10 +27,11 @@ pub enum RailAction {
     ToggleTheme,
 }
 
-/// The four destinations in rail order.
-const DESTINATIONS: [(Screen, Icon, S); 4] = [
+/// The five destinations in rail order.
+const DESTINATIONS: [(Screen, Icon, S); 5] = [
     (Screen::Home, Icon::Home, S::MenuHome),
     (Screen::Devices, Icon::Users, S::MenuDevices),
+    (Screen::Remote, Icon::Globe, S::MenuRemote),
     (Screen::Sessions, Icon::History, S::RailSessions),
     (Screen::Settings, Icon::Settings, S::Settings),
 ];
