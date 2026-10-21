@@ -773,6 +773,12 @@ pub trait Backend: Send + Sync {
         );
     }
 
+    /// Viewer side (TLP-relay): whether `session` goes through the user's relay server. The
+    /// app caps the picture at 1080p60 there and lists the device under Remote devices.
+    fn session_via_relay(&self, _session: SessionId) -> bool {
+        false
+    }
+
     /// Viewer side (TLP-settings-tray): ask the host for a quality preset
     /// (`Message::SetQuality`). The host's encoder (TLP-perf) decides what it means.
     fn request_quality(&self, session: SessionId, quality: tlp_desk_proto::QualitySettings) {

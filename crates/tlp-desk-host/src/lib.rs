@@ -248,7 +248,7 @@ impl Default for HostConfig {
             advertise: true,
             discovery: DiscoveryConfig::default(),
             local_input_grace: Duration::from_millis(1000),
-            remote_pointer_marker: true,
+            remote_pointer_marker: false,
             capturer_factory: Arc::new(open_default_capturer),
             encoder_factory: Arc::new(tlp_desk_codec::new_encoder),
             injector_factory: Arc::new(tlp_desk_input::injector_for_monitor),

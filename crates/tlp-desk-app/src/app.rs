@@ -33,6 +33,8 @@ pub enum Screen {
     Home,
     /// Devices on the LAN and the address book, as one list.
     Devices,
+    /// Devices on other networks, reached through the user's relay (TLP-relay).
+    Remote,
     /// Active host sessions and the connection log.
     Sessions,
     Settings,
@@ -139,6 +141,8 @@ pub struct App {
     pub unattended: crate::ui::unattended::UnattendedUi,
     /// Saved devices (home screen tab).
     pub address_book: AddressBookUi,
+    /// Remote devices: reached through the relay, with a picture of their screen.
+    pub remote: crate::ui::remote::RemoteUi,
     /// macOS Screen Recording / Accessibility guidance (never shown on Windows).
     pub permissions: crate::ui::permissions::PermissionsUi,
     // --- TLP-settings-tray ---
@@ -196,8 +200,14 @@ impl App {
         } else {
             AddressBookUi::load_default(book_tx)
         };
+        let remote = if opts.address_book_in_memory {
+            crate::ui::remote::RemoteUi::load(None)
+        } else {
+            crate::ui::remote::RemoteUi::load_default()
+        };
         let mut app = Self {
             unattended,
+            remote,
             name_edit: local.device_name.clone(),
             backend,
             events,
@@ -434,16 +444,26 @@ impl App {
                     if self.pending.as_ref().is_some_and(|p| p.attempt == attempt) {
                         self.pending = None;
                         self.unattended.password.clear();
-                        self.address_book
-                            .on_session_started(&peer, self.backend.as_ref(), self.tx);
+                        // A device reached through the relay belongs to Remote devices, not to
+                        // the LAN address book; its picture is capped at 1080p.
+                        let via_relay = self.backend.session_via_relay(session);
+                        if via_relay {
+                            self.remote.on_relay_session_started(&peer);
+                        } else {
+                            self.address_book.on_session_started(
+                                &peer,
+                                self.backend.as_ref(),
+                                self.tx,
+                            );
+                        }
                         let mut view = ViewerSession::new(session, peer, permissions, frames);
                         view.clipboard.sync = !self.settings.clipboard_sync_off;
                         view.quality = self.settings.quality;
+                        view.pixel_cap = via_relay.then_some(crate::remote::RELAY_CAP);
                         view.typing.set_route(TextRoute::from_layout_setting(
                             self.settings.type_with_my_layout,
                         ));
-                        self.backend
-                            .request_quality(session, self.settings.quality.to_proto());
+                        view.send_quality(self.backend.as_ref());
                         view.audio = AudioControls::new(!self.settings.mute_remote_audio);
                         if let Some(grab) =
                             SystemKeyGrab::start(Arc::downgrade(&self.backend), session, self.hwnd)
@@ -502,6 +522,11 @@ impl App {
                     self.host_tunnels.remove(&session);
                     self.host_chats.remove(&session);
                     if self.session.as_ref().is_some_and(|s| s.id == session) {
+                        if let Some(s) = self.session.as_mut() {
+                            if let Some(thumb) = s.take_thumb() {
+                                self.remote.store_thumb(s.peer.device_id, thumb);
+                            }
+                        }
                         let reconnect_failed = self
                             .session
                             .take()
@@ -1154,6 +1179,7 @@ impl App {
         match self.screen {
             Screen::Home => self.home_ui(ui),
             Screen::Devices => self.devices_ui(ui),
+            Screen::Remote => self.remote_ui(ui),
             Screen::Sessions | Screen::ConnectionLog => self.sessions_ui(ui),
             Screen::Settings => self.settings_ui(ui),
         }

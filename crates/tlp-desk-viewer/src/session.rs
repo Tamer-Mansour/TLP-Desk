@@ -172,6 +172,8 @@ static NEXT_FEATURE_KEY: AtomicU64 = AtomicU64::new(1 << 32);
 pub struct ViewerSession {
     shared: Arc<Shared>,
     feature_key: u64,
+    /// The packets go through the user's relay (TLP-relay), not straight to the host.
+    via_relay: bool,
     /// Viewer -> host control messages (input, monitor selection), in order.
     input: mpsc::UnboundedSender<Message>,
     ended: watch::Receiver<Option<EndReason>>,
@@ -198,6 +200,7 @@ impl ViewerSession {
         format: PixelFormat,
         on_frame: Option<RepaintFn>,
         features: &FeatureSet,
+        via_relay: bool,
     ) -> (ViewerSession, ViewerEvents) {
         let session = Arc::new(session);
         let feature_key = NEXT_FEATURE_KEY.fetch_add(1, Ordering::Relaxed);
@@ -266,6 +269,7 @@ impl ViewerSession {
             ViewerSession {
                 shared,
                 feature_key,
+                via_relay,
                 input: input_tx,
                 ended: end_rx,
             },
@@ -274,6 +278,11 @@ impl ViewerSession {
     }
 
     /// The host (device ID and fingerprint are authenticated; the name is self-reported).
+    /// Whether this session's packets go through the user's relay server (TLP-relay).
+    pub fn via_relay(&self) -> bool {
+        self.via_relay
+    }
+
     pub fn peer(&self) -> &PeerInfo {
         self.shared.session.peer()
     }

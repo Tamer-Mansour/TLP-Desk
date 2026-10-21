@@ -20,8 +20,11 @@ use crate::backend::{RepaintFn, RequestId};
 pub enum PromptPoll {
     /// Still on screen.
     Pending,
-    /// The user (or the timeout) answered.
+    /// The user (or the timeout) answered; the app must deliver the answer.
     Done(PromptDecision),
+    /// The user answered and the answer already went to the backend (from the popup's reader
+    /// thread, so a minimized main window does not delay it); the app only tidies up.
+    Answered(PromptDecision),
     /// The popup went away without an answer (crashed, could not open a window).
     Failed,
 }
@@ -36,14 +39,23 @@ pub trait PromptHandle: Send {
 
 /// Starts popups.
 pub trait PromptSpawner: Send {
-    /// Show `request` in a new popup.
-    fn spawn(&self, request: &PromptRequest) -> std::io::Result<Box<dyn PromptHandle>>;
+    /// Show `request` (the app's `id` for it) in a new popup.
+    fn spawn(
+        &self,
+        id: RequestId,
+        request: &PromptRequest,
+    ) -> std::io::Result<Box<dyn PromptHandle>>;
 }
+
+/// Delivers a popup's answer to the backend off the UI thread.
+pub type AnswerFn = std::sync::Arc<dyn Fn(RequestId, &PromptDecision) + Send + Sync>;
 
 /// What became of a popup, reported by [`AcceptPopups::poll`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PopupResult {
     Decided(PromptDecision),
+    /// Already delivered to the backend; the app only tidies up.
+    Answered(PromptDecision),
     /// Fall back to the in-app dialog.
     Failed,
 }
@@ -84,7 +96,7 @@ impl AcceptPopups {
         let Some(spawner) = &self.spawner else {
             return false;
         };
-        match spawner.spawn(prompt) {
+        match spawner.spawn(request, prompt) {
             Ok(handle) => {
                 if let Some(mut old) = self.open.insert(request, handle) {
                     old.cancel();
@@ -119,6 +131,10 @@ impl AcceptPopups {
                 out.push((*id, PopupResult::Decided(d)));
                 false
             }
+            PromptPoll::Answered(d) => {
+                out.push((*id, PopupResult::Answered(d)));
+                false
+            }
             PromptPoll::Failed => {
                 out.push((*id, PopupResult::Failed));
                 false
@@ -140,20 +156,28 @@ impl Drop for AcceptPopups {
 pub struct ProcessSpawner {
     exe: PathBuf,
     repaint: RepaintFn,
+    answer: AnswerFn,
 }
 
 impl ProcessSpawner {
-    /// Popups run this same executable. `repaint` wakes the UI when an answer arrives.
-    pub fn current(repaint: RepaintFn) -> std::io::Result<Self> {
+    /// Popups run this same executable. `answer` delivers each decision to the backend as
+    /// soon as it arrives (on the reader thread: the main window may be minimized, and a
+    /// minimized window gets no UI pass on Windows); `repaint` wakes the UI afterwards.
+    pub fn current(repaint: RepaintFn, answer: AnswerFn) -> std::io::Result<Self> {
         Ok(Self {
             exe: std::env::current_exe()?,
             repaint,
+            answer,
         })
     }
 }
 
 impl PromptSpawner for ProcessSpawner {
-    fn spawn(&self, request: &PromptRequest) -> std::io::Result<Box<dyn PromptHandle>> {
+    fn spawn(
+        &self,
+        id: RequestId,
+        request: &PromptRequest,
+    ) -> std::io::Result<Box<dyn PromptHandle>> {
         let line = encode(request).map_err(std::io::Error::other)?;
         let mut cmd = Command::new(&self.exe);
         cmd.arg(ACCEPT_PROMPT_ARG)
@@ -176,6 +200,7 @@ impl PromptSpawner for ProcessSpawner {
         let (tx, rx) = mpsc::channel();
         if let Some(stdout) = child.stdout.take() {
             let repaint = self.repaint.clone();
+            let answer = self.answer.clone();
             std::thread::Builder::new()
                 .name("tlp-desk-accept-popup".into())
                 .spawn(move || {
@@ -183,6 +208,7 @@ impl PromptSpawner for ProcessSpawner {
                     if let Ok(Some(line)) = read_line(&mut r) {
                         match decode::<PromptDecision>(&line) {
                             Ok(d) => {
+                                answer(id, &d);
                                 let _ = tx.send(d);
                             }
                             Err(e) => tracing::warn!(%e, "unreadable accept popup answer"),
@@ -209,7 +235,7 @@ struct ProcessHandle {
 impl PromptHandle for ProcessHandle {
     fn poll(&mut self) -> PromptPoll {
         match self.rx.try_recv() {
-            Ok(d) => PromptPoll::Done(d),
+            Ok(d) => PromptPoll::Answered(d),
             Err(mpsc::TryRecvError::Empty) => PromptPoll::Pending,
             Err(mpsc::TryRecvError::Disconnected) => PromptPoll::Failed,
         }
@@ -267,7 +293,11 @@ pub(crate) mod fake {
     struct FakeHandle(Arc<Mutex<FakeLog>>);
 
     impl PromptSpawner for FakeSpawner {
-        fn spawn(&self, request: &PromptRequest) -> std::io::Result<Box<dyn PromptHandle>> {
+        fn spawn(
+            &self,
+            _id: RequestId,
+            request: &PromptRequest,
+        ) -> std::io::Result<Box<dyn PromptHandle>> {
             let mut log = self.0.lock().unwrap();
             if log.fail_spawn {
                 return Err(std::io::Error::other("no popup"));

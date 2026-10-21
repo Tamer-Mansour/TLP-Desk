@@ -13,6 +13,7 @@ pub mod i18n;
 pub mod input_map;
 pub mod keygrab;
 pub mod prompt;
+pub mod remote;
 #[cfg(windows)]
 pub mod service_entry;
 pub mod service_host;

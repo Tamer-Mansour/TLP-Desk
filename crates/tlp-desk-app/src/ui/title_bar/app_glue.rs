@@ -114,6 +114,7 @@ impl App {
                 self.screen = Screen::Home;
                 self.address_book.tab = HomeTab::AddressBook;
             }
+            TitleAction::RemoteDevices => self.screen = Screen::Remote,
             TitleAction::Theme(t) => self.set_theme(ctx, t),
             TitleAction::Lang(l) => self.set_lang(ctx, l),
             TitleAction::Disconnect => {

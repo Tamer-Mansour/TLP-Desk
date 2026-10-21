@@ -19,6 +19,7 @@ pub mod permissions;
 pub mod playback;
 pub mod privacy;
 pub mod recordings;
+pub mod remote;
 pub mod service;
 pub mod session;
 pub mod sessions;

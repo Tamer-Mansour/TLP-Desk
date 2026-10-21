@@ -221,7 +221,7 @@ fn clean_text(s: &str, max_chars: usize, keep_newlines: bool) -> String {
 
 /// Serializes [`DeviceId`] as a 9-digit string; accepts a string (spaces / dashes allowed)
 /// or a number.
-mod id_serde {
+pub(crate) mod id_serde {
     use serde::{de, Deserialize, Deserializer, Serializer};
 
     use crate::backend::DeviceId;

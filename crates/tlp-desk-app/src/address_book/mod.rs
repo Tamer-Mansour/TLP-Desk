@@ -19,7 +19,8 @@ pub mod wol;
 use std::cmp::Ordering;
 use std::net::IpAddr;
 
-pub use entry::{now, parse_tags, Entry, MacAddr, MacSource, UnixTime, MAX_IPS};
+pub(crate) use entry::id_serde;
+pub use entry::{now, parse_tags, Entry, MacAddr, MacSource, UnixTime, MAX_IPS, MAX_LABEL_CHARS};
 pub use search::{fold, Query};
 pub use store::{
     export_file, from_json, import_file, to_json, LoadReport, Store, FILE_NAME, SCHEMA_VERSION,

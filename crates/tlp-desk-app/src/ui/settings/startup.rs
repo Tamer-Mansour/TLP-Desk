@@ -50,8 +50,9 @@ impl App {
     pub(crate) fn set_quality(&mut self, q: QualityChoice) {
         self.settings.quality = q;
         self.settings.save();
-        if let Some(s) = &self.session {
-            self.backend.request_quality(s.id, q.to_proto());
+        if let Some(s) = self.session.as_mut() {
+            s.quality = q;
+            s.send_quality(self.backend.as_ref());
         }
     }
 
@@ -83,7 +84,7 @@ impl App {
                 changed |= check_row(
                     ui,
                     tx,
-                    &mut self.settings.startup.close_to_tray,
+                    &mut self.settings.startup.keep_in_tray_on_close,
                     tx.t(S::CloseToTray),
                 );
             });

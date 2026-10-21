@@ -26,9 +26,18 @@ pub fn area_hint(w: f32, h: f32) -> Option<(u32, u32)> {
     Some((px(w)?, px(h)?))
 }
 
-/// The `SetQuality` request for `quality` with an optional viewport hint.
-pub fn request(quality: QualityChoice, hint: Option<(u32, u32)>) -> QualitySettings {
-    let (max_width, max_height) = hint.unwrap_or((0, 0));
+/// The `SetQuality` request for `quality` with an optional viewport hint and an optional
+/// pixel cap (sessions through the relay: 1080p). With both, each axis takes the smaller.
+pub fn request(
+    quality: QualityChoice,
+    hint: Option<(u32, u32)>,
+    cap: Option<(u32, u32)>,
+) -> QualitySettings {
+    let (max_width, max_height) = match (hint, cap) {
+        (Some((hw, hh)), Some((cw, ch))) => (hw.min(cw), hh.min(ch)),
+        (Some(h), None) | (None, Some(h)) => h,
+        (None, None) => (0, 0),
+    };
     QualitySettings {
         max_width,
         max_height,
@@ -83,6 +92,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_cap_bounds_the_hint_on_each_axis() {
+        let q = QualityChoice::Balanced;
+        assert_eq!(
+            (
+                request(q, None, None).max_width,
+                request(q, None, None).max_height
+            ),
+            (0, 0)
+        );
+        let r = request(q, Some((2560, 1440)), Some((1920, 1080)));
+        assert_eq!((r.max_width, r.max_height), (1920, 1080));
+        let r = request(q, Some((1280, 720)), Some((1920, 1080)));
+        assert_eq!((r.max_width, r.max_height), (1280, 720));
+        let r = request(q, None, Some((1920, 1080)));
+        assert_eq!((r.max_width, r.max_height), (1920, 1080));
+    }
+
+    #[test]
     fn area_hint_rounds_down_and_rejects_empty() {
         assert_eq!(area_hint(1919.6, 1001.2), Some((1919, 1001)));
         assert_eq!(area_hint(0.0, 500.0), None);
@@ -92,11 +119,11 @@ mod tests {
 
     #[test]
     fn request_carries_the_hint_with_the_preset() {
-        let r = request(QualityChoice::Quality, Some((2560, 1369)));
+        let r = request(QualityChoice::Quality, Some((2560, 1369)), None);
         assert_eq!(r.preset, tlp_desk_proto::QualityPreset::Quality);
         assert_eq!((r.max_width, r.max_height), (2560, 1369));
         assert_eq!((r.fps, r.bitrate_kbps), (0, None));
-        let r = request(QualityChoice::Speed, None);
+        let r = request(QualityChoice::Speed, None, None);
         assert_eq!((r.max_width, r.max_height), (0, 0));
     }
 

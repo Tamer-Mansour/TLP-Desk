@@ -114,7 +114,7 @@ if (-not $SkipVideo) {
 
         $gif = Join-Path $RawDir "demo-$lang.gif"
         $filter = 'fps=12,scale=800:-1:flags=lanczos,split[a][b];' +
-            '[a]palettegen=max_colors=128:stats_mode=diff[p];' +
+            '[a]palettegen=max_colors=96:stats_mode=diff[p];' +
             '[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle'
         & $ffmpeg @quiet -framerate 30 -i $frames @exact -filter_complex $filter -threads 1 -loop 0 $gif
         if ($LASTEXITCODE -ne 0) { throw "ffmpeg gif ($lang) failed" }

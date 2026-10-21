@@ -332,11 +332,13 @@ impl Viewer {
             .await
             .map_err(|e| map_net_error(e, pin, &key))?;
         tracing::info!(host = %ticket.host, %addr, "reconnected with ticket");
+        // A ticket reconnect dials the host's LAN address straight (allow-list checked above).
         Ok(ViewerSession::start(
             session,
             self.cfg.pixel_format,
             self.cfg.on_frame.clone(),
             &self.cfg.features,
+            false,
         ))
     }
 }
