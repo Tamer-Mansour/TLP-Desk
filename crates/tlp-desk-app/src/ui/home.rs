@@ -81,7 +81,7 @@ impl App {
         }
     }
 
-    /// The identity card: a glass panel with a teal light behind it, the device ID as the
+    /// The identity card: a glass panel with the brand light behind it, the device ID as the
     /// largest thing on the screen, the one-time code under it, and a status pill. It is
     /// the one object people recognise the app by.
     fn identity_card(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {

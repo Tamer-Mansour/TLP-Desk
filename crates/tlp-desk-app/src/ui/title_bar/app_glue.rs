@@ -170,10 +170,9 @@ impl App {
                 theme::column(ui, tx.rtl(), |ui| {
                     ui.set_width(340.0);
                     theme::row(ui, tx.rtl(), |ui| {
-                        let dark = ui.visuals().dark_mode;
                         let (mark, _) =
                             ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
-                        theme::paint_brand_mark(ui.painter(), mark, dark);
+                        theme::brand_mark(ui, mark);
                         ui.label(
                             RichText::new(tx.t(S::AppTitle))
                                 .size(theme::font::TITLE)

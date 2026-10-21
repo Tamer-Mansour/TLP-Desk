@@ -9,17 +9,27 @@ hard-code a color or a size: they ask for a token.
 
 The window is a **sidebar workspace**: a 64 pt icon rail on the reading-start side (brand
 mark, Home, Devices, Sessions, Settings, theme toggle at the bottom; the active item carries a
-teal glow and a bookmark bar on the canvas edge, a live-session count sits as a badge on
+rose glow and a bookmark bar on the canvas edge, a live-session count sits as a badge on
 Sessions) and a canvas whose content column is capped at 1180 pt. Pages open with a large
 semibold title and a one-line lede (`shell::page_title`). A session takes the whole window.
 
-The mood is **deep and glassy**, dark first: a graphite canvas (`0x0C0F13`), the rail one
-step deeper, and translucent **glass panels** (`theme::glass`: a lighter fill at ~92 %
-opacity, a soft shadow, a rim highlight brightest along the top edge) for every card. The
-identity card on Home has a teal **light** behind its top-start corner (`theme::glow_shape`, a
-mesh radial gradient so it never bands). The light theme is the same structure lifted: a cool
-off-white canvas and paper-white glass. The accent is a mint teal (`0x52D6C3` on dark,
-`0x0A7266` as text on light, `0x128072` / `0x0D8275` as the filled primary).
+The colours are the **TLP brand palette** (`theme::brand`): Burgundy `#741D3D` (primary,
+logo, filled buttons), Rose `#BE617A` (accent details), Ivory `#FAF4ED` (canvas), Ink
+`#2B2228` (text) and Sage `#A9B9AE` (secondary touches). The mood is **deep and glassy**,
+dark first: a warm near-black canvas made from the ink (`0x1A1417`), the rail one step deeper,
+and translucent **glass panels** (`theme::glass`: a lighter fill at ~92 % opacity, a soft
+shadow, a rim highlight brightest along the top edge) for every card. The identity card on
+Home has a rose **light** behind its top-start corner (`theme::glow_shape`, a mesh radial
+gradient so it never bands). The light theme is the brand's own: ivory canvas, paper-white
+glass, ink text, burgundy as accent text and primary fill (9.7:1 on ivory). On dark the accent
+text is a lifted rose (`0xE398AE`) and the primary fill a lifted burgundy (`0x8F2A52`) so both
+keep AA contrast; sage and rose are kept to tints, avatars and the light, as the kit asks.
+
+The **brand mark** (`theme::brand_mark`) is the app icon itself: the Desk logo (a hand reaching
+out of a screen, `assets/icon/TLP-Desk-logo.svg`, rasterized once per size by
+`icons::brand_logo`) on its ivory tile, in the rail, the title bar and About. The TLP wordmark
+is the parent brand and appears only in the installer wizard (white on burgundy,
+`scripts/make_icon.py`); it is never written as "TLP Desk" in one lockup.
 
 Type is **Inter** (vendored, SIL OFL, with the Arabic fallback after it): Regular for body,
 Medium for buttons and labels, SemiBold for titles and the device ID. Eyebrow labels
@@ -41,7 +51,7 @@ light and the dark theme:
 | `input` | Text fields |
 | `border`, `border_strong` | Hairlines, dividers, input borders; hover borders |
 | `text`, `text_muted` | Primary text; captions, hints, meta lines |
-| `accent` | Brand teal for text, icons and focus rings |
+| `accent` | Brand accent (burgundy / rose) for text, icons and focus rings |
 | `accent_fill`, `accent_hover`, `accent_pressed` | Filled primary surfaces (white `on_fill` text) |
 | `accent_soft` | Tinted accent background (selected chips) |
 | `success`, `warning`, `danger`, `info` (+ `_soft`) | Semantic text/icons and their tints |

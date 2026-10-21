@@ -1,25 +1,26 @@
 /* TLP-Desk landing page. Static, no external fonts, scripts or CDNs. */
 :root {
-  --bg: #f6f8fb;
-  --surface: #ffffff;
-  --text: #16202c;
-  --muted: #55657a;
-  --accent: #1f6feb;
+  /* TLP brand: burgundy #741D3D, rose #BE617A, ivory #FAF4ED, ink #2B2228, sage #A9B9AE. */
+  --bg: #faf4ed;
+  --surface: #fffdfb;
+  --text: #2b2228;
+  --muted: #6b5c63;
+  --accent: #741d3d;
   --accent-text: #ffffff;
-  --border: #d9e0ea;
-  --hero: linear-gradient(160deg, #eaf2ff 0%, #f6f8fb 70%);
-  --shadow: 0 10px 30px rgba(20, 40, 80, 0.12);
+  --border: #ebe0d8;
+  --hero: linear-gradient(160deg, #f6e4ea 0%, #faf4ed 70%);
+  --shadow: 0 10px 30px rgba(43, 24, 32, 0.12);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e141b;
-    --surface: #151d27;
-    --text: #e8eef6;
-    --muted: #9fb0c3;
-    --accent: #4c9aff;
-    --accent-text: #06101d;
-    --border: #263341;
-    --hero: linear-gradient(160deg, #13253b 0%, #0e141b 70%);
+    --bg: #1a1417;
+    --surface: #241c20;
+    --text: #f6eeea;
+    --muted: #bba9b1;
+    --accent: #e398ae;
+    --accent-text: #2b2228;
+    --border: #342a30;
+    --hero: linear-gradient(160deg, #3a1d2a 0%, #1a1417 70%);
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   }
 }

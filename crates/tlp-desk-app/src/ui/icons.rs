@@ -265,6 +265,37 @@ pub fn rasterize(icon: Icon, px: u32, mirrored: bool) -> Option<ColorImage> {
     Some(image)
 }
 
+/// The TLP-Desk logo (the brand kit's `Desk-application-logo.svg`, full color, square
+/// viewBox) rasterized at `px` x `px` and uploaded once per pixel size; later calls return the
+/// cached texture. `None` only if the embedded SVG failed to parse (a test guards that).
+pub fn brand_logo(ctx: &Context, px: u32) -> Option<egui::TextureHandle> {
+    const LOGO: &[u8] = include_bytes!("../../assets/icon/TLP-Desk-logo.svg");
+    let px = px.clamp(1, MAX_PX);
+    let id = egui::Id::new("tlp-brand-logo").with(px);
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(tex);
+    }
+    let source = std::str::from_utf8(LOGO).ok()?;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default()).ok()?;
+    let size = tree.size();
+    let mut pixmap = tiny_skia::Pixmap::new(px, px)?;
+    let s = px as f32 / size.width().max(size.height());
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(s, s),
+        &mut pixmap.as_mut(),
+    );
+    let side = px as usize;
+    let image = ColorImage::from_rgba_premultiplied([side, side], pixmap.data());
+    let tex = ctx.load_texture(
+        format!("tlp-brand-logo-{px}"),
+        image,
+        egui::TextureOptions::LINEAR,
+    );
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    Some(tex)
+}
+
 /// Pixel size for an egui size hint (an icon is square).
 fn hint_px(hint: SizeHint) -> u32 {
     let px = match hint {
@@ -400,6 +431,15 @@ pub fn icon(ui: &mut Ui, tx: Tx, icon: Icon, size: f32, color: Color32) -> Respo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn brand_logo_parses_and_rasterizes() {
+        let ctx = Context::default();
+        let tex = brand_logo(&ctx, 64).expect("logo svg parses");
+        assert_eq!(tex.size(), [64, 64]);
+        // Cached: the same handle comes back.
+        assert_eq!(brand_logo(&ctx, 64).map(|t| t.id()), Some(tex.id()));
+    }
     use crate::i18n::{DigitStyle, Lang};
 
     fn alpha(img: &ColorImage) -> Vec<u8> {

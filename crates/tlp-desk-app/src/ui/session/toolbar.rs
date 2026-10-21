@@ -183,11 +183,7 @@ impl ViewerSession {
         let mut layout = ToolbarLayout::default();
         // The bar is the deepest layer (like the rail) with a glass rim under it, so it
         // reads as a strip of chrome over the remote picture rather than part of it.
-        let bar_fill = if dark {
-            egui::Color32::from_rgb(0x09, 0x0B, 0x0E)
-        } else {
-            egui::Color32::from_rgb(0xF4, 0xF6, 0xF8)
-        };
+        let bar_fill = theme::chrome_fill(dark);
         let panel = egui::Panel::top("session-toolbar")
             .frame(
                 egui::Frame::new()
