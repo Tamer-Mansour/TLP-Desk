@@ -153,9 +153,8 @@ impl TitleBar {
         actions: &mut Vec<TitleAction>,
     ) {
         let p = theme::tokens(ui);
-        let dark = ui.visuals().dark_mode;
         let (mark, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
-        theme::paint_brand_mark(ui.painter(), mark, dark);
+        theme::brand_mark(ui, mark);
         if resp.double_clicked() && cx.integrated {
             // The system menu icon's double-click closes the window; ours goes home instead,
             // which is what people expect from a logo in an app.

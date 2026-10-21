@@ -3,7 +3,7 @@
 //!
 //! The rail is the app's spine: it is drawn under the title bar on every screen except a
 //! session (the session takes the whole window for the remote picture). Each item is an
-//! icon with its label as a tooltip; the active one carries a teal glow and a short accent
+//! icon with its label as a tooltip; the active one carries a rose glow and a short accent
 //! bar on the canvas edge, like a bookmark.
 
 use eframe::egui::{self, vec2, Align, Color32, Layout, Pos2, Rect, Sense, Stroke, Ui};
@@ -78,7 +78,7 @@ pub fn rail(
                 ui.spacing_mut().item_spacing.y = space::S;
                 // Brand mark.
                 let (mark, resp) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::click());
-                theme::paint_brand_mark(ui.painter(), mark, dark);
+                theme::brand_mark(ui, mark);
                 if resp.on_hover_text(tx.t(S::AppTitle)).clicked() {
                     action = Some(RailAction::Go(Screen::Home));
                 }
@@ -117,11 +117,7 @@ pub fn rail(
 /// The rail background: one step darker than the canvas in the dark theme (the rail is the
 /// deepest layer), one step lighter in the light theme.
 fn rail_fill(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_rgb(0x09, 0x0B, 0x0E)
-    } else {
-        Color32::from_rgb(0xF4, 0xF6, 0xF8)
-    }
+    theme::chrome_fill(dark)
 }
 
 /// One rail item: a rounded square hit area, the icon, a tooltip, the active glow and
@@ -144,7 +140,7 @@ fn rail_item(
         let painter = ui.painter();
         let t = ui.ctx().animate_bool_responsive(resp.id, selected);
         if t > 0.0 {
-            // Teal light behind the active item.
+            // The brand light behind the active item.
             painter.add(theme::glow_shape(rect.center(), 34.0, p.accent, 0.35 * t));
             painter.rect_filled(
                 rect,

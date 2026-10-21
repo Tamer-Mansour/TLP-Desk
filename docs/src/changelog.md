@@ -20,6 +20,12 @@ protocol bump is called out below.
   is connected now (with End) above the connection log; Settings is split into General,
   Security, Sessions and picture, Start-up and notification area, and Updates. The session
   toolbar shows the remote device's avatar. Arabic mirrors everything.
+- **The TLP brand.** The app wears the TLP identity: the new TLP-Desk icon (a hand reaching
+  out of a screen on an ivory tile) in the taskbar, the tray, the window and the rail, and the
+  brand colours everywhere — burgundy as the primary, rose as the accent, ivory as the light
+  canvas, ink as the text and the dark canvas, sage as a supporting touch. The installer's
+  wizard shows the white TLP wordmark on burgundy with the product mark under it, and the
+  landing page uses the same palette.
 - **Closing is instant.** Quitting from the window's close button or the tray's Quit no longer
   waits on a fixed delay, per-session goodbyes or thread joins: the host, every session and the
   network endpoint are shut down at once with a 200 ms bound, then the process exits.

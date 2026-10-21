@@ -157,68 +157,69 @@ const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
-/// Light theme tokens: the same structure as the dark theme, lifted. A cool off-white canvas,
-/// paper-white panels, and the teal kept deep enough to carry white text.
+/// Light theme tokens (the TLP brand palette, see `docs/src/dev/design.md`): the warm ivory
+/// canvas, paper-white panels, ink text, and the burgundy as accent text and primary fill
+/// (9.7:1 on ivory). Sage and rose stay small touches (tints, avatars, the light).
 pub const LIGHT: Palette = Palette {
-    bg: rgb(0xEDF0F4),
-    surface: rgb(0xFAFBFC),
-    surface_alt: rgb(0xF0F3F6),
-    surface_hover: rgb(0xEAEEF2),
-    surface_pressed: rgb(0xDBE1E8),
+    bg: rgb(0xFAF4ED),
+    surface: rgb(0xFFFDFB),
+    surface_alt: rgb(0xF4ECE6),
+    surface_hover: rgb(0xEFE5DE),
+    surface_pressed: rgb(0xE8DCD3),
     input: rgb(0xFFFFFF),
-    border: rgb(0xE1E6EB),
-    border_strong: rgb(0xC1C9D2),
-    text: rgb(0x121820),
-    text_muted: rgb(0x5A6574),
-    accent: rgb(0x0A7266),
-    accent_fill: rgb(0x0D8275),
-    accent_hover: rgb(0x0B7467),
-    accent_pressed: rgb(0x09655A),
-    accent_soft: rgb(0xDAF1EC),
+    border: rgb(0xEBE0D8),
+    border_strong: rgb(0xCFBFB6),
+    text: rgb(0x2B2228),
+    text_muted: rgb(0x6B5C63),
+    accent: rgb(0x741D3D),
+    accent_fill: rgb(0x741D3D),
+    accent_hover: rgb(0x631836),
+    accent_pressed: rgb(0x52132C),
+    accent_soft: rgb(0xF3E0E6),
     on_fill: rgb(0xFFFFFF),
-    success: rgb(0x167A4B),
-    success_soft: rgb(0xDFF5E8),
-    warning: rgb(0x8C5200),
-    warning_soft: rgb(0xFCEFD9),
+    success: rgb(0x2E6B4A),
+    success_soft: rgb(0xDFEFE3),
+    warning: rgb(0x8A4F00),
+    warning_soft: rgb(0xFBEBD5),
     danger: rgb(0xB42318),
     danger_fill: rgb(0xC2291E),
     danger_hover: rgb(0xA62217),
     danger_soft: rgb(0xFDE8E6),
-    info: rgb(0x1F5CAA),
-    info_soft: rgb(0xE3ECFA),
-    shadow: Color32::from_rgba_premultiplied(0x10, 0x18, 0x28, 0x1C),
+    info: rgb(0x2F5B9E),
+    info_soft: rgb(0xE2EAF7),
+    shadow: Color32::from_rgba_premultiplied(0x2B, 0x18, 0x20, 0x1C),
 };
 
-/// Dark theme tokens, the hero theme: graphite with a faint blue cast (never pure grey, never
-/// pure black), four steps from canvas to pressed, and a teal light accent bright enough to
-/// carry text on all of them.
+/// Dark theme tokens, the hero theme: the brand ink deepened to a warm near-black (never pure
+/// grey, never pure black), four steps from canvas to pressed, the rose as the light accent
+/// (it carries text on every step) and a lifted burgundy as the primary fill.
 pub const DARK: Palette = Palette {
-    bg: rgb(0x0C0F13),
-    surface: rgb(0x14181E),
-    surface_alt: rgb(0x1C2129),
-    surface_hover: rgb(0x242A33),
-    surface_pressed: rgb(0x2D343E),
-    input: rgb(0x0F1318),
-    border: rgb(0x232931),
-    border_strong: rgb(0x364049),
-    text: rgb(0xECEFF3),
-    text_muted: rgb(0x98A3B0),
-    accent: rgb(0x52D6C3),
-    accent_fill: rgb(0x128072),
-    accent_hover: rgb(0x0F7267),
-    accent_pressed: rgb(0x0D6157),
-    accent_soft: rgb(0x133D38),
+    bg: rgb(0x1A1417),
+    surface: rgb(0x241C20),
+    surface_alt: rgb(0x2D242A),
+    surface_hover: rgb(0x362C32),
+    surface_pressed: rgb(0x41353C),
+    input: rgb(0x15100F),
+    border: rgb(0x342A30),
+    border_strong: rgb(0x4F4148),
+    text: rgb(0xF6EEEA),
+    text_muted: rgb(0xBBA9B1),
+    accent: rgb(0xE398AE),
+    accent_fill: rgb(0x8F2A52),
+    accent_hover: rgb(0x7E244A),
+    accent_pressed: rgb(0x6B1E3E),
+    accent_soft: rgb(0x4A2535),
     on_fill: rgb(0xFFFFFF),
-    success: rgb(0x5DD093),
-    success_soft: rgb(0x16382A),
-    warning: rgb(0xEEB950),
-    warning_soft: rgb(0x3B3016),
-    danger: rgb(0xF58D84),
+    success: rgb(0x7FCF9E),
+    success_soft: rgb(0x1F3A2B),
+    warning: rgb(0xEFBE63),
+    warning_soft: rgb(0x3D3016),
+    danger: rgb(0xF59A92),
     danger_fill: rgb(0xB5362C),
     danger_hover: rgb(0xA03027),
-    danger_soft: rgb(0x3F1F1C),
-    info: rgb(0x82B8F7),
-    info_soft: rgb(0x1A2D46),
+    danger_soft: rgb(0x402120),
+    info: rgb(0x8FBDF5),
+    info_soft: rgb(0x1E2E45),
     shadow: Color32::from_rgba_premultiplied(0, 0, 0, 0x88),
 };
 
@@ -236,7 +237,7 @@ pub fn tokens(ui: &Ui) -> &'static Palette {
     palette(ui.visuals().dark_mode)
 }
 
-/// Brand accent (teal) for text and icons, tuned per theme for contrast.
+/// Brand accent (burgundy in the light theme, rose in the dark one) for text and icons.
 pub fn accent(dark: bool) -> Color32 {
     palette(dark).accent
 }
@@ -718,41 +719,68 @@ pub fn app_icon() -> egui::IconData {
     }
 }
 
-/// Paint the brand mark (the app icon's shape, drawn as vectors) into `rect`.
-pub fn paint_brand_mark(painter: &egui::Painter, rect: egui::Rect, dark: bool) {
-    let p = palette(dark);
+/// The TLP-Desk logo (the hand reaching out of a screen, from the brand kit) as it appears in
+/// the rail, the title bar and About: the app icon's ivory tile with the logo on it, so the
+/// mark in the window is the same object as the one on the desktop and in the taskbar.
+pub fn brand_mark(ui: &mut Ui, rect: egui::Rect) {
     let s = rect.width().min(rect.height());
     let rect = egui::Rect::from_center_size(rect.center(), egui::vec2(s, s));
-    let r = |v: f32| CornerRadius::same(v.clamp(0.0, 255.0) as u8);
-    painter.rect_filled(rect, r(s * 0.28), p.accent_fill);
-    let u = s / 64.0;
-    let at = |x: f32, y: f32| rect.min + egui::vec2(x * u, y * u);
-    painter.rect_stroke(
-        egui::Rect::from_min_max(at(14.0, 16.0), at(50.0, 40.0)),
-        r(3.0 * u),
-        Stroke::new(3.0 * u, p.on_fill),
-        egui::StrokeKind::Inside,
-    );
-    painter.rect_filled(
-        egui::Rect::from_min_max(at(29.0, 40.0), at(35.0, 46.0)),
-        0.0,
-        p.on_fill,
-    );
-    painter.rect_filled(
-        egui::Rect::from_min_max(at(22.0, 46.0), at(42.0, 49.0)),
-        1.0,
-        p.on_fill,
-    );
+    let r = CornerRadius::same((s * 0.22).clamp(0.0, 255.0) as u8);
+    ui.painter().rect_filled(rect, r, brand::IVORY);
+    if !ui.visuals().dark_mode {
+        ui.painter().rect_stroke(
+            rect,
+            r,
+            Stroke::new(1.0, palette(false).border),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let logo = rect.shrink(s * 0.11);
+    let px = (logo.width() * ui.ctx().pixels_per_point()).ceil() as u32;
+    if let Some(tex) = super::icons::brand_logo(ui.ctx(), px) {
+        ui.painter().image(
+            tex.id(),
+            logo,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    }
 }
 
-/// The hero tile fill (the device-ID tile on the home screen): the one place the brand teal
-/// is used as a large surface. Two stops of the same hue, top-left lighter, so the tile reads
+/// The five brand colors as published in the TLP brand kit (`TLP-colour-palette.md`).
+pub mod brand {
+    use super::{rgb, Color32};
+
+    /// Burgundy: the primary, the logo, the filled buttons.
+    pub const BURGUNDY: Color32 = rgb(0x741D3D);
+    /// Rose: the accent, details, the dark theme's light.
+    pub const ROSE: Color32 = rgb(0xBE617A);
+    /// Ivory: the canvas.
+    pub const IVORY: Color32 = rgb(0xFAF4ED);
+    /// Ink: text and icons.
+    pub const INK: Color32 = rgb(0x2B2228);
+    /// Sage: secondary surfaces and supporting touches.
+    pub const SAGE: Color32 = rgb(0xA9B9AE);
+}
+
+/// The chrome fill: the rail and the session toolbar, the deepest layer in the dark theme
+/// and the lightest in the light one.
+pub fn chrome_fill(dark: bool) -> Color32 {
+    if dark {
+        rgb(0x120D10)
+    } else {
+        rgb(0xFFFBF8)
+    }
+}
+
+/// The hero tile fill (the device-ID tile on the home screen): the one place the brand
+/// burgundy is used as a large surface. Two stops of the same hue, top-left lighter, so the tile reads
 /// as lit rather than flat; `on_fill` text keeps its contrast on both stops (unit-tested).
 pub fn hero_fill(dark: bool) -> (Color32, Color32) {
     if dark {
-        (rgb(0x118074), rgb(0x0C5A51))
+        (rgb(0x8F2A52), rgb(0x5E1733))
     } else {
-        (rgb(0x0E8276), rgb(0x0A6C60))
+        (rgb(0x8A2449), rgb(0x5E1733))
     }
 }
 
@@ -897,20 +925,20 @@ pub fn paint_avatar(painter: &egui::Painter, rect: egui::Rect, name: &str, dark:
 /// Six muted disc tints with text that keeps AA contrast on them (unit-tested).
 fn avatar_colors(hash: u32, dark: bool) -> (Color32, Color32) {
     const LIGHT_DISCS: [(u32, u32); 6] = [
-        (0x0A6B60, 0xD7F0EB),
+        (0x741D3D, 0xF6E1E8),
+        (0x3E6B52, 0xE1EEE5),
+        (0x8A4A00, 0xFBE9D3),
         (0x1F4FA3, 0xDDE8FA),
         (0x7A3E9E, 0xEEE1F8),
-        (0x8A4A00, 0xFBE9D3),
-        (0x1D6F3E, 0xDDF3E4),
-        (0x8A2E3B, 0xFAE1E5),
+        (0x0A6B60, 0xD7F0EB),
     ];
     const DARK_DISCS: [(u32, u32); 6] = [
-        (0x9FE6DA, 0x14443E),
+        (0xF0B3C4, 0x4A2535),
+        (0xB7D9C3, 0x24392D),
+        (0xF2CD9A, 0x4B3414),
         (0xA9C9FA, 0x1B3358),
         (0xD9BFF2, 0x3B2650),
-        (0xF2CD9A, 0x4B3414),
-        (0xA6E6BD, 0x173C27),
-        (0xF5B7C1, 0x4A2229),
+        (0x9FE6DA, 0x14443E),
     ];
     let i = (hash % 6) as usize;
     let (fg, bg) = if dark { DARK_DISCS[i] } else { LIGHT_DISCS[i] };
