@@ -3,7 +3,9 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, PKCS_ECDSA_P256_SHA256};
+use rcgen::{
+    CertificateParams, DistinguishedName, DnType, KeyPair, PublicKeyData, PKCS_ECDSA_P256_SHA256,
+};
 
 use crate::{CryptoError, DeviceId, Fingerprint};
 
@@ -91,7 +93,7 @@ impl Identity {
     }
 
     fn from_key(key: KeyPair) -> Result<Self, CryptoError> {
-        let fingerprint = Fingerprint::of_spki(&key.public_key_der());
+        let fingerprint = Fingerprint::of_spki(&key.subject_public_key_info());
         let mut params = CertificateParams::new(vec!["tlp-desk".to_owned()])?;
         let mut dn = DistinguishedName::new();
         dn.push(
@@ -164,6 +166,22 @@ mod tests {
     fn load_missing_is_none() {
         let dir = tempfile::tempdir().unwrap();
         assert!(Identity::load(dir.path()).unwrap().is_none());
+    }
+
+    /// A fixed test key (generated for this test only, never used anywhere else).
+    /// Computed with rcgen 0.13 and checked independently: first 8 bytes of SHA-256 over the
+    /// key's SubjectPublicKeyInfo DER (`openssl pkey -pubout -outform DER | sha256sum`).
+    const GOLDEN_ID: u32 = 333_733_828;
+    const FIXED_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgJCldqCWBTV2oQoCd\nQ/tt8slI5f0Lq7u5aouBptpEhPahRANCAASSTz6sl560IG6FLXL5M3b/dSNJfAKY\nu6dHpET46/pr+PxFHNWqYu6isa/BJtO10nbGGZGDk3jWsye9msuzAL4y\n-----END PRIVATE KEY-----";
+
+    /// Regression for dependency upgrades (rcgen, sha2): the device ID other PCs have pinned
+    /// must come out the same from the same key file, forever.
+    #[test]
+    fn device_id_of_a_stored_key_never_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(KEY_FILE), FIXED_KEY_PEM).unwrap();
+        let id = Identity::load(dir.path()).unwrap().unwrap();
+        assert_eq!(id.device_id().as_u32(), GOLDEN_ID);
     }
 
     #[test]
