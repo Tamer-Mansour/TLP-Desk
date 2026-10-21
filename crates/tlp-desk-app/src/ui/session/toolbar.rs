@@ -66,6 +66,9 @@ struct Entry {
     rank: Option<u8>,
 }
 
+/// Size of the peer avatar at the start of the bar.
+const AVATAR: f32 = 26.0;
+
 const fn entry(item: Item, sep: bool, rank: Option<u8>) -> Entry {
     Entry { item, sep, rank }
 }
@@ -178,10 +181,17 @@ impl ViewerSession {
         let dark = ui.visuals().dark_mode;
         let mut disconnect = false;
         let mut layout = ToolbarLayout::default();
-        egui::Panel::top("session-toolbar")
+        // The bar is the deepest layer (like the rail) with a glass rim under it, so it
+        // reads as a strip of chrome over the remote picture rather than part of it.
+        let bar_fill = if dark {
+            egui::Color32::from_rgb(0x09, 0x0B, 0x0E)
+        } else {
+            egui::Color32::from_rgb(0xF4, 0xF6, 0xF8)
+        };
+        let panel = egui::Panel::top("session-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(ui.visuals().window_fill)
+                    .fill(bar_fill)
                     .inner_margin(egui::Margin::symmetric(14, 8)),
             )
             .show(ui, |ui| {
@@ -228,7 +238,7 @@ impl ViewerSession {
                     });
                     let label_full = tx.f(S::SessionWith, &[("name", &self.peer.name)]);
                     let natural_name = text_width(ui, &label_full);
-                    let dot_w = 10.0;
+                    let dot_w = AVATAR;
 
                     // Move items into "More", least important first, until the rest fits.
                     let mut shown: Vec<bool> = vec![true; sizes.len()];
@@ -260,8 +270,11 @@ impl ViewerSession {
                     let name_w = (width - (needed(&shown) - min_name))
                         .clamp(MIN_NAME_FLOOR, natural_name.max(MIN_NAME_FLOOR));
 
-                    // The bar.
-                    theme::status_dot(ui, theme::success(dark));
+                    // The bar: the peer's avatar with a presence dot, then its name.
+                    let av = widgets::avatar(ui, &self.peer.name, AVATAR).rect;
+                    let dot = av.right_bottom() + egui::vec2(-4.0, -4.0);
+                    ui.painter().circle_filled(dot, 5.0, bar_fill);
+                    ui.painter().circle_filled(dot, 3.5, theme::success(dark));
                     let label = fit_label(ui, tx, &self.peer.name, name_w);
                     let truncated = label != label_full;
                     let resp = ui.add(
@@ -309,6 +322,16 @@ impl ViewerSession {
                     });
                 });
             });
+        {
+            let r = panel.response.rect;
+            let rim = if dark {
+                egui::Color32::from_white_alpha(0x14)
+            } else {
+                theme::palette(dark).border
+            };
+            ui.painter()
+                .hline(r.x_range(), r.max.y - 0.5, egui::Stroke::new(1.0, rim));
+        }
         self.toolbar_layout = layout;
         if disconnect {
             self.release_all(backend);
