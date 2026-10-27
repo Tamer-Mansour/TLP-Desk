@@ -32,7 +32,7 @@ sys-locale = "0.3"
 # manifest (cargo-apk uses android.app.NativeActivity).
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "android-native-activity"] }
 android-activity = { version = "0.6", features = ["native-activity"] }
-android_logger = "0.14"
+android_logger = "0.15"
 log = "0.4"
 
 [package.metadata.android]
