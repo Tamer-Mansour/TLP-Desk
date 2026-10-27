@@ -19,7 +19,7 @@ quinn = { version = "0.11", default-features = false, features = ["runtime-tokio
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util"] }
 mdns-sd = "0.21"
-socket2 = "0.5"
+socket2 = "0.6"
 sha2 = "0.11"
 hmac = "0.13"
 if-addrs = "0.15"
