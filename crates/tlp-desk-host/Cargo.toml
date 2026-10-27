@@ -20,7 +20,7 @@ thiserror.workspace = true
 serde.workspace = true
 postcard.workspace = true
 # Device info (OS, CPU, RAM, disks, uptime). MIT; only the system + disk parts are compiled.
-sysinfo = { version = "0.36", default-features = false, features = ["system", "disk"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
 # rt-multi-thread: the Windows service runs its own runtime (service::windows::run).
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }
 tracing = "0.1"
